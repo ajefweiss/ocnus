@@ -1,0 +1,41 @@
+[package]
+name = "ocnus"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ocnus"
+crate-type = ["lib"]
+
+
+[dependencies]
+chrono = "*"
+derive_builder = "*"
+derive_more = { version = "*", features = ["full"] }
+itertools = "*"
+log = "*"
+nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
+num-traits = "*"
+rand = "*"
+rand_chacha = "*"
+rand_distr = "*"
+rand_xoshiro = "*"
+rayon = "*"
+serde = { version = "*", features = ["derive"] }
+serde_arrays = "0.*"
+serde_json = "*"
+thiserror = "*"
+
+[dev-dependencies]
+directories = "*"
+dyn-fmt = "*"
+criterion = "*"
+env_logger = "*"
+
+[[bench]]
+name = "cylm"
+harness = false
+
+[[bench]]
+name = "corem"
+harness = false
