@@ -1,2 +1,2 @@
 # ocnus
-OCNUS - Heliospheric Magnetic Flux Rope Modeling Framework
+Ocnus - Heliospheric Magnetic Flux Rope Modeling Framework
