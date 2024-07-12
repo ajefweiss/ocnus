@@ -1,0 +1,9 @@
+{
+    // Default configuration for all implemented flux rope models
+    // The _ key refers to parameters that are implemented for all models (rot_z/y/x)
+    // "_": {
+    //     "rot_z": {
+    //         "group": 
+    //     }
+    // }
+}
