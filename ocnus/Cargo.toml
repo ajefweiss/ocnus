@@ -1,0 +1,30 @@
+[package]
+name = "ocnus"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ocnus"
+crate-type = ["lib"]
+
+[features]
+# Enables the usage of 64-bit floating-point values as default.
+f64 = []
+
+[dependencies]
+derive_builder = "*"
+derive_more = { version = "*", features = ["full"] }
+itertools = "*"
+log = "*"
+nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
+ndarray = { version = "*", features = ["rayon", "serde"] }
+num-traits = "*"
+rand = "*"
+rand_chacha = "*"
+rand_distr = "*"
+rand_xoshiro = "*"
+rayon = "*"
+serde = { version = "*", features = ["derive"] }
+serde_arrays = "0.*"
+serde_json = "*"
+thiserror = "*"
