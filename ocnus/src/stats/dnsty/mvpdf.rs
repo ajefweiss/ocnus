@@ -1,79 +1,65 @@
 use crate::{
-    stats::dnsty::{DensityError, ProbabilityDensityFunctionSampling},
-    Fp, PVector, ParamVectorsViewMut,
+    alias::PMatrixViewMut,
+    stats::dnsty::{CovMatrix, DensityError, ProbabilityDensityFunctionSampling},
+    Fp,
 };
-use nalgebra::{
-    allocator::{Allocator, Reallocator},
-    ArrayStorage, Const, DVector, DefaultAllocator, Dim, DimAdd, Dyn, SVector, VecStorage, U1,
-};
+use nalgebra::{Const, Dim, Dyn, SVector, U1};
+use rand::Rng;
 use rand_distr::Normal;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-
-use super::cvmat::CovMatrix;
 
 /// A multivariate normal probability density function (PDF).
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MultivariateProbabilityDensityFunction<D>
-where
-    Const<D>: Dim + DimAdd<U1>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<U1, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
-{
-    /// Covariance matrix that describes the multivariate normal PDF.
-    // pub covariance: CovMatrix<D>,
+pub struct MultivariatePDF<const P: usize> {
+    // CovMatrix matrix that describes the multivariate normal ProbabilityDensityFunction.
+    pub covm: CovMatrix<Const<P>>,
 
-    /// The mean parameter of the PDF.
-    pub mean: PVector<D>,
+    /// The mean parameter of the ProbabilityDensityFunction.
+    pub mean: SVector<Fp, P>,
 
     /// Valid parameter range.
     #[serde(with = "serde_arrays")]
-    pub range: [(Fp, Fp); D],
+    pub range: [(Fp, Fp); P],
 }
 
-// impl<D> ProbabilityDensityFunctionSampling<D>
-//     for MultivariateProbabilityDensityFunction<D>
-// where
-//     Const<D>: Dim + DimAdd<U1>,
-//     DefaultAllocator: Allocator<Const<D>>
-//         + Allocator<U1, Const<D>>
-//         + Allocator<Const<D>, Const<D>>
-//         + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-//     <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-//         for<'a> Deserialize<'a> + Serialize,
-// {
-//     fn sample_fill<RStride: Dim, CStride: Dim>(
-//         &self,
-//         view: &mut ParamVectorsViewMut<D, Dyn, RStride, CStride>,
-//         rng: &mut impl rand::Rng,
-//     ) -> Result<(), DensityError> where {
-//         let normal = Normal::new(0.0, 1.0).unwrap();
+impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &MultivariatePDF<P> {
+    fn sample_fill<RStride: Dim, CStride: Dim>(
+        &self,
+        pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
+        rng: &mut impl Rng,
+    ) -> Result<(), DensityError> {
+        let normal = Normal::new(0.0, 1.0).unwrap();
 
-//         let x = SVector::from_vec((0..D).map(|_| rng.sample(normal)).collect::<Vec<Fp>>());
+        pmatrix.column_iter_mut().try_for_each(|mut col| {
+            let mut proposal = self.mean
+                + self.covm.cholesky
+                    * SVector::<Fp, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
-//         let mut proposal = self.mean;
+            // Counter for rejected proposals.
+            let mut limit = 0;
 
-//         // Counter for rejected proposals.
-//         let mut limit = 0;
+            while !self.validate_pvector::<U1, Const<P>>(&proposal.as_view()) {
+                if limit > 100 {
+                    return Err(DensityError::ReachedSamplerLimit(100));
+                }
 
-//         while !self.validate_candidate(&proposal.as_view()) {
-//             if limit > 100 {
-//                 return Err(DensityError::ReachedSamplerLimit(100));
-//             }
+                proposal = self.mean
+                    + self.covm.cholesky
+                        * SVector::<Fp, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
-//             proposal =
-//                 self.mean + SVector::<Fp, D>::from_data(VecStorage([[rng.sample(normal); D]]));
+                limit += 1;
+            }
 
-//             limit += 1;
-//         }
+            col.set_column(0, &proposal);
 
-//         Ok(proposal)
-//     }
+            Ok(())
+        })?;
 
-//     fn valid_range(&self) -> [(Fp, Fp); D] {
-//         self.range
-//     }
-// }
+        Ok(())
+    }
+
+    fn valid_range(&self) -> [(Fp, Fp); P] {
+        self.range
+    }
+}

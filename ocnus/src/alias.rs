@@ -1,4 +1,4 @@
-//! A collection of common and useful type aliases.
+//! A collection of internal type aliases.
 
 use crate::Fp;
 use nalgebra::{Dyn, Matrix, VecStorage, ViewStorage, ViewStorageMut};
