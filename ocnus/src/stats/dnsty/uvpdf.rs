@@ -1,32 +1,30 @@
 use crate::{
     stats::dnsty::{DensityError, ProbabilityDensityFunctionSampling},
-    Fp, PVectorsViewMut,
+    Fp, ParamVectorsViewMut,
 };
 use derive_more::derive::{Deref, DerefMut, IntoIterator};
-use ndarray::Axis;
+use nalgebra::{Dim, Dyn};
 use rand_distr::{Normal, Uniform};
 use serde::{Deserialize, Serialize};
 
 /// A probability density function (PDF) composed of `D` independent univariate PDFs.
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, IntoIterator, Serialize)]
-pub struct UnivariateProbabilityDensityFunctions<const D: usize>(
+pub struct UnivariateProbabilityDensityFunctions<D>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
-    [UnivariatePDF; D],
+    pub [UnivariatePDF; D],
 );
 
-impl<const D: usize> ProbabilityDensityFunctionSampling<D>
-    for UnivariateProbabilityDensityFunctions<D>
-{
-    fn sample_fill(
+impl<D> ProbabilityDensityFunctionSampling<D> for UnivariateProbabilityDensityFunctions<D> {
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<D, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<D, Dyn, RStride, CStride>,
         rng: &mut impl rand::Rng,
     ) -> Result<(), DensityError> {
         self.0
             .iter()
-            .zip(view.axis_iter_mut(Axis(0)))
-            .try_for_each(|(uvpdf, col)| uvpdf.sample_fill(view, rng))?;
+            .zip(view.row_iter_mut())
+            .try_for_each(|(uvpdf, mut col)| uvpdf.sample_fill(&mut col, rng))?;
 
         Ok(())
     }
@@ -53,9 +51,9 @@ pub enum UnivariatePDF {
 }
 
 impl ProbabilityDensityFunctionSampling<1> for UnivariatePDF {
-    fn sample_fill(
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<1, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<1, Dyn, RStride, CStride>,
         rng: &mut impl rand::Rng,
     ) -> Result<(), super::DensityError> {
         match self {
@@ -64,7 +62,7 @@ impl ProbabilityDensityFunctionSampling<1> for UnivariatePDF {
             UnivariatePDF::Normal(pdf) => pdf.sample_fill(view, rng),
             UnivariatePDF::Reciprocal(pdf) => pdf.sample_fill(view, rng),
             UnivariatePDF::Uniform(pdf) => pdf.sample_fill(view, rng),
-        };
+        }?;
 
         Ok(())
     }
@@ -87,9 +85,9 @@ pub struct ConstantPDF {
 }
 
 impl ProbabilityDensityFunctionSampling<1> for ConstantPDF {
-    fn sample_fill(
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<1, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<1, Dyn, RStride, CStride>,
         _rng: &mut impl rand::Rng,
     ) -> Result<(), super::DensityError> {
         view.iter_mut().for_each(|col| *col = self.constant);
@@ -109,9 +107,9 @@ pub struct CosinePDF {
 }
 
 impl ProbabilityDensityFunctionSampling<1> for CosinePDF {
-    fn sample_fill(
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<1, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<1, Dyn, RStride, CStride>,
         rng: &mut impl rand::Rng,
     ) -> Result<(), super::DensityError> {
         // The range is limited to the interval [-π/2, π/2].
@@ -148,9 +146,9 @@ pub struct NormalPDF {
 }
 
 impl ProbabilityDensityFunctionSampling<1> for NormalPDF {
-    fn sample_fill(
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<1, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<1, Dyn, RStride, CStride>,
         rng: &mut impl rand::Rng,
     ) -> Result<(), super::DensityError> {
         let normal = Normal::new(self.mean, self.std_dev).expect("invalid variance");
@@ -198,9 +196,9 @@ pub struct ReciprocalPDF {
 }
 
 impl ProbabilityDensityFunctionSampling<1> for ReciprocalPDF {
-    fn sample_fill(
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<1, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<1, Dyn, RStride, CStride>,
         rng: &mut impl rand::Rng,
     ) -> Result<(), super::DensityError> {
         let (minv, maxv) = self.range;
@@ -228,9 +226,9 @@ pub struct UniformPDF {
 }
 
 impl ProbabilityDensityFunctionSampling<1> for UniformPDF {
-    fn sample_fill(
+    fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
-        view: &mut PVectorsViewMut<1, nalgebra::Dyn>,
+        view: &mut ParamVectorsViewMut<1, Dyn, RStride, CStride>,
         rng: &mut impl rand::Rng,
     ) -> Result<(), super::DensityError> {
         let (minv, maxv) = self.range;

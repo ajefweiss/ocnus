@@ -1,10 +1,11 @@
-use crate::{Fp, PVectorsView, FP_EPSILON};
+use crate::{Fp, FP_EPSILON};
 use derive_more::From;
 use itertools::zip_eq;
 use log::error;
 use nalgebra::{
     allocator::{Allocator, Reallocator},
-    Const, DVector, DefaultAllocator, Dim, DimAdd, Dyn, OMatrix,
+    Const, DMatrix, DVector, DefaultAllocator, Dim, DimAdd, DimName, Dyn, Matrix, MatrixView,
+    OMatrix, RawStorage, SquareMatrix, Storage, VecStorage, U1, U2,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,48 +16,41 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CovMatrixError {
+    #[error("array or matrix dimensions must be static and cannot be dynamic")]
+    ConstantDimensionExpected,
     #[error("array or matrix dimensions are mismatched")]
     DimensionMismatch((usize, usize)),
     #[error("matrix determinant is  zero or its absolute value is below the precision limit")]
     SingularMatrix(Fp),
 }
 
-/// A data structure for holding a dynamically or statically sized covariance matrix, its inverse, the cholesky decomposition (L matrix) and the determinant.
-#[derive(Deserialize, Serialize)]
-pub struct CovMatrix<const D: usize>
+/// A data structure for holding a dynamically or statically sized D-dimensional covariance matrix,
+/// its inverse, the cholesky decomposition (L matrix) and the determinant.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CovMatrix<D>
 where
-    Const<D>: Dim + DimAdd<Const<1>>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<Const<1>, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
+    D: Dim,
+    VecStorage<Fp, D, D>: Storage<Fp, D, D>,
 {
     /// The lower triangular matrix result the Cholesky decomposition.
-    pub cholesky: OMatrix<Fp, Const<D>, Const<D>>,
+    pub cholesky: Matrix<Fp, D, D, VecStorage<Fp, D, D>>,
 
     /// The matrix determinant.
     pub determinant: Fp,
 
     /// The inverse of the covariance matrix.
-    pub inverse: OMatrix<Fp, Const<D>, Const<D>>,
+    pub inverse: Matrix<Fp, D, D, VecStorage<Fp, D, D>>,
 
     /// The covariance matrix itself.
-    pub matrix: OMatrix<Fp, Const<D>, Const<D>>,
+    pub matrix: Matrix<Fp, D, D, VecStorage<Fp, D, D>>,
 }
 
-impl<const D: usize> CovMatrix<D>
+impl<D> CovMatrix<D>
 where
-    Const<D>: Dim + DimAdd<Const<1>>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<Const<1>, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
+    D: Dim,
+    VecStorage<Fp, D, D>: Storage<Fp, D, D>,
 {
-    /// Compute the multivariate likelihood from two vectors with of length k x Const<D>.
+    /// Compute the multivariate likelihood from two vectors with of length k x D.
     pub fn multivarate_likelihood<const N: usize>(
         &self,
         x: impl IntoIterator<Item = Fp>,
@@ -93,7 +87,10 @@ where
     }
 
     /// Create a new [`Covariance`] object from a positive-definite matrix.
-    fn new_from_matrix(matrix: OMatrix<Fp, Const<D>, Const<D>>) -> Result<Self, CovMatrixError> {
+    fn new_from_matrix(matrix: OMatrix<Fp, D, D>) -> Result<Self, CovMatrixError>
+    where
+        DefaultAllocator: Allocator<D, D, Buffer<Fp> = VecStorage<Fp, D, D>>,
+    {
         let (cholesky, determinant) = match matrix.clone().cholesky() {
             Some(value) => (value.l(), value.determinant()),
             None => {
@@ -132,14 +129,18 @@ where
     /// Create a new [`Covariance`] object from an array of D-dimensional parameter vectors.
     ///
     /// This function properly handles constant parameters (resulting in empty columns/rows) and can also optionally use weighted vectors.
-    fn new_from_particles(
-        particles: PVectorsView<D, Dyn>,
+    fn new_from_particles<RStride: Dim, CStride: Dim>(
+        particles: &PVectorsView<D, Dyn, RStride, CStride>,
         optional_weights: Option<&[Fp]>,
-    ) -> Result<CovMatrix<D>, CovMatrixError> {
-        let mut matrix =
-            OMatrix::<Fp, Const<D>, Const<D>>::from_iterator((0..(D * D)).map(|idx| {
-                let jdx = idx / D;
-                let kdx = idx % D;
+    ) -> Result<CovMatrix<D>, CovMatrixError>
+    where
+        D: DimName,
+        DefaultAllocator: Allocator<D, D, Buffer<Fp> = VecStorage<Fp, D, D>>,
+    {
+        let mut matrix = Matrix::<Fp, D, D, VecStorage<Fp, D, D>>::from_iterator(
+            (0..(D::USIZE.pow(2))).map(|idx| {
+                let jdx = idx / D::USIZE;
+                let kdx = idx % D::USIZE;
 
                 if jdx <= kdx {
                     let x = particles.row(jdx);
@@ -152,163 +153,155 @@ where
                 } else {
                     0.0
                 }
-            }));
+            }),
+        );
 
-        matrix += matrix.transpose()
-            - OMatrix::<Fp, Const<D>, Const<D>>::from_diagonal(&matrix.diagonal());
+        // matrix += matrix.transpose() - DMatrix::<Fp>::from_diagonal(&matrix.diagonal());
 
-        // Remove vanishing columns/rows.
-        let remove_indices = (0..matrix.nrows())
-            .filter(|idx| {
-                matches!(
-                    matrix[(*idx, *idx)]
-                        .partial_cmp(&(512.0 * f32::EPSILON))
-                        .expect("matrix has NaN values"),
-                    Ordering::Less
-                )
-            })
-            .collect::<Vec<usize>>();
+        // // Remove vanishing columns/rows.
+        // let remove_indices = (0..matrix.nrows())
+        //     .filter(|idx| {
+        //         matches!(
+        //             matrix[(*idx, *idx)]
+        //                 .partial_cmp(&(512.0 * f32::EPSILON))
+        //                 .expect("matrix has NaN values"),
+        //             Ordering::Less
+        //         )
+        //     })
+        //     .collect::<Vec<usize>>();
 
-        let matrix_copy = matrix.clone();
+        // let matrix_copy = matrix.clone();
 
-        // Remove the empty columns and rows.
-        let matrix_red = matrix_copy
-            .remove_columns_at(&remove_indices)
-            .remove_rows_at(&remove_indices);
+        // // Remove the empty columns and rows.
+        // let matrix_red = matrix_copy
+        //     .remove_columns_at(&remove_indices)
+        //     .remove_rows_at(&remove_indices);
 
-        let (cholesky_red, determinant) = match matrix_red.clone().cholesky() {
-            Some(value) => (value.l(), value.determinant()),
-            None => {
-                error!("failed to perform a cholesky decomposition: {}", matrix_red);
-                return Err(CovMatrixError::SingularMatrix(0.0));
-            }
-        };
+        // let (cholesky_red, determinant) = match matrix_red.clone().cholesky() {
+        //     Some(value) => (value.l(), value.determinant()),
+        //     None => {
+        //         error!("failed to perform a cholesky decomposition: {}", matrix_red);
+        //         return Err(CovMatrixError::SingularMatrix(0.0));
+        //     }
+        // };
 
-        if matches!(
-            determinant.abs().partial_cmp(&FP_EPSILON).unwrap(),
-            Ordering::Less
-        ) {
-            error!(
-                "matrix determinant is below precision threshold: {}",
-                matrix_red
-            );
-            return Err(CovMatrixError::SingularMatrix(determinant));
-        }
+        // if matches!(
+        //     determinant.abs().partial_cmp(&FP_EPSILON).unwrap(),
+        //     Ordering::Less
+        // ) {
+        //     error!(
+        //         "matrix determinant is below precision threshold: {}",
+        //         matrix_red
+        //     );
+        //     return Err(CovMatrixError::SingularMatrix(determinant));
+        // }
 
-        let inverse_red = match matrix_red.clone().try_inverse() {
-            Some(value) => value,
-            None => {
-                error!("failed to invert matrix: {}", matrix_red);
-                return Err(CovMatrixError::SingularMatrix(determinant));
-            }
-        };
+        // let inverse_red = match matrix_red.clone().try_inverse() {
+        //     Some(value) => value,
+        //     None => {
+        //         error!("failed to invert matrix: {}", matrix_red);
+        //         return Err(CovMatrixError::SingularMatrix(determinant));
+        //     }
+        // };
 
-        let mut inverse_rec = inverse_red.clone();
-        let mut cholesky_rec = cholesky_red.clone();
+        // let mut inverse_rec = inverse_red.clone();
+        // let mut cholesky_rec = cholesky_red.clone();
 
-        // Re-insert empty columns/rows.
-        for idx in remove_indices.iter() {
-            inverse_rec = inverse_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
-            cholesky_rec = cholesky_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
-        }
+        // // Re-insert empty columns/rows.
+        // for idx in remove_indices.iter() {
+        //     inverse_rec = inverse_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
+        //     cholesky_rec = cholesky_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
+        // }
 
-        let inverse_proper =
-            OMatrix::<f32, Const<D>, Const<D>>::from_iterator(inverse_rec.iter().cloned());
-        let cholesky_proper =
-            OMatrix::<f32, Const<D>, Const<D>>::from_iterator(cholesky_rec.iter().cloned());
+        // let inverse_proper =
+        //     Matrix::<f32, D, D, DefaultAllocator>::from_iterator(inverse_rec.iter().cloned());
+        // let cholesky_proper =
+        //     DMatrix::<f32>::from_iterator(D::USIZE, D::USIZE, cholesky_rec.iter().cloned());
 
-        Ok(Self {
-            matrix,
-            inverse: inverse_proper,
-            cholesky: cholesky_proper,
-            determinant,
-        })
+        // let kk = matrix.as_view((0, 0), (D::USIZE, D::USIZE)).to_owned();
+
+        // Ok(Self {
+        //     matrix: matrix.view((0, 0), (D::USIZE, D::USIZE)).clone(),
+        //     inverse: inverse_proper,
+        //     cholesky: cholesky_proper,
+        //     determinant,
+        // })
+
+        Err(CovMatrixError::ConstantDimensionExpected)
     }
 }
 
-impl<const D: usize> Mul<Fp> for CovMatrix<D>
-where
-    Const<D>: Dim + DimAdd<Const<1>>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<Const<1>, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<f32, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
-{
-    type Output = CovMatrix<D>;
+// impl<D> Mul<Fp> for CovMatrix<D>
+// where
+//     D: Dim + DimAdd<U1>,
+//     DefaultAllocator:
+//         Allocator<D> + Allocator<U1, D> + Allocator<D, D> + Reallocator<f32, D, D, D, Dyn>,
+//     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
+// {
+//     type Output = CovMatrix<D>;
 
-    fn mul(self, rhs: Fp) -> Self::Output {
-        let dim = self.matrix.ncols() as i32;
+//     fn mul(self, rhs: Fp) -> Self::Output {
+//         let dim = self.matrix.ncols() as i32;
 
-        Self::Output {
-            cholesky: self.cholesky * rhs.sqrt(),
-            determinant: self.determinant * rhs.powi(dim),
-            inverse: self.inverse / rhs,
-            matrix: self.matrix * rhs,
-        }
-    }
-}
+//         Self::Output {
+//             cholesky: self.cholesky * rhs.sqrt(),
+//             determinant: self.determinant * rhs.powi(dim),
+//             inverse: self.inverse / rhs,
+//             matrix: self.matrix * rhs,
+//         }
+//     }
+// }
 
-impl<const D: usize> Mul<CovMatrix<D>> for Fp
-where
-    Const<D>: Dim + DimAdd<Const<1>>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<Const<1>, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
-{
-    type Output = CovMatrix<D>;
-    fn mul(self, rhs: CovMatrix<D>) -> Self::Output {
-        let dim = rhs.matrix.ncols() as i32;
+// impl<D> Mul<CovMatrix<D>> for Fp
+// where
+//     D: Dim + DimAdd<U1>,
+//     DefaultAllocator:
+//         Allocator<D> + Allocator<U1, D> + Allocator<D, D> + Reallocator<Fp, D, D, D, Dyn>,
+//     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
+// {
+//     type Output = CovMatrix<D>;
+//     fn mul(self, rhs: CovMatrix<D>) -> Self::Output {
+//         let dim = rhs.matrix.ncols() as i32;
 
-        Self::Output {
-            cholesky: rhs.cholesky * self.sqrt(),
-            determinant: rhs.determinant * self.powi(dim),
-            inverse: rhs.inverse / self,
-            matrix: rhs.matrix * self,
-        }
-    }
-}
+//         Self::Output {
+//             cholesky: rhs.cholesky * self.sqrt(),
+//             determinant: rhs.determinant * self.powi(dim),
+//             inverse: rhs.inverse / self,
+//             matrix: rhs.matrix * self,
+//         }
+//     }
+// }
 
-impl<const D: usize> MulAssign<Fp> for CovMatrix<D>
-where
-    Const<D>: Dim + DimAdd<Const<1>>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<Const<1>, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
-{
-    fn mul_assign(&mut self, rhs: Fp) {
-        let dim = self.matrix.ncols() as i32;
+// impl<D> MulAssign<Fp> for CovMatrix<D>
+// where
+//     D: Dim + DimAdd<U1>,
+//     DefaultAllocator:
+//         Allocator<D> + Allocator<U1, D> + Allocator<D, D> + Reallocator<Fp, D, D, D, Dyn>,
+//     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
+// {
+//     fn mul_assign(&mut self, rhs: Fp) {
+//         let dim = self.matrix.ncols() as i32;
 
-        self.cholesky *= rhs.sqrt();
-        self.determinant *= rhs.powi(dim);
-        self.inverse /= rhs;
-        self.matrix *= rhs;
-    }
-}
+//         self.cholesky *= rhs.sqrt();
+//         self.determinant *= rhs.powi(dim);
+//         self.inverse /= rhs;
+//         self.matrix *= rhs;
+//     }
+// }
 
-impl<const D: usize> TryFrom<OMatrix<Fp, Const<D>, Const<D>>> for CovMatrix<D>
-where
-    Const<D>: Dim + DimAdd<Const<1>>,
-    DefaultAllocator: Allocator<Const<D>>
-        + Allocator<Const<1>, Const<D>>
-        + Allocator<Const<D>, Const<D>>
-        + Reallocator<Fp, Const<D>, Const<D>, Const<D>, Dyn>,
-    <DefaultAllocator as Allocator<Const<D>, Const<D>>>::Buffer<Fp>:
-        for<'a> Deserialize<'a> + Serialize,
-{
-    type Error = CovMatrixError;
+// impl<D> TryFrom<OMatrix<Fp, D, D>> for CovMatrix<D>
+// where
+//     D: Dim + DimAdd<U1>,
+//     DefaultAllocator:
+//         Allocator<D> + Allocator<U1, D> + Allocator<D, D> + Reallocator<Fp, D, D, D, Dyn>,
+//     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
+// {
+//     type Error = CovMatrixError;
 
-    fn try_from(value: OMatrix<Fp, Const<D>, Const<D>>) -> Result<Self, Self::Error> {
-        Self::new_from_matrix(value)
-    }
-}
+//     fn try_from(value: OMatrix<Fp, D, D>) -> Result<Self, Self::Error> {
+//         Self::new_from_matrix(value)
+//     }
+// }
 
 /// Computes the unbiased covariance over two slices.
 pub fn covariance<'a>(
