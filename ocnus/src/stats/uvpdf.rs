@@ -5,8 +5,10 @@ use crate::{
 };
 use derive_more::derive::{Deref, DerefMut, IntoIterator};
 use nalgebra::{Const, Dim, Dyn, U1};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use rand_distr::{Normal, Uniform};
+use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// A probability density function (PDF) composed of `P` independent univariate PDFs.
@@ -21,12 +23,15 @@ impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &UnivariatePDFs<P
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
         self.0
             .iter()
             .zip(pmatrix.row_iter_mut())
-            .try_for_each(|(uvpdf, mut col)| uvpdf.sample_fill(&mut col, rng))?;
+            .enumerate()
+            .try_for_each(|(rdx, (uvpdf, mut col))| {
+                uvpdf.sample_fill(&mut col, seed + rdx as u64)
+            })?;
 
         Ok(())
     }
@@ -56,14 +61,14 @@ impl ProbabilityDensityFunctionSampling<1> for &UnivariatePDF {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
         match self {
-            UnivariatePDF::Constant(pdf) => pdf.sample_fill(pmatrix, rng),
-            UnivariatePDF::Cosine(pdf) => pdf.sample_fill(pmatrix, rng),
-            UnivariatePDF::Normal(pdf) => pdf.sample_fill(pmatrix, rng),
-            UnivariatePDF::Reciprocal(pdf) => pdf.sample_fill(pmatrix, rng),
-            UnivariatePDF::Uniform(pdf) => pdf.sample_fill(pmatrix, rng),
+            UnivariatePDF::Constant(pdf) => pdf.sample_fill(pmatrix, seed),
+            UnivariatePDF::Cosine(pdf) => pdf.sample_fill(pmatrix, seed),
+            UnivariatePDF::Normal(pdf) => pdf.sample_fill(pmatrix, seed),
+            UnivariatePDF::Reciprocal(pdf) => pdf.sample_fill(pmatrix, seed),
+            UnivariatePDF::Uniform(pdf) => pdf.sample_fill(pmatrix, seed),
         }?;
 
         Ok(())
@@ -90,9 +95,16 @@ impl ProbabilityDensityFunctionSampling<1> for &ConstantPDF {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        _rng: &mut (impl Rng + Clone),
+        _seed: u64,
     ) -> Result<(), StatsError> {
-        pmatrix.iter_mut().for_each(|col| *col = self.constant);
+        pmatrix
+            .par_column_iter_mut()
+            .chunks(256)
+            .for_each(|mut chunks| {
+                chunks
+                    .iter_mut()
+                    .for_each(|col| col[(0, 0)] = self.constant);
+            });
 
         Ok(())
     }
@@ -112,7 +124,7 @@ impl ProbabilityDensityFunctionSampling<1> for &CosinePDF {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
         // The range is limited to the interval [-π/2, π/2].
         let (minv, maxv) = match self.range {
@@ -126,8 +138,17 @@ impl ProbabilityDensityFunctionSampling<1> for &CosinePDF {
         let uniform = Uniform::new_inclusive(minv.sin(), maxv.sin()).unwrap();
 
         pmatrix
-            .iter_mut()
-            .for_each(|col| *col = rng.sample(uniform).asin());
+            .par_column_iter_mut()
+            .chunks(256)
+            .enumerate()
+            .try_for_each(|(cdx, mut chunks)| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + 17 * cdx as u64);
+
+                chunks
+                    .iter_mut()
+                    .for_each(|col| col[(0, 0)] = rng.sample(uniform).asin());
+                Ok(())
+            })?;
 
         Ok(())
     }
@@ -152,34 +173,44 @@ impl ProbabilityDensityFunctionSampling<1> for &NormalPDF {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
         let normal = Normal::new(self.mean, self.std_dev).expect("invalid variance");
 
-        pmatrix.iter_mut().try_for_each(|col| {
-            *col = match self.range {
-                Some((min, max)) => {
-                    let mut candidate = rng.sample(normal);
+        pmatrix
+            .par_column_iter_mut()
+            .chunks(256)
+            .enumerate()
+            .try_for_each(|(cdx, mut chunks)| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + 17 * cdx as u64);
 
-                    let mut limit_counter = 0;
+                chunks.iter_mut().try_for_each(|col| {
+                    col[(0, 0)] = match self.range {
+                        Some((min, max)) => {
+                            let mut candidate = rng.sample(normal);
 
-                    // Continsouly draw candidates until a sample is drawn within the valid range.
-                    while ((min > candidate) | (candidate > max)) && limit_counter < 100 {
-                        candidate = rng.sample(normal);
-                        limit_counter += 1;
-                    }
+                            let mut limit_counter = 0;
 
-                    if limit_counter == 50 {
-                        return Err(StatsError::ReachedSamplerLimit(50));
-                    } else {
-                        candidate
-                    }
-                }
-                None => rng.sample(normal),
-            };
+                            // Continsouly draw candidates until a sample is drawn within the valid range.
+                            while ((min > candidate) | (candidate > max)) && limit_counter < 100 {
+                                candidate = rng.sample(normal);
+                                limit_counter += 1;
+                            }
 
-            Ok(())
-        })?;
+                            if limit_counter == 50 {
+                                return Err(StatsError::ReachedSamplerLimit(50));
+                            } else {
+                                candidate
+                            }
+                        }
+                        None => rng.sample(normal),
+                    };
+
+                    Ok(())
+                })?;
+
+                Ok(())
+            })?;
 
         Ok(())
     }
@@ -202,7 +233,7 @@ impl ProbabilityDensityFunctionSampling<1> for &ReciprocalPDF {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
         let (minv, maxv) = self.range;
 
@@ -212,8 +243,18 @@ impl ProbabilityDensityFunctionSampling<1> for &ReciprocalPDF {
         let uniform = Uniform::new_inclusive(0.0, 1.0).unwrap();
 
         pmatrix
-            .iter_mut()
-            .for_each(|col| *col = cdf_inv(rng.sample(uniform)));
+            .par_column_iter_mut()
+            .chunks(256)
+            .enumerate()
+            .try_for_each(|(cdx, mut chunks)| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + 17 * cdx as u64);
+
+                chunks
+                    .iter_mut()
+                    .for_each(|col| col[(0, 0)] = cdf_inv(rng.sample(uniform)));
+
+                Ok(())
+            })?;
 
         Ok(())
     }
@@ -233,14 +274,24 @@ impl ProbabilityDensityFunctionSampling<1> for &UniformPDF {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
         let (minv, maxv) = self.range;
         let uniform = Uniform::new_inclusive(minv, maxv).unwrap();
 
         pmatrix
-            .iter_mut()
-            .for_each(|col| *col = rng.sample(uniform));
+            .par_column_iter_mut()
+            .chunks(256)
+            .enumerate()
+            .try_for_each(|(cdx, mut chunks)| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + 17 * cdx as u64);
+
+                chunks
+                    .iter_mut()
+                    .for_each(|col| col[(0, 0)] = rng.sample(uniform));
+
+                Ok(())
+            })?;
 
         Ok(())
     }

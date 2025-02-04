@@ -18,7 +18,6 @@ use crate::{
 };
 use itertools::zip_eq;
 use nalgebra::{Const, Dim, Dyn, U1};
-use rand::Rng;
 use thiserror::Error;
 
 /// Errors associated with the [`crate::stats`] module.
@@ -44,7 +43,7 @@ pub trait ProbabilityDensityFunctionSampling<const P: usize>: Send + Sync {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError>;
 
     /// Validate a single parameter vector by checking for out of bounds.
@@ -73,7 +72,7 @@ where
     //     &self,
     //     xs: &PMatrixView<Const<P>, Dyn, RStride, CStride>,
     //     size: usize,
-    //     rng: &mut (impl Rng + Clone),
+    //     seed: u64
     // ) -> Result<Fp, StatsError> {
     //     let sample = self.0.sample_array(size, rng);
 
@@ -85,7 +84,7 @@ where
     //     &self,
     //     other: &Self,
     //     size: usize,
-    //     rng: &mut (impl Rng + Clone),
+    //     seed: u64
     // ) -> Result<Fp, StatsError> {
     //     let sample_p = self.0.sample_array(size, rng);
 
@@ -96,9 +95,9 @@ where
     pub fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
-        rng: &mut (impl Rng + Clone),
+        seed: u64,
     ) -> Result<(), StatsError> {
-        (&self.0).sample_fill(pmatrix, rng)
+        (&self.0).sample_fill(pmatrix, seed)
     }
 
     /// Returns the valid range for parameter vector samples.
