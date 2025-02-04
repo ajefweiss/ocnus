@@ -26,16 +26,16 @@ where
     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
 {
     /// The lower triangular matrix result the Cholesky decomposition.
-    pub cholesky: OMatrix<Fp, D, D>,
+    cholesky: OMatrix<Fp, D, D>,
 
     /// The matrix determinant.
-    pub determinant: Fp,
+    determinant: Fp,
 
     /// The inverse of the covariance matrix.
-    pub inverse: OMatrix<Fp, D, D>,
+    inverse: OMatrix<Fp, D, D>,
 
     /// The covariance matrix itself.
-    pub matrix: OMatrix<Fp, D, D>,
+    matrix: OMatrix<Fp, D, D>,
 }
 
 impl<D> CovMatrix<D>
@@ -44,6 +44,16 @@ where
     DefaultAllocator: Allocator<D, D>,
     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
 {
+    /// Returns the lower triangular matrix of the Cholesky decomposition.
+    pub fn cholesky_ltm(&self) -> &OMatrix<Fp, D, D> {
+        &self.cholesky
+    }
+
+    /// Returns the determinant of the covariance matrix.
+    pub fn determinant(&self) -> Fp {
+        self.determinant
+    }
+
     /// Compute the multivariate likelihood from two vectors with of length k x D.
     pub fn multivarate_likelihood(
         &self,
@@ -54,7 +64,7 @@ where
         let ndim = xminmu.len() / self.ndim();
 
         if xminmu.len() % self.ndim() != 0 {
-            return Err(StatsError::DimensionMismatch((xminmu.len(), self.ndim())));
+            return Err(StatsError::BadDimensions((xminmu.len(), self.ndim())));
         }
 
         let mut result =

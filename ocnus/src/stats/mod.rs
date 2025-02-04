@@ -1,57 +1,43 @@
-//! Bayesian inference, statistics and probability density functions.
+//! Bayesian inference, probability density functions and statistics.
 
-mod covmt;
+mod covm;
 mod mvpdf;
 mod ptpdf;
 mod uvpdf;
 
-pub use covmt::CovMatrix;
+pub use covm::{covariance, covariance_with_weights, CovMatrix};
+use itertools::zip_eq;
 pub use mvpdf::MultivariatePDF;
 pub use ptpdf::ParticlePDF;
-pub use uvpdf::{
-    ConstantPDF, CosinePDF, NormalPDF, ReciprocalPDF, UniformPDF, UnivariatePDF, UnivariatePDFs,
-};
+pub use uvpdf::{ConstantPDF, PUnivariatePDF, UniformPDF, UnivariatePDF};
 
-use crate::{
-    alias::{PMatrixView, PMatrixViewMut},
-    Fp,
-};
-use itertools::zip_eq;
-use nalgebra::{Const, Dim, Dyn, U1};
+use nalgebra::SVector;
+use rand::Rng;
+
+use crate::Fp;
 use thiserror::Error;
 
 /// Errors associated with the [`crate::stats`] module.
 #[derive(Debug, Error)]
 pub enum StatsError {
-    #[error("array or matrix dimensions must be static and cannot be dynamic")]
-    ConstantDimensionExpected,
     #[error("array or matrix dimensions are mismatched")]
-    DimensionMismatch((usize, usize)),
+    BadDimensions((usize, usize)),
     #[error("invalid parameter range")]
     InvalidParamRange((Fp, Fp)),
-    #[error("missing covariance matrix")]
-    MissingCovMat,
-    #[error("reached the maximum number of iterations for a random sampler")]
-    ReachedSamplerLimit(usize),
-    #[error("matrix determinant is  zero or its absolute value is below the precision limit")]
+    #[error("reached the maximum number of allowed sampler iterations")]
+    SamplerLimit(usize),
+    #[error("matrix determinant is zero or its absolute value is below the precision limit")]
     SingularMatrix(Fp),
 }
 
-/// A trait that provides sampling functionality for a probability density function (PDF) with `P` dimensions.
+/// A trait that provides sampling functionality for a P-dimensional PDF.
 pub trait ProbabilityDensityFunctionSampling<const P: usize>: Send + Sync {
-    /// Fill a contiguous parameter matrix view with random samples from the underlying probability density function.
-    fn sample_fill<RStride: Dim, CStride: Dim>(
-        &self,
-        pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
-        seed: u64,
-    ) -> Result<(), StatsError>;
+    /// Draw a single params vector from the underlying PDF.
+    fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError>;
 
-    /// Validate a single parameter vector by checking for out of bounds.
-    fn validate_pvector<RStride: Dim, CStride: Dim>(
-        &self,
-        pvector: &PMatrixView<Const<P>, U1, RStride, CStride>,
-    ) -> bool {
-        zip_eq(pvector.iter(), self.valid_range().iter()).fold(true, |acc, (c, range)| {
+    /// Validate a sample by checking for out of bounds.
+    fn validate_sample(&self, sample: &SVector<Fp, P>) -> bool {
+        zip_eq(sample.iter(), self.valid_range().iter()).fold(true, |acc, (c, range)| {
             acc & ((&range.0 <= c) & (c <= &range.1))
         })
     }
@@ -60,44 +46,23 @@ pub trait ProbabilityDensityFunctionSampling<const P: usize>: Send + Sync {
     fn valid_range(&self) -> [(Fp, Fp); P];
 }
 
-/// A generic probability density function (PDF) with `P` dimensions of sub-type `T`.
+/// A generic P-dimensional PDF of sub-type T.
 pub struct ProbabilityDensityFunction<T, const P: usize>(T);
+
+impl<T, const P: usize> ProbabilityDensityFunction<T, P> {
+    /// Create a new [`ProbabilityDensityFunction`] object.
+    pub fn new(pdf: T) -> Self {
+        Self(pdf)
+    }
+}
 
 impl<T, const P: usize> ProbabilityDensityFunction<T, P>
 where
     for<'a> &'a T: ProbabilityDensityFunctionSampling<P>,
 {
-    // /// Computes the density p(x) for each position in `xs` using a kernel density estimation algorithm with `size` particles.
-    // pub fn kernel_density_estimate<'a, RStride: Dim, CStride: Dim>(
-    //     &self,
-    //     xs: &PMatrixView<Const<P>, Dyn, RStride, CStride>,
-    //     size: usize,
-    //     seed: u64
-    // ) -> Result<Fp, StatsError> {
-    //     let sample = self.0.sample_array(size, rng);
-
-    //     Ok(0.0)
-    // }
-
-    // /// Computes the Kullback-Leibler divergence P(self | other) with respect to another density.
-    // pub fn kullback_leibler_div(
-    //     &self,
-    //     other: &Self,
-    //     size: usize,
-    //     seed: u64
-    // ) -> Result<Fp, StatsError> {
-    //     let sample_p = self.0.sample_array(size, rng);
-
-    //     Ok(0.0)
-    // }
-
-    /// Fill a contiguous parameter matrix view with random samples from the underlying probability density function.
-    pub fn sample_fill<RStride: Dim, CStride: Dim>(
-        &self,
-        pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
-        seed: u64,
-    ) -> Result<(), StatsError> {
-        (&self.0).sample_fill(pmatrix, seed)
+    /// Draw a single params vector from the underlying PDF.
+    pub fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError> {
+        (&self.0).sample(rng)
     }
 
     /// Returns the valid range for parameter vector samples.

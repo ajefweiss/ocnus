@@ -28,3 +28,10 @@ serde = { version = "*", features = ["derive"] }
 serde_arrays = "0.*"
 serde_json = "*"
 thiserror = "*"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "stats"
+harness = false
