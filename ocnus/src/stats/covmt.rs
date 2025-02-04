@@ -1,4 +1,4 @@
-use crate::{alias::PMatrixView, Fp, FP_EPSILON};
+use crate::{alias::PMatrixView, stats::StatsError, Fp, FP_EPSILON};
 use derive_more::From;
 use itertools::zip_eq;
 use log::error;
@@ -11,20 +11,13 @@ use std::{
     cmp::Ordering,
     ops::{Mul, MulAssign},
 };
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum CovarianceError {
-    #[error("array or matrix dimensions must be static and cannot be dynamic")]
-    ConstantDimensionExpected,
-    #[error("array or matrix dimensions are mismatched")]
-    DimensionMismatch((usize, usize)),
-    #[error("matrix determinant is  zero or its absolute value is below the precision limit")]
-    SingularMatrix(Fp),
-}
-
-/// A data structure for holding a dynamically or statically sized D-dimensional covariance matrix,
-/// its inverse, the cholesky decomposition (L matrix) and the determinant.
+/// A data structure for holding a dynamically or statically sized covariance matrix.
+///
+/// This struct not only stores the covariance matrix itself, but also holds the lower triangular
+/// matrix result from the Cholesky decomposition, the determinant and the covariance inverse.
+/// These associated matrices are computed from a modified covariance matrix where any
+/// zero-columns/rows are removed to handle constant model parameters.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CovMatrix<D>
 where
@@ -56,15 +49,12 @@ where
         &self,
         x: impl IntoIterator<Item = Fp>,
         mu: impl IntoIterator<Item = Fp>,
-    ) -> Result<Fp, CovarianceError> {
+    ) -> Result<Fp, StatsError> {
         let xminmu = DVector::from(zip_eq(x, mu).map(|(i, j)| i - j).collect::<Vec<Fp>>());
         let ndim = xminmu.len() / self.ndim();
 
         if xminmu.len() % self.ndim() != 0 {
-            return Err(CovarianceError::DimensionMismatch((
-                xminmu.len(),
-                self.ndim(),
-            )));
+            return Err(StatsError::DimensionMismatch((xminmu.len(), self.ndim())));
         }
 
         let mut result =
@@ -88,12 +78,12 @@ where
     }
 
     /// Create a new [`CovMatrix`] object from a positive-definite matrix.
-    pub fn from_matrix(matrix: OMatrix<Fp, D, D>) -> Result<Self, CovarianceError> {
+    pub fn from_matrix(matrix: OMatrix<Fp, D, D>) -> Result<Self, StatsError> {
         let (cholesky, determinant) = match matrix.clone().cholesky() {
             Some(value) => (value.l(), value.determinant()),
             None => {
                 error!("failed to perform a cholesky decomposition: {}", matrix);
-                return Err(CovarianceError::SingularMatrix(0.0));
+                return Err(StatsError::SingularMatrix(0.0));
             }
         };
 
@@ -105,14 +95,14 @@ where
                 "matrix determinant is below precision threshold: {}",
                 matrix
             );
-            return Err(CovarianceError::SingularMatrix(determinant));
+            return Err(StatsError::SingularMatrix(determinant));
         }
 
         let inverse = match matrix.clone().try_inverse() {
             Some(value) => value,
             None => {
                 error!("failed to invert matrix: {}", matrix);
-                return Err(CovarianceError::SingularMatrix(determinant));
+                return Err(StatsError::SingularMatrix(determinant));
             }
         };
 
@@ -130,7 +120,7 @@ where
     pub fn from_particles<RStride: Dim, CStride: Dim>(
         particles: &PMatrixView<D, Dyn, RStride, CStride>,
         optional_weights: Option<&[Fp]>,
-    ) -> Result<CovMatrix<D>, CovarianceError>
+    ) -> Result<CovMatrix<D>, StatsError>
     where
         D: DimName,
         DefaultAllocator: Allocator<D>
@@ -183,7 +173,7 @@ where
             Some(value) => (value.l(), value.determinant()),
             None => {
                 error!("failed to perform a cholesky decomposition: {}", matrix_red);
-                return Err(CovarianceError::SingularMatrix(0.0));
+                return Err(StatsError::SingularMatrix(0.0));
             }
         };
 
@@ -195,14 +185,14 @@ where
                 "matrix determinant is below precision threshold: {}",
                 matrix_red
             );
-            return Err(CovarianceError::SingularMatrix(determinant));
+            return Err(StatsError::SingularMatrix(determinant));
         }
 
         let inverse_red = match matrix_red.clone().try_inverse() {
             Some(value) => value,
             None => {
                 error!("failed to invert matrix: {}", matrix_red);
-                return Err(CovarianceError::SingularMatrix(determinant));
+                return Err(StatsError::SingularMatrix(determinant));
             }
         };
 
@@ -291,7 +281,7 @@ where
     DefaultAllocator: Allocator<D, D>,
     <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
 {
-    type Error = CovarianceError;
+    type Error = StatsError;
 
     fn try_from(value: OMatrix<Fp, D, D>) -> Result<Self, Self::Error> {
         Self::from_matrix(value)

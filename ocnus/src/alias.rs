@@ -1,9 +1,7 @@
-//! A collection of internal type aliases.
-
 use crate::Fp;
 use nalgebra::{Dyn, Matrix, VecStorage, ViewStorage, ViewStorageMut};
 
-/// A dynamically sized parameter matrix representing an ensemble of P-dimensional parameter vectors.
+/// A dynamically sized matrix representing an ensemble of P-dimensional parameter vectors.
 pub type PMatrix<P> = Matrix<Fp, P, Dyn, VecStorage<Fp, P, Dyn>>;
 
 /// A matrix view into a [`PMatrix`].

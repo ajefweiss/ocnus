@@ -1,18 +1,3 @@
-//! Implementation of the [`ScConf`] and [`ScObs`] structures.
-//!
-//! The main building block of this module is the [`ScObs`] data structure that represents a time
-//! series of spacecraft observations tied to a specific generic observation type that implements
-//! [`OcnusObser`].
-//!
-//! The configuration of a single spacecraft observation can be configures using [`ScConf`] enum using the following variants:
-//! - [`ScConf::TimeDistance`] : Time & (x)-position of the spacecraft in a heliocentric coordinate system.
-//! - [`ScConf::TimePosition`] : Time & (x,y,z)-position of the spacecraft in a heliocentric coordinate system.
-//!
-//! [`ScObs`] has, among others, two important implementations:
-//! - [`ScObs::add`] : Allows composition of two [`ScObs`] objects, and sorts the underlying vectors by the time stamp value.
-//! - [`ScObs::split`] : The reciprocal of one or multiple [`ScObs::add`] calls.
-//!   Calling this function consumes a composite [`ScObs`] object and returns the original [`ScObs`] objects in a vector.
-
 use crate::{Fp, OcnusObser};
 use itertools::zip_eq;
 use log::debug;
@@ -22,7 +7,11 @@ use std::{
     ops::{Add, AddAssign},
 };
 
-/// The spacecraft observation configuration.
+/// The configuration of a single spacecraft observation as used in [`ScObs`].
+///
+/// The following variants are currently implemented:
+/// - [`ScConf::TimeDistance`] : Time & (x)-position of the spacecraft in a heliocentric coordinate system.
+/// - [`ScConf::TimePosition`] : Time & (x,y,z)-position of the spacecraft in a heliocentric coordinate system.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "content")]
 pub enum ScConf {
@@ -41,7 +30,13 @@ impl ScConf {
     }
 }
 
-/// A series of spacecraft observations.
+/// Represents a time series of spacecraft observations tied
+/// to a specific generic observation type that implements [`OcnusObser`].
+///
+/// [`ScObs`] has, among others, two important implementations:
+/// - [`ScObs::add`] : Allows composition of two [`ScObs`] objects, and sorts the underlying vectors by the time stamp value.
+/// - [`ScObs::split`] : The reciprocal of one or multiple [`ScObs::add`] calls.
+///   Calling this function consumes a composite [`ScObs`] object and returns the original [`ScObs`] objects in a vector.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ScObs<O: OcnusObser> {
     /// Vector of (optional) spacecraft observations.

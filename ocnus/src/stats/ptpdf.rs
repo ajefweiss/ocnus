@@ -1,14 +1,12 @@
 use crate::{
     alias::{PMatrix, PMatrixViewMut},
-    stats::dnsty::{CovMatrix, DensityError, ProbabilityDensityFunctionSampling},
+    stats::{CovMatrix, ProbabilityDensityFunctionSampling, StatsError},
     Fp,
 };
 use nalgebra::{Const, Dim, Dyn, SVector, U1};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use serde::{Deserialize, Serialize};
-
-use super::ParRng;
 
 /// A probability density function (PDF) defined by an ensemble particles.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -31,15 +29,15 @@ impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &ParticlePDF<P> {
     fn sample_fill<RStride: Dim, CStride: Dim>(
         &self,
         pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
-        rng: &mut impl Rng,
-    ) -> Result<(), DensityError> {
+        rng: &mut (impl Rng + Clone),
+    ) -> Result<(), StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let uniform = Uniform::new(0.0, 1.0).unwrap();
 
         // Unwrap covariance object, return an error otherwise.
         let covm = match self.covm.as_ref() {
             Some(value) => value,
-            None => return Err(DensityError::MissingCovariance),
+            None => return Err(StatsError::MissingCovMat),
         };
 
         pmatrix.column_iter_mut().try_for_each(|mut col| {
@@ -80,7 +78,7 @@ impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &ParticlePDF<P> {
 
             while !self.validate_pvector::<U1, Const<P>>(&proposal.as_view()) {
                 if limit > 500 {
-                    return Err(DensityError::ReachedSamplerLimit(500));
+                    return Err(StatsError::ReachedSamplerLimit(500));
                 }
 
                 proposal = offset
@@ -94,56 +92,6 @@ impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &ParticlePDF<P> {
 
             Ok(())
         })?;
-
-        Ok(())
-    }
-
-    fn par_sample_fill<RStride: Dim, CStride: Dim>(
-        &self,
-        pmatrix: &mut PMatrixViewMut<U1, Dyn, RStride, CStride>,
-        par_rng: &ParRng,
-    ) -> Result<(), DensityError> {
-        let normal: Normal<f64> = Normal::new(0.0, 1.0).unwrap();
-        let uniform = Uniform::new(0.0, 1.0).unwrap();
-
-        // Unwrap covariance object, return an error otherwise.
-        let covm = match self.covm.as_ref() {
-            Some(value) => value,
-            None => return Err(DensityError::MissingCovariance),
-        };
-
-        pmatrix
-            .par_column_iter_mut()
-            .chunks(par_rng.rayon_chunk_size)
-            .enumerate()
-            .try_for_each(|(cdx, mut chunks)| {
-                let mut rng = par_rng.rng(cdx);
-
-                chunks.iter_mut().try_for_each(|col| {
-                    col[(0, 0)] = match self.range {
-                        Some((min, max)) => {
-                            let mut candidate = rng.sample(normal);
-
-                            let mut limit_counter = 0;
-
-                            // Continsouly draw candidates until a sample is drawn within the valid range.
-                            while ((min > candidate) | (candidate > max)) && limit_counter < 100 {
-                                candidate = rng.sample(normal);
-                                limit_counter += 1;
-                            }
-
-                            if limit_counter == 50 {
-                                return Err(DensityError::ReachedSamplerLimit(50));
-                            } else {
-                                candidate
-                            }
-                        }
-                        None => rng.sample(normal),
-                    };
-
-                    Ok(())
-                })
-            })?;
 
         Ok(())
     }

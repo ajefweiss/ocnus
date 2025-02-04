@@ -1,6 +1,6 @@
 use crate::{
     alias::PMatrixViewMut,
-    stats::dnsty::{CovMatrix, DensityError, ProbabilityDensityFunctionSampling},
+    stats::{CovMatrix, ProbabilityDensityFunctionSampling, StatsError},
     Fp,
 };
 use nalgebra::{Const, Dim, Dyn, SVector, U1};
@@ -28,33 +28,38 @@ impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &MultivariatePDF<
         &self,
         pmatrix: &mut PMatrixViewMut<Const<P>, Dyn, RStride, CStride>,
         rng: &mut impl Rng,
-    ) -> Result<(), DensityError> {
+    ) -> Result<(), StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
 
-        pmatrix.column_iter_mut().try_for_each(|mut col| {
-            let mut proposal = self.mean
-                + self.covm.cholesky
-                    * SVector::<Fp, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+        pmatrix
+            .par_column_iter_mut()
+            .chunks(256)
+            .try_for_each(|mut chunk| {
+                let internal_rng = rng.clone();
 
-            // Counter for rejected proposals.
-            let mut limit = 0;
-
-            while !self.validate_pvector::<U1, Const<P>>(&proposal.as_view()) {
-                if limit > 100 {
-                    return Err(DensityError::ReachedSamplerLimit(100));
-                }
-
-                proposal = self.mean
+                let mut proposal = self.mean
                     + self.covm.cholesky
                         * SVector::<Fp, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
-                limit += 1;
-            }
+                // Counter for rejected proposals.
+                let mut limit = 0;
 
-            col.set_column(0, &proposal);
+                while !self.validate_pvector::<U1, Const<P>>(&proposal.as_view()) {
+                    if limit > 100 {
+                        return Err(StatsError::ReachedSamplerLimit(100));
+                    }
 
-            Ok(())
-        })?;
+                    proposal = self.mean
+                        + self.covm.cholesky
+                            * SVector::<Fp, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+
+                    limit += 1;
+                }
+
+                col.set_column(0, &proposal);
+
+                Ok(())
+            })?;
 
         Ok(())
     }
