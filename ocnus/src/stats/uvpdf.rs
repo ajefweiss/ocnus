@@ -1,5 +1,5 @@
 use crate::{
-    stats::{ProbabilityDensityFunctionSampling, StatsError},
+    stats::{StatsError, PDF},
     Fp,
 };
 use derive_more::derive::{Deref, DerefMut, IntoIterator};
@@ -23,7 +23,18 @@ impl<const P: usize> PUnivariatePDF<P> {
     }
 }
 
-impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &PUnivariatePDF<P> {
+impl<const P: usize> PDF<P> for &PUnivariatePDF<P> {
+    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
+        let mut rlh = 1.0;
+
+        self.0.iter().zip(x.iter()).for_each(|(uvpdf, value)| {
+            let vec = SVector::from([*value]);
+            rlh *= uvpdf.relative_likelihood(&vec.as_view());
+        });
+
+        rlh
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError> {
         let mut sample = [0.0; P];
 
@@ -60,7 +71,17 @@ pub enum UnivariatePDF {
     Uniform(UniformPDF),
 }
 
-impl ProbabilityDensityFunctionSampling<1> for &UnivariatePDF {
+impl PDF<1> for &UnivariatePDF {
+    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+        match self {
+            UnivariatePDF::Constant(pdf) => pdf.relative_likelihood(x),
+            UnivariatePDF::Cosine(pdf) => pdf.relative_likelihood(x),
+            UnivariatePDF::Normal(pdf) => pdf.relative_likelihood(x),
+            UnivariatePDF::Reciprocal(pdf) => pdf.relative_likelihood(x),
+            UnivariatePDF::Uniform(pdf) => pdf.relative_likelihood(x),
+        }
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, 1>, StatsError> {
         let sample = match self {
             UnivariatePDF::Constant(pdf) => pdf.sample(rng),
@@ -102,7 +123,11 @@ impl ConstantPDF {
     }
 }
 
-impl ProbabilityDensityFunctionSampling<1> for &ConstantPDF {
+impl PDF<1> for &ConstantPDF {
+    fn relative_likelihood(&self, _x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+        1.0
+    }
+
     fn sample(&self, _rng: &mut impl Rng) -> Result<SVector<Fp, 1>, StatsError> {
         Ok(SVector::from([self.constant]))
     }
@@ -139,7 +164,11 @@ impl CosinePDF {
     }
 }
 
-impl ProbabilityDensityFunctionSampling<1> for &CosinePDF {
+impl PDF<1> for &CosinePDF {
+    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+        x[0].cos()
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, 1>, StatsError> {
         // The range is limited to the interval [-π/2, π/2].
         // This invariant is guaranteed by the constructor.
@@ -189,7 +218,11 @@ impl NormalPDF {
     }
 }
 
-impl ProbabilityDensityFunctionSampling<1> for &NormalPDF {
+impl PDF<1> for &NormalPDF {
+    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+        ((x[0] - self.mean).powi(2) / 2.0 / self.std_dev.powi(2)).exp()
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, 1>, StatsError> {
         let (minv, maxv) = self.range;
         let normal = Normal::new(self.mean, self.std_dev).expect("invalid variance");
@@ -242,7 +275,13 @@ impl ReciprocalPDF {
     }
 }
 
-impl ProbabilityDensityFunctionSampling<1> for &ReciprocalPDF {
+impl PDF<1> for &ReciprocalPDF {
+    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+        let (minv, maxv) = self.range;
+
+        1.0 / (x[0] * (maxv.ln() - minv.ln()))
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, 1>, StatsError> {
         let (minv, maxv) = self.range;
 
@@ -287,7 +326,11 @@ impl UniformPDF {
     }
 }
 
-impl ProbabilityDensityFunctionSampling<1> for &UniformPDF {
+impl PDF<1> for &UniformPDF {
+    fn relative_likelihood(&self, _x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+        1.0
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, 1>, StatsError> {
         let (minv, maxv) = self.range;
         let uniform = Uniform::new_inclusive(minv, maxv).unwrap();

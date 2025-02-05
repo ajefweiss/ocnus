@@ -9,14 +9,12 @@
 //! - Circular/ellliptic-cylindrical models (Nieves-Chinchilla et al. 2016 + 2018).
 //! - 3D Coronal Rope Ejection model (Weiss et al. 2021a/b).
 
-mod alias;
 pub mod fevms;
 mod math;
 mod model;
 mod scobs;
 pub mod stats;
 
-pub use alias::*;
 pub use model::*;
 pub use scobs::*;
 
@@ -33,3 +31,7 @@ pub type Fp = f64;
 const FP_EPSILON: f32 = 32.0 * f32::EPSILON;
 #[cfg(feature = "f64")]
 const FP_EPSILON: f64 = 32.0 * f64::EPSILON;
+
+/// A dynamically sized matrix of P-dimensional parameters.
+pub type PMatrix<P> =
+    nalgebra::Matrix<Fp, P, nalgebra::Dyn, nalgebra::VecStorage<Fp, P, nalgebra::Dyn>>;

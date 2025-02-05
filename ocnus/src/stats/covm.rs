@@ -1,4 +1,4 @@
-use crate::{alias::PMatrixView, stats::StatsError, Fp, FP_EPSILON};
+use crate::{stats::StatsError, Fp, PMatrix, FP_EPSILON};
 use derive_more::From;
 use itertools::zip_eq;
 use log::error;
@@ -52,6 +52,11 @@ where
     /// Returns the determinant of the covariance matrix.
     pub fn determinant(&self) -> Fp {
         self.determinant
+    }
+
+    /// Returns the inverse of the covariance matrix.
+    pub fn inverse(&self) -> &OMatrix<Fp, D, D> {
+        &self.inverse
     }
 
     /// Compute the multivariate likelihood from two vectors with of length k x D.
@@ -127,9 +132,9 @@ where
     /// Create a new [`CovMatrix`] object from an array of D-dimensional parameter vectors.
     ///
     /// This function properly handles constant parameters (resulting in empty columns/rows) and can also optionally use weights.
-    pub fn from_particles<RStride: Dim, CStride: Dim>(
-        particles: &PMatrixView<D, Dyn, RStride, CStride>,
-        optional_weights: Option<&[Fp]>,
+    pub fn from_particles(
+        particles: &PMatrix<D>,
+        optional_weights: Option<&Vec<Fp>>,
     ) -> Result<CovMatrix<D>, StatsError>
     where
         D: DimName,

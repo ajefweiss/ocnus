@@ -1,12 +1,19 @@
 use crate::OcnusObser;
-use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
+use derive_more::{derive::DerefMut, Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
+use ndarray::Array2;
 use num_traits::Float;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Display, Formatter},
     ops::{Add, Mul, Sub},
 };
+
+/// Generic N-dimensional observation array.
+#[derive(Clone, Debug, Deref, DerefMut, Deserialize, Serialize)]
+pub struct ModelObserArray<const N: usize>(pub Array2<Option<ModelObserVec<N>>>);
+
+impl<const N: usize> ModelObserArray<N> {}
 
 /// Generic N-dimensional observation vector.
 #[derive(Clone, Debug, Deref, Deserialize, From, Index, IndexMut, IntoIterator, Serialize)]

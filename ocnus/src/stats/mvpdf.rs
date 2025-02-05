@@ -1,14 +1,14 @@
 use crate::{
-    stats::{CovMatrix, ProbabilityDensityFunctionSampling, StatsError},
+    stats::{CovMatrix, StatsError, PDF},
     Fp,
 };
 use nalgebra::{Const, SVector};
 use rand::Rng;
 use rand_distr::Normal;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// A multivariate normal PDF .
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct MultivariatePDF<const P: usize> {
     /// A [`CovMatrix`] object that describes the multivariate normal PDF.
     covm: CovMatrix<Const<P>>,
@@ -21,7 +21,22 @@ pub struct MultivariatePDF<const P: usize> {
     range: [(Fp, Fp); P],
 }
 
-impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &MultivariatePDF<P> {
+impl<const P: usize> MultivariatePDF<P> {
+    /// Create a new [`MultivariatePDF`] object.
+    pub fn new(covm: CovMatrix<Const<P>>, mean: SVector<Fp, P>, range: [(Fp, Fp); P]) -> Self {
+        Self { covm, mean, range }
+    }
+}
+
+impl<const P: usize> PDF<P> for &MultivariatePDF<P> {
+    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
+        let diff = x - self.mean;
+        let value = (diff.transpose() * self.covm.inverse() * diff)[(0, 0)];
+
+        (-0.5 * value).exp()
+            / ((2.0 * std::f64::consts::PI as Fp).powi(P as i32) * self.covm.determinant()).sqrt()
+    }
+
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
 
@@ -32,7 +47,7 @@ impl<const P: usize> ProbabilityDensityFunctionSampling<P> for &MultivariatePDF<
         // Counter for rejected proposals.
         let mut limit = 0;
 
-        while !self.validate_sample(&proposal) {
+        while !self.validate_sample(&proposal.as_view()) {
             if limit > 100 {
                 return Err(StatsError::SamplerLimit(100));
             }

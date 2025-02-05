@@ -62,24 +62,16 @@ impl<O: OcnusObser> ScObs<O> {
 
     /// Create a new [`ScObs`] object from an iterator over `ScConf` and `Option<impl OcnusObser>`.
     /// Returns [None] if the two iterators do not match in length.
-    pub fn from_iterator<I1: IntoIterator<Item = Option<O>>, I2: IntoIterator<Item = ScConf>>(
-        obser_iter: I1,
-        scconf_iter: I2,
-    ) -> Option<Self> {
-        let obser_list = obser_iter.into_iter().collect::<Vec<Option<O>>>();
-        let scconf_list = scconf_iter.into_iter().collect::<Vec<ScConf>>();
-
-        if obser_list.len() != scconf_list.len() {
-            return None;
-        }
+    pub fn from_iterator<I: IntoIterator<Item = (Option<O>, ScConf)>>(iter: I) -> Self {
+        let (obser_list, scconf_list): (Vec<Option<O>>, Vec<ScConf>) = iter.into_iter().unzip();
 
         let length = obser_list.len();
 
-        Some(Self {
+        Self {
             obser: obser_list,
             sccnf: scconf_list,
             sorti: vec![0; length],
-        })
+        }
     }
 
     /// Returns `true`` if the observation contains no elements.
@@ -240,15 +232,12 @@ mod tests {
 
     #[test]
     fn test_scobs_slice() {
-        let sctc1 = ScConf::TimeDistance(0.0, 1.0);
-        let sctc2 = ScConf::TimeDistance(1.0, 1.0);
-        let sctc3 = ScConf::TimeDistance(0.5, 1.0);
+        let sctc1 = (None, ScConf::TimeDistance(0.0, 1.0));
+        let sctc2 = (None, ScConf::TimeDistance(1.0, 1.0));
+        let sctc3 = (None, ScConf::TimeDistance(0.5, 1.0));
 
-        let o1: [Option<Fp>; 2] = [None, None];
-        let o2: [Option<Fp>; 1] = [None];
-
-        let mut ts3: ScObs<Fp> = ScObs::from_iterator(o1, [sctc1, sctc2]).unwrap();
-        let ts4: ScObs<Fp> = ScObs::from_iterator(o2, [sctc3]).unwrap();
+        let mut ts3: ScObs<Fp> = ScObs::<Fp>::from_iterator([sctc1, sctc2]);
+        let ts4: ScObs<Fp> = ScObs::<Fp>::from_iterator([sctc3]);
 
         assert!(ts3.nseries() == 1);
         assert!(ts4.nseries() == 1);

@@ -8,10 +8,10 @@ mod uvpdf;
 pub use covm::{covariance, covariance_with_weights, CovMatrix};
 use itertools::zip_eq;
 pub use mvpdf::MultivariatePDF;
-pub use ptpdf::ParticlePDF;
+pub use ptpdf::{ParticleMutPDF, ParticlePDF, ParticleRefPDF};
 pub use uvpdf::{ConstantPDF, PUnivariatePDF, UniformPDF, UnivariatePDF};
 
-use nalgebra::SVector;
+use nalgebra::{SVector, SVectorView};
 use rand::Rng;
 
 use crate::Fp;
@@ -31,12 +31,16 @@ pub enum StatsError {
 }
 
 /// A trait that provides sampling functionality for a P-dimensional PDF.
-pub trait ProbabilityDensityFunctionSampling<const P: usize>: Send + Sync {
+pub trait PDF<const P: usize>: Sync {
+    /// Estimates the relative likelihood value at a specific position `x`.
+    /// The result is not necessarily normalized depending on the specific PDF.
+    fn relative_likelihood(&self, x: &SVectorView<Fp, P>) -> Fp;
+
     /// Draw a single params vector from the underlying PDF.
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError>;
 
     /// Validate a sample by checking for out of bounds.
-    fn validate_sample(&self, sample: &SVector<Fp, P>) -> bool {
+    fn validate_sample(&self, sample: &SVectorView<Fp, P>) -> bool {
         zip_eq(sample.iter(), self.valid_range().iter()).fold(true, |acc, (c, range)| {
             acc & ((&range.0 <= c) & (c <= &range.1))
         })
@@ -44,29 +48,4 @@ pub trait ProbabilityDensityFunctionSampling<const P: usize>: Send + Sync {
 
     /// Returns the valid range for parameter vector samples.
     fn valid_range(&self) -> [(Fp, Fp); P];
-}
-
-/// A generic P-dimensional PDF of sub-type T.
-pub struct ProbabilityDensityFunction<T, const P: usize>(T);
-
-impl<T, const P: usize> ProbabilityDensityFunction<T, P> {
-    /// Create a new [`ProbabilityDensityFunction`] object.
-    pub fn new(pdf: T) -> Self {
-        Self(pdf)
-    }
-}
-
-impl<T, const P: usize> ProbabilityDensityFunction<T, P>
-where
-    for<'a> &'a T: ProbabilityDensityFunctionSampling<P>,
-{
-    /// Draw a single params vector from the underlying PDF.
-    pub fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError> {
-        (&self.0).sample(rng)
-    }
-
-    /// Returns the valid range for parameter vector samples.
-    pub fn valid_range(&self) -> [(Fp, Fp); P] {
-        (&self.0).valid_range()
-    }
 }

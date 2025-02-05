@@ -33,5 +33,5 @@ thiserror = "*"
 criterion = "0.5.1"
 
 [[bench]]
-name = "stats"
+name = "acylm"
 harness = false

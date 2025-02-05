@@ -1,12 +1,10 @@
 use crate::Fp;
+use nalgebra::SVectorView;
 
 /// A trait that must be implemented for any type that acts as a model within the framework.
 pub trait OcnusModel<const P: usize> {
     /// Array of parameter names.
     const PARAMS: [&'static str; P];
-
-    /// Array of parameter bounds.
-    const PARAM_BOUNDS: [(f32, f32); P];
 
     /// Compute adaptive step sizes for finite differences based on the valid range of the model prior.
     ///
@@ -23,6 +21,11 @@ pub trait OcnusModel<const P: usize> {
     /// Get parameter index by name.
     fn get_param_index(name: &str) -> Option<usize> {
         Self::PARAMS.into_iter().position(|param| param == name)
+    }
+
+    /// Get parameter value by name.
+    fn get_param_value(name: &str, params: &SVectorView<Fp, P>) -> Option<Fp> {
+        Some(params[Self::get_param_index(name)?])
     }
 
     /// Returns the valid range for parameter vector samples.
