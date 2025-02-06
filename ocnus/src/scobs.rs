@@ -80,13 +80,21 @@ impl<O: OcnusObser> ScObs<O> {
     }
 
     /// Returns an iterator over the observations.
-    pub fn iter(&self) -> impl Iterator<Item = (&ScConf, &Option<O>)> {
-        zip_eq(self.sccnf.iter(), self.obser.iter())
+    pub fn iter(&self) -> impl Iterator<Item = (&ScConf, &Option<O>, usize)> {
+        zip_eq(
+            zip_eq(self.sccnf.iter(), self.obser.iter()),
+            self.sorti.iter(),
+        )
+        .map(|((a, b), c)| (a, b, *c))
     }
 
-    /// Returns an iterator that allows modifying each observation.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut ScConf, &mut Option<O>)> {
-        zip_eq(self.sccnf.iter_mut(), self.obser.iter_mut())
+    /// Returns an iterator that allows modifying each observation (except the sorting index).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut ScConf, &mut Option<O>, usize)> {
+        zip_eq(
+            zip_eq(self.sccnf.iter_mut(), self.obser.iter_mut()),
+            self.sorti.iter(),
+        )
+        .map(|((a, b), c)| (a, b, *c))
     }
 
     /// Returns the number of elements in the observation, also referred to as its 'length'.

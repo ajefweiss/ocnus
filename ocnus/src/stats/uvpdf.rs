@@ -24,12 +24,12 @@ impl<const P: usize> PUnivariatePDF<P> {
 }
 
 impl<const P: usize> PDF<P> for &PUnivariatePDF<P> {
-    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
+    fn relative_density(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
         let mut rlh = 1.0;
 
         self.0.iter().zip(x.iter()).for_each(|(uvpdf, value)| {
             let vec = SVector::from([*value]);
-            rlh *= uvpdf.relative_likelihood(&vec.as_view());
+            rlh *= uvpdf.relative_density(&vec.as_view());
         });
 
         rlh
@@ -72,13 +72,13 @@ pub enum UnivariatePDF {
 }
 
 impl PDF<1> for &UnivariatePDF {
-    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+    fn relative_density(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
         match self {
-            UnivariatePDF::Constant(pdf) => pdf.relative_likelihood(x),
-            UnivariatePDF::Cosine(pdf) => pdf.relative_likelihood(x),
-            UnivariatePDF::Normal(pdf) => pdf.relative_likelihood(x),
-            UnivariatePDF::Reciprocal(pdf) => pdf.relative_likelihood(x),
-            UnivariatePDF::Uniform(pdf) => pdf.relative_likelihood(x),
+            UnivariatePDF::Constant(pdf) => pdf.relative_density(x),
+            UnivariatePDF::Cosine(pdf) => pdf.relative_density(x),
+            UnivariatePDF::Normal(pdf) => pdf.relative_density(x),
+            UnivariatePDF::Reciprocal(pdf) => pdf.relative_density(x),
+            UnivariatePDF::Uniform(pdf) => pdf.relative_density(x),
         }
     }
 
@@ -124,7 +124,7 @@ impl ConstantPDF {
 }
 
 impl PDF<1> for &ConstantPDF {
-    fn relative_likelihood(&self, _x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+    fn relative_density(&self, _x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
         1.0
     }
 
@@ -165,7 +165,7 @@ impl CosinePDF {
 }
 
 impl PDF<1> for &CosinePDF {
-    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+    fn relative_density(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
         x[0].cos()
     }
 
@@ -219,7 +219,7 @@ impl NormalPDF {
 }
 
 impl PDF<1> for &NormalPDF {
-    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+    fn relative_density(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
         ((x[0] - self.mean).powi(2) / 2.0 / self.std_dev.powi(2)).exp()
     }
 
@@ -276,7 +276,7 @@ impl ReciprocalPDF {
 }
 
 impl PDF<1> for &ReciprocalPDF {
-    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+    fn relative_density(&self, x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
         let (minv, maxv) = self.range;
 
         1.0 / (x[0] * (maxv.ln() - minv.ln()))
@@ -327,7 +327,7 @@ impl UniformPDF {
 }
 
 impl PDF<1> for &UniformPDF {
-    fn relative_likelihood(&self, _x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
+    fn relative_density(&self, _x: &nalgebra::SVectorView<Fp, 1>) -> Fp {
         1.0
     }
 

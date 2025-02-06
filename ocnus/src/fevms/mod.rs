@@ -8,7 +8,7 @@ pub use models::{CCLFF_Model, CCUT_Model, NC18_Model};
 pub use obsvc::{ModelObserArray, ModelObserVec};
 
 use crate::{
-    stats::{CovMatrix, MultivariatePDF, ParticleMutPDF, ParticleRefPDF, StatsError, PDF},
+    stats::{CovMatrix, MultivariatePDF, ParticleRefPDF, StatsError, PDF},
     Fp, OcnusState, PMatrix, ScConf,
 };
 use itertools::zip_eq;
@@ -44,7 +44,7 @@ pub enum FEVModelError {
 pub struct FEVMEnsbl<S, const P: usize> {
     pub ensbl: PMatrix<Const<P>>,
     pub states: Vec<S>,
-    pub weights: Option<Vec<Fp>>,
+    pub weights: Vec<Fp>,
 }
 
 impl<S, const P: usize> FEVMEnsbl<S, P>
@@ -63,12 +63,30 @@ where
             for<'b> Deserialize<'b> + Serialize,
         VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
     {
-        let covm = match CovMatrix::<Const<P>>::from_particles(&self.ensbl, self.weights.as_ref()) {
+        let covm = match CovMatrix::<Const<P>>::from_particles(&self.ensbl, Some(&self.weights)) {
             Ok(result) => result,
             Err(err) => return Err(FEVModelError::Stats(err)),
         };
 
         Ok(MultivariatePDF::new(covm, self.mean(), range))
+    }
+
+    /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
+    pub fn as_ptpdf(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, FEVModelError>
+    where
+        Const<P>: Dim + DimName,
+        DefaultAllocator: Allocator<Const<P>>
+            + Allocator<Const<P>, Const<P>>
+            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
+            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
+        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
+            for<'b> Deserialize<'b> + Serialize,
+        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
+    {
+        match ParticleRefPDF::new(None, &self.ensbl, range, &self.weights) {
+            Ok(result) => Ok(result),
+            Err(err) => Err(FEVModelError::Stats(err)),
+        }
     }
 
     /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
@@ -83,25 +101,7 @@ where
             for<'b> Deserialize<'b> + Serialize,
         VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
     {
-        match ParticleRefPDF::new(None, &self.ensbl, range, self.weights.as_ref()) {
-            Ok(result) => Ok(result),
-            Err(err) => Err(FEVModelError::Stats(err)),
-        }
-    }
-
-    /// Creates a [`ParticleMutPDF`] object from the underlying FEVM ensemble.
-    pub fn as_ptpdf_mut(&mut self, range: [(Fp, Fp); P]) -> Result<ParticleMutPDF<P>, FEVModelError>
-    where
-        Const<P>: Dim + DimName,
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
-        match ParticleMutPDF::new(None, &mut self.ensbl, range, self.weights.as_mut()) {
+        match ParticleRefPDF::new(None, &self.ensbl, range, &self.weights) {
             Ok(result) => Ok(result),
             Err(err) => Err(FEVModelError::Stats(err)),
         }
@@ -127,7 +127,7 @@ where
         Self {
             ensbl: PMatrix::<Const<P>>::zeros(size),
             states: vec![S::default(); size],
-            weights: None,
+            weights: vec![1.0 / size as Fp; size],
         }
     }
 }
@@ -284,7 +284,7 @@ where
         &self,
         scconf: &[ScConf],
         fevme: &mut FEVMEnsbl<S, P>,
-        output: &mut ArrayViewMut2<Option<ModelObserVec<N>>>,
+        output: &mut ModelObserArray<N>,
     ) -> Result<(), FEVModelError> {
         let mut timer = 0.0;
 

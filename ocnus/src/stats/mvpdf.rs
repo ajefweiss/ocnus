@@ -1,5 +1,5 @@
 use crate::{
-    stats::{CovMatrix, StatsError, PDF},
+    stats::{CovMatrix, PDFDensity, StatsError, PDF},
     Fp,
 };
 use nalgebra::{Const, SVector};
@@ -29,12 +29,11 @@ impl<const P: usize> MultivariatePDF<P> {
 }
 
 impl<const P: usize> PDF<P> for &MultivariatePDF<P> {
-    fn relative_likelihood(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
+    fn relative_density(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covm.inverse() * diff)[(0, 0)];
 
         (-0.5 * value).exp()
-            / ((2.0 * std::f64::consts::PI as Fp).powi(P as i32) * self.covm.determinant()).sqrt()
     }
 
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError> {
@@ -64,5 +63,15 @@ impl<const P: usize> PDF<P> for &MultivariatePDF<P> {
 
     fn valid_range(&self) -> [(Fp, Fp); P] {
         self.range
+    }
+}
+
+impl<const P: usize> PDFDensity<P> for &MultivariatePDF<P> {
+    fn density(&self, x: &nalgebra::SVectorView<Fp, P>) -> Fp {
+        let diff = x - self.mean;
+        let value = (diff.transpose() * self.covm.inverse() * diff)[(0, 0)];
+
+        (-0.5 * value).exp()
+            / ((2.0 * std::f64::consts::PI as Fp).powi(P as i32) * self.covm.determinant()).sqrt()
     }
 }

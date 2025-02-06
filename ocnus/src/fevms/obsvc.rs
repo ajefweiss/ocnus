@@ -1,8 +1,9 @@
-use crate::OcnusObser;
+use crate::{Fp, OcnusObser, ScObs};
 use derive_more::{derive::DerefMut, Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use ndarray::Array2;
+use ndarray::{Array2, Axis};
 use num_traits::Float;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Display, Formatter},
@@ -13,7 +14,49 @@ use std::{
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, Serialize)]
 pub struct ModelObserArray<const N: usize>(pub Array2<Option<ModelObserVec<N>>>);
 
-impl<const N: usize> ModelObserArray<N> {}
+impl<const N: usize> ModelObserArray<N> {
+    /// Computes the column-wise maximum RMSE value over multiple spacecraft observations.
+    pub fn rmse_maximum(&self, scobs: &ScObs<ModelObserVec<N>>, flags: Option<&[bool]>) -> Vec<Fp> {
+        let mut baseline = vec![0.0; scobs.nseries()];
+
+        scobs.iter().for_each(|(_, obs, idx)| {
+            if let Some(obsvec) = obs {
+                baseline[idx] += obsvec.rmse(&ModelObserVec::zeros())
+            }
+        });
+
+        match flags {
+            Some(flags) => {
+                let mut rmse_by_sc = vec![vec![[0.0, 0.0]; scobs.nseries()]; self.ncols()];
+
+                rmse_by_sc
+                    .par_iter_mut()
+                    .zip(self.0.axis_iter(Axis(1)).into_par_iter())
+                    .zip(flags)
+                    .chunks(64)
+                    .for_each(|mut chunks| {
+                        chunks.iter_mut().for_each(|((rmse, obs), flag)| {
+                            if *flag {
+                                zip_eq(scobs.iter(), obs.iter()).for_each(
+                                    |((_, opt_refv, idx), opt_obsv)| match (opt_refv, opt_obsv) {
+                                        (Some(refv), Some(obsv)) => {
+                                            rmse[idx][0] += refv.mse(&obsv);
+                                            rmse[idx][1] += 1.0;
+                                        }
+                                        (None, None) => (),
+                                        _ => rmse[idx][0] = Fp::NAN,
+                                    },
+                                );
+                            }
+                        })
+                    });
+
+                Vec::new()
+            }
+            None => Vec::new(),
+        }
+    }
+}
 
 /// Generic N-dimensional observation vector.
 #[derive(Clone, Debug, Deref, Deserialize, From, Index, IndexMut, IntoIterator, Serialize)]

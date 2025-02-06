@@ -2,7 +2,7 @@ use crate::{
     fevms::{FEVMEnsbl, FEVModelError, ForwardEnsembleVectorModel, ModelObserArray, ModelObserVec},
     model::OcnusState,
     scobs::ScObs,
-    stats::{CovMatrix, ParticlePDF, ParticleRefPDF},
+    stats::{CovMatrix, ParticlePDF, ParticleRefPDF, PDF},
     Fp, PMatrix,
 };
 use derive_builder::Builder;
@@ -14,6 +14,7 @@ use nalgebra::{Const, DVector, DimAdd, Dyn, SVector, ToTypenum};
 use ndarray::{Array2, ArrayViewMut2, Axis};
 use rand::{Rng, SeedableRng};
 use rand_distr::Normal;
+use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, mem::replace, time::Instant};
@@ -90,7 +91,7 @@ where
         fevme: &mut FEVMEnsbl<S, P>,
         output: &mut ModelObserArray<N>,
     ) -> Result<Vec<bool>, FEVModelError> {
-        self.fevm_simulate(scobs.as_scconf_slice(), fevme, &mut output.view_mut())?;
+        self.fevm_simulate(scobs.as_scconf_slice(), fevme, output)?;
 
         let mut valid_indices_flags = vec![false; fevme.len()];
 
@@ -136,55 +137,121 @@ where
         Ok(Vec::new())
     }
 
-    /// Compute weights according to the ABC particle filter algorithm.
-    fn abc_weights(&self, pdf: &ParticleRefPDF<P>, pdf_old: &ParticleRefPDF<P>) -> Vec<f64> {
-        let covm_inv = pdf_old.covm_inverse();
+    fn abc_filter_by_threshold(
+        &self,
+        scobs: &ScObs<ModelObserVec<N>>,
+        fevme: &mut FEVMEnsbl<S, P>,
+        output: &mut ModelObserArray<N>,
+        cov_noise: Option<&CovMatrix<Dyn>>,
+        epsilon: Fp,
+        seed: u64,
+    ) -> Vec<(usize, Fp)> {
+        self.fevm_initialize_states_only(scobs.as_scconf_slice(), fevme);
+        self.fevm_simulate(scobs.as_scconf_slice(), fevme, output);
 
-        let mut weights = prtd_new
-            .particles
-            .par_iter()
-            .map(|new| {
-                let mut w = 0.0;
+        let mut valid_indices_flags = vec![false; fevme.len()];
 
-                prtd_old
-                    .particles
-                    .iter()
-                    .zip(prtd_old.weights.as_ref().unwrap())
-                    .for_each(|(old, old_weight)| {
-                        let diff = new - old;
-
-                        let arg = (diff.transpose() * inverse * diff)[(0, 0)] as f64;
-
-                        w += (old_weight.ln() - arg).exp();
-                    });
-
-                1.0 / w
-            })
-            .collect::<Vec<f64>>();
-
-        // Apply prior distributions to the weights.
-        self.model_prior()
-            .as_uvnd_ref()
-            .unwrap()
-            .0
-            .iter()
+        // Collect indices that produce valid results and add random noise.
+        output
+            .axis_chunks_iter_mut(Axis(1), Self::RCS)
+            .into_par_iter()
+            .zip(valid_indices_flags.par_chunks_mut(Self::RCS))
             .enumerate()
-            .for_each(|(idx, prior)| match prior {
-                UnivariateType::Normal { mean, variance, .. } => weights
-                    .par_iter_mut()
-                    .zip(prtd_new.particles.par_iter())
-                    .for_each(|(w, p)| {
-                        *w *= ((p[idx] - mean).powi(2) / 2.0 / variance).exp() as f64
-                    }),
-                UnivariateType::Reciprocal { .. } => weights
-                    .par_iter_mut()
-                    .zip(prtd_new.particles.par_iter())
-                    .for_each(|(w, p)| *w *= 1.0 / p[idx] as f64),
-                _ => (),
+            .for_each(|(cdx, (mut ensbl_chunks, flag_chunks))| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + (cdx as u64 * 517));
+                let norm = Normal::new(0.0, 1.0).unwrap();
+
+                ensbl_chunks
+                    .axis_iter_mut(Axis(1))
+                    .zip(flag_chunks.iter_mut())
+                    .for_each(|(mut obs, is_valid)| {
+                        *is_valid = obs.iter().fold(true, |acc, o| acc & o.is_some());
+
+                        // Only add noise for valid ensemble members and only if a covariance matrix is given.
+                        if let Some(covm) = cov_noise {
+                            if *is_valid {
+                                for n in 0..N {
+                                    let noise_vector = DVector::<Fp>::from_iterator(
+                                        scobs.len(),
+                                        (0..scobs.len()).map(|_| rng.sample(norm)),
+                                    )
+                                    .transpose()
+                                        * covm.cholesky_ltm();
+
+                                    zip_eq(obs.iter_mut(), noise_vector.iter()).for_each(
+                                        |(obs, noise)| {
+                                            let obs_ref = obs.as_mut().unwrap();
+                                            obs_ref.0[n] += *noise;
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    });
             });
 
-        let total_weights = weights.iter().sum::<f64>();
-        weights.iter_mut().for_each(|value| *value /= total_weights);
+        let mut valid_indices_rmses = valid_indices_flags
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, flag)| match flag {
+                true => Some((idx, 0.0)),
+                false => None,
+            })
+            .collect::<Vec<(usize, Fp)>>();
+
+        // Only accept results that fall below the rmse threshold.
+        valid_indices_rmses.retain_mut(|(idx, rmse_value)| {
+            let rmse = vecobs.rmse(
+                &output
+                    .column(*idx)
+                    .iter()
+                    .map(|v| v.clone().unwrap())
+                    .collect::<Vec<ModelObserVec<N>>>(),
+            );
+
+            *rmse_value = rmse;
+
+            matches!(
+                rmse.partial_cmp(&epsilon)
+                    .unwrap_or(std::cmp::Ordering::Less),
+                std::cmp::Ordering::Less
+            )
+        });
+
+        valid_indices_rmses
+    }
+
+    /// Compute weights according to the ABC particle filter algorithm.
+    fn abc_weights<'a>(&self, pdf: &ParticleRefPDF<'a, P>, pdf_old: &ParticleRefPDF<P>) -> Vec<Fp> {
+        let covm_inv = pdf_old.covm().inverse();
+
+        let mut weights = pdf
+            .particles()
+            .par_column_iter()
+            .map(|params_new| {
+                let value = pdf_old
+                    .particles()
+                    .par_column_iter()
+                    .zip(pdf_old.weights())
+                    .map(|(params_old, weight_old)| {
+                        let delta = params_new - params_old;
+
+                        (weight_old.ln() - (delta.transpose() * covm_inv * delta)[(0, 0)]).exp()
+                    })
+                    .sum::<Fp>();
+
+                1.0 / value
+            })
+            .collect::<Vec<Fp>>();
+
+        let total = weights.iter().sum::<Fp>();
+
+        weights
+            .par_iter_mut()
+            .zip(pdf.particles().par_column_iter())
+            .for_each(|(weight, params)| {
+                *weight *= self.model_prior().relative_density(&params) / total
+            });
 
         weights
     }

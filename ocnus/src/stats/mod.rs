@@ -8,7 +8,7 @@ mod uvpdf;
 pub use covm::{covariance, covariance_with_weights, CovMatrix};
 use itertools::zip_eq;
 pub use mvpdf::MultivariatePDF;
-pub use ptpdf::{ParticleMutPDF, ParticlePDF, ParticleRefPDF};
+pub use ptpdf::{ParticlePDF, ParticleRefPDF};
 pub use uvpdf::{ConstantPDF, PUnivariatePDF, UniformPDF, UnivariatePDF};
 
 use nalgebra::{SVector, SVectorView};
@@ -32,9 +32,9 @@ pub enum StatsError {
 
 /// A trait that provides sampling functionality for a P-dimensional PDF.
 pub trait PDF<const P: usize>: Sync {
-    /// Estimates the relative likelihood value at a specific position `x`.
-    /// The result is not necessarily normalized depending on the specific PDF.
-    fn relative_likelihood(&self, x: &SVectorView<Fp, P>) -> Fp;
+    /// Estimates the relative density/likelihood value at a specific position `x`.
+    /// For an exact calculation or estimate of the density see the [`PDFDensity`] trait.
+    fn relative_density(&self, x: &SVectorView<Fp, P>) -> Fp;
 
     /// Draw a single params vector from the underlying PDF.
     fn sample(&self, rng: &mut impl Rng) -> Result<SVector<Fp, P>, StatsError>;
@@ -48,4 +48,10 @@ pub trait PDF<const P: usize>: Sync {
 
     /// Returns the valid range for parameter vector samples.
     fn valid_range(&self) -> [(Fp, Fp); P];
+}
+
+/// A trait that provides a function that calculates or estimates the density.
+pub trait PDFDensity<const P: usize>: PDF<P> {
+    /// Calculates or estimates the density at a specific position `x`.
+    fn density(&self, x: &SVectorView<Fp, P>) -> Fp;
 }
