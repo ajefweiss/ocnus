@@ -188,13 +188,13 @@ impl PDF<1> for &CosinePDF {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NormalPDF {
     mean: Fp,
-    range: (f32, f32),
-    std_dev: f32,
+    range: (Fp, Fp),
+    std_dev: Fp,
 }
 
 impl NormalPDF {
     /// Create a new [`NormalPDF`] object.
-    pub fn new(mean: Fp, std_dev: Fp, range: (f32, f32)) -> Result<Self, StatsError> {
+    pub fn new(mean: Fp, std_dev: Fp, range: (Fp, Fp)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if (minv < mean) || (maxv > mean) || (minv > maxv) {
@@ -209,11 +209,7 @@ impl NormalPDF {
     }
 
     /// Create a new [`NormalPDF`] object wrapped within the [`UnivariatePDF`] ADT.
-    pub fn new_uvpdf(
-        mean: Fp,
-        std_dev: Fp,
-        range: (f32, f32),
-    ) -> Result<UnivariatePDF, StatsError> {
+    pub fn new_uvpdf(mean: Fp, std_dev: Fp, range: (Fp, Fp)) -> Result<UnivariatePDF, StatsError> {
         Ok(UnivariatePDF::Normal(Self::new(mean, std_dev, range)?))
     }
 }
@@ -255,11 +251,11 @@ impl PDF<1> for &NormalPDF {
 /// A reciprocal PDF.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReciprocalPDF {
-    range: (f32, f32),
+    range: (Fp, Fp),
 }
 impl ReciprocalPDF {
     /// Create a new [`ReciprocalPDF`] object.
-    pub fn new(range: (f32, f32)) -> Result<Self, StatsError> {
+    pub fn new(range: (Fp, Fp)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if (minv < 0.0) || (maxv < 0.0) || (minv > maxv) {
@@ -270,7 +266,7 @@ impl ReciprocalPDF {
     }
 
     /// Create a new [`ReciprocalPDF`] object wrapped within the [`UnivariatePDF`] ADT.
-    pub fn new_uvpdf(range: (f32, f32)) -> Result<UnivariatePDF, StatsError> {
+    pub fn new_uvpdf(range: (Fp, Fp)) -> Result<UnivariatePDF, StatsError> {
         Ok(UnivariatePDF::Reciprocal(Self::new(range)?))
     }
 }
@@ -291,7 +287,7 @@ impl PDF<1> for &ReciprocalPDF {
 
         // Inverse transform sampling.
         let ratio = maxv / minv;
-        let cdf_inv = |u: f32| minv * (ratio.ln() * u).exp();
+        let cdf_inv = |u: Fp| minv * (ratio.ln() * u).exp();
         let uniform = Uniform::new_inclusive(0.0, 1.0).unwrap();
 
         Ok(SVector::from([cdf_inv(rng.sample(uniform))]))
@@ -305,12 +301,12 @@ impl PDF<1> for &ReciprocalPDF {
 /// A uniform PDF.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct UniformPDF {
-    range: (f32, f32),
+    range: (Fp, Fp),
 }
 
 impl UniformPDF {
     /// Create a new [`UniformPDF`] object.
-    pub fn new(range: (f32, f32)) -> Result<Self, StatsError> {
+    pub fn new(range: (Fp, Fp)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if minv >= maxv {
@@ -321,7 +317,7 @@ impl UniformPDF {
     }
 
     /// Create a new [`UniformPDF`] object wrapped within the [`UnivariatePDF`] ADT.
-    pub fn new_uvpdf(range: (f32, f32)) -> Result<UnivariatePDF, StatsError> {
+    pub fn new_uvpdf(range: (Fp, Fp)) -> Result<UnivariatePDF, StatsError> {
         Ok(UnivariatePDF::Uniform(Self::new(range)?))
     }
 }

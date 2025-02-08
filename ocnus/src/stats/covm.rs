@@ -151,7 +151,7 @@ impl CovMatrix {
             .filter(|idx| {
                 matches!(
                     matrix[(*idx, *idx)]
-                        .partial_cmp(&(512.0 * f32::EPSILON))
+                        .partial_cmp(&(512.0 * Fp::EPSILON))
                         .expect("matrix has NaN values"),
                     Ordering::Less
                 )

@@ -1,16 +1,18 @@
 use crate::{
+    fevms::FEVMEnsbl,
     stats::{CovMatrix, StatsError, PDF},
-    Fp, PMatrix,
+    Fp, OcnusState, PMatrix,
 };
 use nalgebra::{Const, SVector};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-macro_rules! impl_ptpdf_general {
+macro_rules! impl_ptpdf {
     () => {
         /// Access the covariance matrix.
-        pub fn covm(&self) -> &CovMatrix<Const<P>> {
+        pub fn covm(&self) -> &CovMatrix {
             &self.covm
         }
 
@@ -20,7 +22,7 @@ macro_rules! impl_ptpdf_general {
         }
 
         /// Access the particle ensemble matrix.
-        pub fn particles(&self) -> &PMatrix<Const<P>> {
+        pub fn particles_ref(&self) -> &PMatrix<Const<P>> {
             &self.parts
         }
 
@@ -30,7 +32,7 @@ macro_rules! impl_ptpdf_general {
         }
 
         /// Access the particle weights.
-        pub fn weights(&self) -> &Vec<Fp> {
+        pub fn weights_ref(&self) -> &Vec<Fp> {
             &self.weights
         }
     };
@@ -75,7 +77,7 @@ macro_rules! impl_ptpdf_sampler {
         let mut limit = 0;
 
         while !$self.validate_sample(&proposal.as_view()) {
-            if limit > 500 {
+            if limit > 5000 {
                 return Err(StatsError::SamplerLimit(500));
             }
 
@@ -94,7 +96,7 @@ macro_rules! impl_ptpdf_sampler {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ParticlePDF<const P: usize> {
     /// Covariance matrix describing the ensemble.
-    covm: CovMatrix<Const<P>>,
+    covm: CovMatrix,
 
     /// A [`PMatrix`] object that acts as the particle ensemble array.
     parts: PMatrix<Const<P>>,
@@ -108,23 +110,72 @@ pub struct ParticlePDF<const P: usize> {
 }
 
 impl<const P: usize> ParticlePDF<P> {
-    impl_ptpdf_general!();
+    impl_ptpdf!();
 
     /// Creates a [`ParticleRefPDF`] object from a [`ParticlePDF`] object.
-    pub fn as_ptpdf_ref(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, StatsError> {
-        ParticleRefPDF::new(None, &self.parts, range, self.weights.as_ref())
+    pub fn as_ptpdf_ref(&self) -> Result<ParticleRefPDF<P>, StatsError> {
+        ParticleRefPDF::new(None, &self.parts, self.range, self.weights.as_ref())
+    }
+
+    /// Update weights assuming a transition from `other` and a prior `prior`.
+    pub fn compute_importance_weights(&mut self, other: &ParticleRefPDF<P>, prior: &impl PDF<P>) {
+        let covm_inv = other.covm().inverse();
+
+        let mut weights = self
+            .parts
+            .par_column_iter()
+            .map(|params_new| {
+                let value = other
+                    .particles_ref()
+                    .par_column_iter()
+                    .zip(other.weights_ref())
+                    .map(|(params_old, weight_old)| {
+                        let delta = params_new - params_old;
+
+                        (weight_old.ln() - (delta.transpose() * covm_inv * delta)[(0, 0)]).exp()
+                    })
+                    .sum::<Fp>();
+
+                1.0 / value
+            })
+            .collect::<Vec<Fp>>();
+
+        let total = weights.iter().sum::<Fp>();
+
+        weights
+            .par_iter_mut()
+            .zip(self.parts.par_column_iter())
+            .for_each(|(weight, params)| *weight *= prior.relative_density(&params) / total);
+
+        self.weights = weights
+    }
+
+    /// Convert self into a [`FEVMEnsbl`] object.
+    pub fn into_fevme<S: OcnusState>(self) -> FEVMEnsbl<S, P> {
+        FEVMEnsbl {
+            ensbl: self.parts,
+            states: vec![S::default(); self.weights.len()],
+            weights: self.weights,
+        }
+    }
+
+    /// Create a new [`ParticleRefPDF`] object and multiply the covariance matrix by `factor`.
+    pub fn mul_covm(&self, factor: Fp) -> Result<ParticleRefPDF<P>, StatsError> {
+        let new = ParticleRefPDF::new(None, &self.parts, self.range, self.weights.as_ref())?;
+
+        Ok(new.mul_covm(factor))
     }
 
     /// Create a new object.
     pub fn new(
-        optional_covm: Option<CovMatrix<Const<P>>>,
+        optional_covm: Option<CovMatrix>,
         parts: PMatrix<Const<P>>,
         range: [(Fp, Fp); P],
         weights: Vec<Fp>,
     ) -> Result<Self, StatsError> {
         let covm = match optional_covm {
             Some(value) => Ok(value),
-            None => CovMatrix::<Const<P>>::from_particles(&parts, Some(&weights)),
+            None => CovMatrix::from_particles(&parts, Some(&weights)),
         }?;
 
         Ok(Self {
@@ -154,7 +205,7 @@ impl<const P: usize> PDF<P> for &ParticlePDF<P> {
 #[derive(Clone, Debug, Serialize)]
 pub struct ParticleRefPDF<'a, const P: usize> {
     /// Covariance matrix describing the ensemble.
-    covm: CovMatrix<Const<P>>,
+    covm: CovMatrix,
 
     /// A reference to a [`PMatrix`] object that acts as the particle ensemble array.
     parts: &'a PMatrix<Const<P>>,
@@ -168,18 +219,28 @@ pub struct ParticleRefPDF<'a, const P: usize> {
 }
 
 impl<'a, const P: usize> ParticleRefPDF<'a, P> {
-    impl_ptpdf_general!();
+    impl_ptpdf!();
+
+    /// Create a new [`ParticleRefPDF`] object and multiply the covariance matrix by `factor`.
+    pub fn mul_covm(&self, factor: Fp) -> Self {
+        Self {
+            covm: self.covm.clone() * factor,
+            parts: self.parts,
+            range: self.range,
+            weights: self.weights,
+        }
+    }
 
     /// Create a new [`ParticleRefPDF`] object.
     pub fn new(
-        optional_covm: Option<CovMatrix<Const<P>>>,
+        optional_covm: Option<CovMatrix>,
         parts: &'a PMatrix<Const<P>>,
         range: [(Fp, Fp); P],
         weights: &'a Vec<Fp>,
     ) -> Result<Self, StatsError> {
         let covm = match optional_covm {
             Some(value) => Ok(value),
-            None => CovMatrix::<Const<P>>::from_particles(parts, Some(weights)),
+            None => CovMatrix::from_particles(parts, Some(weights)),
         }?;
 
         Ok(Self {

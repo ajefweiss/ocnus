@@ -96,25 +96,25 @@ impl<const N: usize> ModelObserArray<N> {
 pub struct ModelObserVec<const N: usize>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
-    pub [f32; N],
+    pub [Fp; N],
 );
 
 impl<const N: usize> OcnusObser for ModelObserVec<N> {}
 
 impl<const N: usize> ModelObserVec<N> {
-    pub fn mse(&self, other: &Self) -> f32 {
-        (self - other).sum_of_squares() / N as f32
+    pub fn mse(&self, other: &Self) -> Fp {
+        (self - other).sum_of_squares() / N as Fp
     }
 
-    pub fn rmse(&self, other: &Self) -> f32 {
-        ((self - other).sum_of_squares() / N as f32).sqrt()
+    pub fn rmse(&self, other: &Self) -> Fp {
+        ((self - other).sum_of_squares() / N as Fp).sqrt()
     }
 }
 
 impl<const N: usize> ModelObserVec<N> {
     /// Sum of the squares of for the underlying vector.
-    pub fn sum_of_squares(&self) -> f32 {
-        self.iter().map(|value| value.powi(2)).sum::<f32>()
+    pub fn sum_of_squares(&self) -> Fp {
+        self.iter().map(|value| value.powi(2)).sum::<Fp>()
     }
 
     /// Return a observation vector filled with zeros.
@@ -125,7 +125,7 @@ impl<const N: usize> ModelObserVec<N> {
 
 impl<const N: usize> Default for ModelObserVec<N> {
     fn default() -> Self {
-        ModelObserVec([f32::nan(); N])
+        ModelObserVec([Fp::nan(); N])
     }
 }
 
@@ -154,7 +154,7 @@ impl<const N: usize> Add for ModelObserVec<N> {
         ModelObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(a, b)| a + b)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
@@ -168,63 +168,63 @@ impl<'a, const N: usize> Add<&'a ModelObserVec<N>> for &'a ModelObserVec<N> {
         ModelObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(v1, v2)| v1 + v2)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<const N: usize> Mul<f32> for ModelObserVec<N> {
+impl<const N: usize> Mul<Fp> for ModelObserVec<N> {
     type Output = ModelObserVec<N>;
 
-    fn mul(self, rhs: f32) -> Self::Output {
+    fn mul(self, rhs: Fp) -> Self::Output {
         ModelObserVec::<N>(
             self.iter()
                 .map(|v| *v * rhs)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<const N: usize> Mul<f32> for &ModelObserVec<N> {
+impl<const N: usize> Mul<Fp> for &ModelObserVec<N> {
     type Output = ModelObserVec<N>;
 
-    fn mul(self, rhs: f32) -> Self::Output {
+    fn mul(self, rhs: Fp) -> Self::Output {
         ModelObserVec::<N>(
             self.iter()
                 .map(|v| *v * rhs)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<const N: usize> Mul<ModelObserVec<N>> for f32 {
+impl<const N: usize> Mul<ModelObserVec<N>> for Fp {
     type Output = ModelObserVec<N>;
 
     fn mul(self, rhs: ModelObserVec<N>) -> Self::Output {
         ModelObserVec::<N>(
             rhs.iter()
                 .map(|v| *v * self)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<'a, const N: usize> Mul<&'a ModelObserVec<N>> for f32 {
+impl<'a, const N: usize> Mul<&'a ModelObserVec<N>> for Fp {
     type Output = ModelObserVec<N>;
 
     fn mul(self, rhs: &'a ModelObserVec<N>) -> Self::Output {
         ModelObserVec::<N>(
             rhs.iter()
                 .map(|v| *v * self)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
@@ -238,7 +238,7 @@ impl<const N: usize> Sub for ModelObserVec<N> {
         ModelObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(v1, v2)| v1 - v2)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )
@@ -252,7 +252,7 @@ impl<'a, const N: usize> Sub<&'a ModelObserVec<N>> for &'a ModelObserVec<N> {
         ModelObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(v1, v2)| *v1 - *v2)
-                .collect::<Vec<f32>>()
+                .collect::<Vec<Fp>>()
                 .try_into()
                 .unwrap(),
         )

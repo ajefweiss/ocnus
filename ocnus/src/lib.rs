@@ -20,7 +20,7 @@ pub use scobs::*;
 
 /// The default floating-point type.
 ///
-/// This type is either `f32` or `f64` as defined by the crate feature flags (default is `f32`).
+/// This type is either `Fp` or `f64` as defined by the crate feature flags (default is `Fp`).
 #[cfg(not(feature = "f64"))]
 pub type Fp = f32;
 #[cfg(feature = "f64")]

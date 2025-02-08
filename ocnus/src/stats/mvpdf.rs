@@ -2,7 +2,7 @@ use crate::{
     stats::{CovMatrix, PDFDensity, StatsError, PDF},
     Fp,
 };
-use nalgebra::{Const, SVector};
+use nalgebra::SVector;
 use rand::Rng;
 use rand_distr::Normal;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MultivariatePDF<const P: usize> {
     /// A [`CovMatrix`] object that describes the multivariate normal PDF.
-    covm: CovMatrix<Const<P>>,
+    covm: CovMatrix,
 
     /// The mean parameter of the multivariate normal distribution.
     mean: SVector<Fp, P>,
@@ -23,7 +23,7 @@ pub struct MultivariatePDF<const P: usize> {
 
 impl<const P: usize> MultivariatePDF<P> {
     /// Create a new [`MultivariatePDF`] object.
-    pub fn new(covm: CovMatrix<Const<P>>, mean: SVector<Fp, P>, range: [(Fp, Fp); P]) -> Self {
+    pub fn new(covm: CovMatrix, mean: SVector<Fp, P>, range: [(Fp, Fp); P]) -> Self {
         Self { covm, mean, range }
     }
 }

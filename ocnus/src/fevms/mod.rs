@@ -17,10 +17,7 @@ use crate::{
 };
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{
-    allocator::{Allocator, Reallocator},
-    Const, DefaultAllocator, Dyn, SVector, SVectorView, StorageMut, VecStorage,
-};
+use nalgebra::{Const, SVector, SVectorView};
 use ndarray::Axis;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -58,7 +55,7 @@ where
 {
     // Creates a [`MultivariatePDF`] object from the underlying FEVM ensemble.
     pub fn as_mvpdf(&self, range: [(Fp, Fp); P]) -> Result<MultivariatePDF<P>, FEVModelError> {
-        let covm = match CovMatrix::<Const<P>>::from_particles(&self.ensbl, Some(&self.weights)) {
+        let covm = match CovMatrix::from_particles(&self.ensbl, Some(&self.weights)) {
             Ok(result) => result,
             Err(err) => return Err(FEVModelError::Stats(err)),
         };
@@ -67,7 +64,7 @@ where
     }
 
     /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
-    pub fn as_ptpdf(self, range: [(Fp, Fp); P]) -> Result<ParticlePDF<P>, FEVModelError> {
+    pub fn into_ptpdf(self, range: [(Fp, Fp); P]) -> Result<ParticlePDF<P>, FEVModelError> {
         match ParticlePDF::new(None, self.ensbl, range, self.weights) {
             Ok(result) => Ok(result),
             Err(err) => Err(FEVModelError::Stats(err)),

@@ -2,14 +2,14 @@ use crate::{
     fevms::{FEVMEnsbl, FEVModelError, ForwardEnsembleVectorModel, ModelObserArray, ModelObserVec},
     model::OcnusState,
     scobs::ScObs,
-    stats::{CovMatrix, PUnivariatePDF, ParticleRefPDF, PDF},
+    stats::{CovMatrix, PUnivariatePDF},
     Fp, PMatrix,
 };
 use derive_builder::Builder;
 use derive_more::derive::Deref;
 use itertools::{zip_eq, Itertools};
 use log::info;
-use nalgebra::{Const, DVector, Dyn};
+use nalgebra::{Const, DVector};
 use ndarray::Axis;
 use rand::{Rng, SeedableRng};
 use rand_distr::Normal;
@@ -143,7 +143,7 @@ pub struct ABCSettings {
 
     /// The covariance matrix that is used to generate the multivariate noise
     /// that is super imposed on top of the model outputs.
-    pub noise_covm: Option<CovMatrix<Dyn>>,
+    pub noise_covm: Option<CovMatrix>,
 
     /// Size of the FEVM ensemble that is used for temporary simulation runs
     /// at each iteration.
@@ -221,7 +221,7 @@ where
         let mut iteration = 0;
         let mut result = Vec::with_capacity(abcfs.target_size);
 
-        if fevmd.fevme.is_some() && (fevmd.step > 0) {
+        let fevme_new = if fevmd.fevme.is_some() && (fevmd.step > 0) {
             // N -th iteration.
 
             // Copy existing ensemble as particle pdf.
@@ -230,17 +230,23 @@ where
                 .as_ref()
                 .unwrap()
                 .clone()
-                .as_ptpdf(self.valid_range())
+                .into_ptpdf(self.valid_range())
                 .unwrap();
 
             // Take() FEVMEnsbl.
             let mut fevme_new = fevmd.fevme.take().unwrap();
 
+            // Create a ParticleRefPDF object where we multiply the covariance matrix by exploration_factor.
+            let pdf_old_ef = match pdf_old.mul_covm(abcfs.exploration_factor) {
+                Ok(result) => result,
+                Err(err) => return Err(FEVModelError::Stats(err)),
+            };
+
             while counter != abcfs.target_size {
                 self.fevm_initialize(
                     scobs.as_scconf_slice(),
                     &mut fevme_sim,
-                    Some(&pdf_old),
+                    Some(&pdf_old_ef),
                     (37 + iteration * 43) as u64 + seed,
                 )?;
 
@@ -262,7 +268,12 @@ where
                     .iter()
                     .enumerate()
                     .for_each(|(idx, (vdx, rmse))| {
-                        fevme_new.ensbl[counter + idx] = fevme_sim.ensbl[*vdx];
+                        fevme_new
+                            .ensbl
+                            .column_mut(counter + idx)
+                            .iter_mut()
+                            .zip(fevme_sim.ensbl.column(*vdx).iter())
+                            .for_each(|(a, b)| *a = *b);
                         result.push(*rmse);
                     });
 
@@ -271,9 +282,20 @@ where
                 iteration += 1;
             }
 
-            det = Fp::NAN;
-            ess = abcfs.target_size as Fp;
+            let mut pdf_new = fevme_new.into_ptpdf(self.valid_range())?;
+
+            pdf_new.compute_importance_weights(&pdf_old_ef, &self.model_prior());
+
+            det = pdf_new.covm().determinant();
+            ess = 1.0
+                / pdf_new
+                    .weights_ref()
+                    .iter()
+                    .map(|value| value.powi(2))
+                    .sum::<Fp>();
             kld = Fp::NAN;
+
+            pdf_new.into_fevme()
         } else if fevmd.step == 0 {
             // First iteration.
             let mut particles = PMatrix::<Const<P>>::zeros(abcfs.target_size);
@@ -304,7 +326,11 @@ where
                     .iter()
                     .enumerate()
                     .for_each(|(idx, (vdx, rmse))| {
-                        particles[counter + idx] = fevme_sim.ensbl[*vdx];
+                        particles
+                            .column_mut(counter + idx)
+                            .iter_mut()
+                            .zip(fevme_sim.ensbl.column(*vdx))
+                            .for_each(|(a, b)| *a = *b);
                         result.push(*rmse);
                     });
 
@@ -313,34 +339,47 @@ where
                 iteration += 1;
             }
 
-            // Insert our FEVMEnsbl into the fevme field.
-            let _ = replace(
-                &mut fevmd.fevme,
-                Some(FEVMEnsbl {
-                    ensbl: particles,
-                    states: vec![S::default(); abcfs.simulation_size],
-                    weights: vec![1.0 / abcfs.simulation_size as Fp; abcfs.simulation_size],
-                }),
-            );
-
-            // Also re-insert the temporary data structures.
-            let _ = replace(&mut fevmd.fevme_simulation, Some(fevme_sim));
-            let _ = replace(&mut fevmd.fevme_simulation_output, Some(fevme_sim_out));
-
             det = Fp::NAN;
             ess = abcfs.target_size as Fp;
             kld = Fp::NAN;
+
+            FEVMEnsbl {
+                ensbl: particles,
+                states: vec![S::default(); abcfs.target_size],
+                weights: vec![1.0 / abcfs.target_size as Fp; abcfs.target_size],
+            }
         } else {
             return Err(FEVModelError::InvalidArgument((
                 "fevme field is not initialized and step counter is non-zero",
                 step as Fp,
             )));
-        }
+        };
+
+        // Insert our FEVMEnsbl into the fevme field.
+        let _ = replace(&mut fevmd.fevme, Some(fevme_new));
+
+        // Also re-insert the temporary data structures.
+        let _ = replace(&mut fevmd.fevme_simulation, Some(fevme_sim));
+        let _ = replace(&mut fevmd.fevme_simulation_output, Some(fevme_sim_out));
+
+        // Increase seed and step values.
+        fevmd.seed = Some(seed + 1);
+        fevmd.step = step + 1;
+
+        let res_sorted = result
+            .iter()
+            .sorted_by(|a, b| a.partial_cmp(b).unwrap())
+            .copied()
+            .collect::<Vec<Fp>>();
+
+        let eps_25 = res_sorted[abcfs.target_size / 4];
+        let eps_50 = res_sorted[abcfs.target_size / 2];
+        let eps_75 = res_sorted[3 * abcfs.target_size / 4];
 
         info!(
-            "abc pf step {}\n\tKL delta: {:.3} | ln det {:.3}\n\tran {:2.2}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
+            "abc pf step {}\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
             step,
-            kld, det.ln(),
+            kld, det.ln(), eps_25,eps_50,eps_75,
             (iteration * abcfs.simulation_size) as Fp / 1e6,
             start.elapsed().as_millis() as Fp / 1e3,
             ess,
@@ -440,7 +479,7 @@ where
                     .sorted_by(|x, y| x.partial_cmp(y).unwrap())
                     .collect::<Vec<Fp>>();
 
-                let target_index = (valid_indices.len() as Fp * rate) as usize;
+                let target_index = (abcfs.simulation_size as Fp * rate) as usize;
 
                 if target_index > rmse_sorted.len() {
                     Fp::INFINITY
@@ -461,40 +500,5 @@ where
         });
 
         Ok(valid_indices)
-    }
-
-    /// Compute weights according to the ABC particle filter algorithm.
-    fn abc_weights(&self, pdf: &ParticleRefPDF<P>, pdf_old: &ParticleRefPDF<P>) -> Vec<Fp> {
-        let covm_inv = pdf_old.covm().inverse();
-
-        let mut weights = pdf
-            .particles()
-            .par_column_iter()
-            .map(|params_new| {
-                let value = pdf_old
-                    .particles()
-                    .par_column_iter()
-                    .zip(pdf_old.weights())
-                    .map(|(params_old, weight_old)| {
-                        let delta = params_new - params_old;
-
-                        (weight_old.ln() - (delta.transpose() * covm_inv * delta)[(0, 0)]).exp()
-                    })
-                    .sum::<Fp>();
-
-                1.0 / value
-            })
-            .collect::<Vec<Fp>>();
-
-        let total = weights.iter().sum::<Fp>();
-
-        weights
-            .par_iter_mut()
-            .zip(pdf.particles().par_column_iter())
-            .for_each(|(weight, params)| {
-                *weight *= self.model_prior().relative_density(&params) / total
-            });
-
-        weights
     }
 }

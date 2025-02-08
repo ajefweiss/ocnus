@@ -1,5 +1,6 @@
 use crate::Fp;
 use nalgebra::SVectorView;
+use serde::Serialize;
 
 /// A trait that must be implemented for any type that acts as a model within the framework.
 pub trait OcnusModel<const P: usize> {
@@ -9,11 +10,11 @@ pub trait OcnusModel<const P: usize> {
     /// Compute adaptive step sizes for finite differences based on the valid range of the model prior.
     ///
     /// The step size for constant parameters is zero.
-    fn adaptive_step_sizes(&self) -> [f32; P] {
+    fn adaptive_step_sizes(&self) -> [Fp; P] {
         self.valid_range()
             .iter()
-            .map(|(min, max)| 1024.0 * (max - min) * f32::EPSILON)
-            .collect::<Vec<f32>>()
+            .map(|(min, max)| 256.0 * (max - min) * Fp::EPSILON)
+            .collect::<Vec<Fp>>()
             .try_into()
             .unwrap()
     }
@@ -33,13 +34,13 @@ pub trait OcnusModel<const P: usize> {
 }
 
 /// A trait that must be implemented for any type that acts as a model observable.
-pub trait OcnusObser: Clone + Default + Send + serde::Serialize + Sync {}
+pub trait OcnusObser: Clone + Default + Send + Serialize + Sync {}
 
 // Implement the [`OcnusObser`] traits for Fp.
 impl OcnusObser for Fp {}
 
 /// A trait that must be implemented for any type that acts as a model state.
-pub trait OcnusState: Clone + Default + Send + serde::Serialize + Sync {}
+pub trait OcnusState: Clone + Default + Send + Serialize + Sync {}
 
 // Implement the [`OcnusState`] traits for Fp.
 impl OcnusState for Fp {}
