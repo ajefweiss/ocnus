@@ -2,10 +2,7 @@ use crate::{
     stats::{CovMatrix, StatsError, PDF},
     Fp, PMatrix,
 };
-use nalgebra::{
-    allocator::{Allocator, Reallocator},
-    Const, DefaultAllocator, Dim, DimName, Dyn, SVector, StorageMut, VecStorage,
-};
+use nalgebra::{Const, SVector};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use serde::{Deserialize, Serialize};
@@ -93,7 +90,7 @@ macro_rules! impl_ptpdf_sampler {
     }};
 }
 
-/// A probability density function (PDF) defined by an ensemble particles.
+/// A probability density function (PDF) defined by an ensemble of particles.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ParticlePDF<const P: usize> {
     /// Covariance matrix describing the ensemble.
@@ -110,21 +107,11 @@ pub struct ParticlePDF<const P: usize> {
     weights: Vec<Fp>,
 }
 
-impl<'a, const P: usize> ParticlePDF<P> {
+impl<const P: usize> ParticlePDF<P> {
     impl_ptpdf_general!();
 
     /// Creates a [`ParticleRefPDF`] object from a [`ParticlePDF`] object.
-    pub fn as_ptpdf_ref(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, StatsError>
-    where
-        Const<P>: Dim + DimName,
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
+    pub fn as_ptpdf_ref(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, StatsError> {
         ParticleRefPDF::new(None, &self.parts, range, self.weights.as_ref())
     }
 
@@ -134,17 +121,7 @@ impl<'a, const P: usize> ParticlePDF<P> {
         parts: PMatrix<Const<P>>,
         range: [(Fp, Fp); P],
         weights: Vec<Fp>,
-    ) -> Result<Self, StatsError>
-    where
-        Const<P>: Dim + DimName,
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
+    ) -> Result<Self, StatsError> {
         let covm = match optional_covm {
             Some(value) => Ok(value),
             None => CovMatrix::<Const<P>>::from_particles(&parts, Some(&weights)),
@@ -173,7 +150,7 @@ impl<const P: usize> PDF<P> for &ParticlePDF<P> {
     }
 }
 
-/// A probability density function (PDF) defined by a reference to an ensemble particles.
+/// A probability density function (PDF) defined by a reference to an ensemble of particles.
 #[derive(Clone, Debug, Serialize)]
 pub struct ParticleRefPDF<'a, const P: usize> {
     /// Covariance matrix describing the ensemble.
@@ -199,20 +176,10 @@ impl<'a, const P: usize> ParticleRefPDF<'a, P> {
         parts: &'a PMatrix<Const<P>>,
         range: [(Fp, Fp); P],
         weights: &'a Vec<Fp>,
-    ) -> Result<Self, StatsError>
-    where
-        Const<P>: Dim + DimName,
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
+    ) -> Result<Self, StatsError> {
         let covm = match optional_covm {
             Some(value) => Ok(value),
-            None => CovMatrix::<Const<P>>::from_particles(parts, Some(&weights)),
+            None => CovMatrix::<Const<P>>::from_particles(parts, Some(weights)),
         }?;
 
         Ok(Self {

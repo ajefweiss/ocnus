@@ -5,10 +5,10 @@ use crate::{
 use nalgebra::{Const, SVector};
 use rand::Rng;
 use rand_distr::Normal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A multivariate normal PDF .
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MultivariatePDF<const P: usize> {
     /// A [`CovMatrix`] object that describes the multivariate normal PDF.
     covm: CovMatrix<Const<P>>,

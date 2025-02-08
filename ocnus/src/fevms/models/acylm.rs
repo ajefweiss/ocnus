@@ -1,5 +1,8 @@
 use crate::{
-    fevms::{FEVModelError, ForwardEnsembleVectorModel, ModelObserVec},
+    fevms::{
+        ABCParticleFilter, FEVModelError, ForwardEnsembleVectorModel, ModelObserVec,
+        ParticleFiltering,
+    },
     math::{bessel_jn, quaternion_xyz},
     model::{OcnusModel, OcnusState},
     scobs::ScConf,
@@ -292,9 +295,19 @@ macro_rules! impl_acylm {
             }
         }
 
-        // impl<'a> ParticleFiltering<LinearModelState, { $params.len() }, 3> for $model<'a> {}
+        impl<T> ParticleFiltering<LinearModelState, { $params.len() }, 3> for $model<T>
+        where
+            T: Sync,
+            for<'a> &'a T: PDF<{ $params.len() }>,
+        {
+        }
 
-        // impl<'a> ABCParticleFilter<LinearModelState, { $params.len() }, 3> for $model<'a> {}
+        impl<T> ABCParticleFilter<LinearModelState, { $params.len() }, 3> for $model<T>
+        where
+            T: Sync,
+            for<'a> &'a T: PDF<{ $params.len() }>,
+        {
+        }
 
         // impl<'a> MVLLParticleFilter<LinearModelState, { $params.len() }, 3> for $model<'a> {}
 
@@ -304,7 +317,7 @@ macro_rules! impl_acylm {
 
 // Implementation of the classical linear force-free cylindrical flux rope model.
 impl_acylm!(
-    CCLFF_Model,
+    OCModel_CC_LFF,
     ["phi", "theta", "y", "radius", "v", "B", "alpha", "x_0"],
     cc_coords,
     cc_lff_obs,
@@ -313,7 +326,7 @@ impl_acylm!(
 
 // Implementation of the classical uniform twist cylindrical flux rope model.
 impl_acylm!(
-    CCUT_Model,
+    OCModel_CC_UT,
     ["phi", "theta", "y", "radius", "v", "B", "tau", "x_0"],
     cc_coords,
     cc_ut_obs,
@@ -322,7 +335,7 @@ impl_acylm!(
 
 // Implementation of the ellliptic-cylindrical flux rope model as described in Nieves-Chinchilla et al. (2018).
 impl_acylm!(
-    NC18_Model,
+    OCModel_CC_NC18,
     ["phi", "theta", "y", "radius", "delta", "v", "B", "tau", "c10", "x_0"],
     ec_coords,
     ec_c10_obs,
@@ -334,7 +347,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        fevms::FEVMEnsbl,
+        fevms::{FEVMEnsbl, ModelObserArray},
         model::OcnusModel,
         scobs::{ScConf, ScObs},
         stats::{ConstantPDF, PUnivariatePDF, UniformPDF, UnivariatePDF},
@@ -359,7 +372,7 @@ mod tests {
             UnivariatePDF::Uniform(UniformPDF::new((0.0, 1.0)).unwrap()),
         ]);
 
-        let model = CCLFF_Model(prior_density);
+        let model = OCModel_CC_LFF(prior_density);
 
         let sc = ScObs::<ModelObserVec<3>>::from_iterator((0..8).map(|i| {
             (
@@ -370,7 +383,7 @@ mod tests {
 
         let mut data = FEVMEnsbl::new(1);
 
-        let mut output = ndarray::Array2::<Option<ModelObserVec<3>>>::default((sc.len(), 1));
+        let mut output = ModelObserArray::new(&sc, 1);
 
         data.ensbl.set_column(
             0,
@@ -382,14 +395,14 @@ mod tests {
             .is_ok());
 
         assert!(model
-            .fevm_simulate(sc.as_scconf_slice(), &mut data, &mut output.view_mut())
+            .fevm_simulate(sc.as_scconf_slice(), &mut data, &mut output)
             .is_ok(),);
 
         assert!((output[(0, 0)].as_ref().unwrap()[1] - 18.7926).abs() < 1e-4);
         assert!((output[(2, 0)].as_ref().unwrap()[1] - 19.7875).abs() < 1e-4);
         assert!((output[(4, 0)].as_ref().unwrap()[2] + 0.8228).abs() < 1e-4);
 
-        assert!(CCLFF_Model::<PUnivariatePDF<8>>::get_param_index("B").unwrap() == 5);
+        assert!(OCModel_CC_LFF::<PUnivariatePDF<8>>::get_param_index("B").unwrap() == 5);
     }
 
     #[test]
@@ -409,7 +422,7 @@ mod tests {
             UnivariatePDF::Uniform(UniformPDF::new((0.0, 1.0)).unwrap()),
         ]);
 
-        let model = CCUT_Model(prior_density);
+        let model = OCModel_CC_UT(prior_density);
 
         let sc = ScObs::<ModelObserVec<3>>::from_iterator((0..8).map(|i| {
             (
@@ -420,7 +433,7 @@ mod tests {
 
         let mut data = FEVMEnsbl::new(1);
 
-        let mut output = ndarray::Array2::<Option<ModelObserVec<3>>>::default((sc.len(), 1));
+        let mut output = ModelObserArray::new(&sc, 1);
 
         data.ensbl.set_column(
             0,
@@ -432,7 +445,7 @@ mod tests {
             .is_ok());
 
         assert!(model
-            .fevm_simulate(sc.as_scconf_slice(), &mut data, &mut output.view_mut())
+            .fevm_simulate(sc.as_scconf_slice(), &mut data, &mut output)
             .is_ok(),);
 
         assert!((output[(0, 0)].as_ref().unwrap()[1] - 16.0615).abs() < 1e-4);
@@ -459,7 +472,7 @@ mod tests {
             UnivariatePDF::Uniform(UniformPDF::new((0.0, 1.0)).unwrap()),
         ]);
 
-        let model = NC18_Model(prior_density);
+        let model = OCModel_CC_NC18(prior_density);
 
         let sc = ScObs::<ModelObserVec<3>>::from_iterator((0..8).map(|i| {
             (
@@ -470,7 +483,7 @@ mod tests {
 
         let mut data = FEVMEnsbl::new(1);
 
-        let mut output = ndarray::Array2::<Option<ModelObserVec<3>>>::default((sc.len(), 1));
+        let mut output = ModelObserArray::new(&sc, 1);
 
         data.ensbl.set_column(
             0,
@@ -482,13 +495,13 @@ mod tests {
             .is_ok());
 
         assert!(model
-            .fevm_simulate(sc.as_scconf_slice(), &mut data, &mut output.view_mut())
+            .fevm_simulate(sc.as_scconf_slice(), &mut data, &mut output)
             .is_ok(),);
 
         assert!((output[(0, 0)].as_ref().unwrap()[1] - 10.047894).abs() < 1e-4);
         assert!((output[(2, 0)].as_ref().unwrap()[1] - 12.073919).abs() < 1e-4);
         assert!((output[(4, 0)].as_ref().unwrap()[2] - 0.0434046).abs() < 1e-4);
 
-        assert!(NC18_Model::<PUnivariatePDF<10>>::get_param_index("B").unwrap() == 6);
+        assert!(OCModel_CC_NC18::<PUnivariatePDF<10>>::get_param_index("B").unwrap() == 6);
     }
 }

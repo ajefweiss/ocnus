@@ -4,31 +4,36 @@ mod flter;
 mod models;
 mod obsvc;
 
-pub use models::{CCLFF_Model, CCUT_Model, NC18_Model};
+pub use flter::{
+    ABCMode, ABCParticleFilter, ABCSettings, ABCSettingsBuilder, ABCSummaryStatistic,
+    ParticleFiltering,
+};
+pub use models::{OCModel_CC_LFF, OCModel_CC_NC18, OCModel_CC_UT};
 pub use obsvc::{ModelObserArray, ModelObserVec};
 
 use crate::{
-    stats::{CovMatrix, MultivariatePDF, ParticleRefPDF, StatsError, PDF},
-    Fp, OcnusState, PMatrix, ScConf,
+    stats::{CovMatrix, MultivariatePDF, ParticlePDF, ParticleRefPDF, StatsError, PDF},
+    Fp, OcnusModel, OcnusState, PMatrix, ScConf,
 };
 use itertools::zip_eq;
 use log::debug;
 use nalgebra::{
     allocator::{Allocator, Reallocator},
-    Const, DefaultAllocator, Dim, DimName, Dyn, SVector, SVectorView, StorageMut, VecStorage,
+    Const, DefaultAllocator, Dyn, SVector, SVectorView, StorageMut, VecStorage,
 };
-use ndarray::{ArrayViewMut2, Axis};
+use ndarray::Axis;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use thiserror::Error;
-
-pub struct A<T>(T);
 
 /// Errors associated with the [`crate::fevms`] module.
 #[derive(Debug, Error)]
 pub enum FEVModelError {
+    #[error("invalid function argument")]
+    InvalidArgument((&'static str, Fp)),
     #[error("model parameter value is invalid")]
     InvalidModelParam((&'static str, Fp)),
     #[error("output array has incorrect dimensions")]
@@ -54,13 +59,9 @@ where
     // Creates a [`MultivariatePDF`] object from the underlying FEVM ensemble.
     pub fn as_mvpdf(&self, range: [(Fp, Fp); P]) -> Result<MultivariatePDF<P>, FEVModelError>
     where
-        Const<P>: Dim + DimName,
         DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
             + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
             + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
         VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
     {
         let covm = match CovMatrix::<Const<P>>::from_particles(&self.ensbl, Some(&self.weights)) {
@@ -72,18 +73,14 @@ where
     }
 
     /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
-    pub fn as_ptpdf(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, FEVModelError>
+    pub fn as_ptpdf(self, range: [(Fp, Fp); P]) -> Result<ParticlePDF<P>, FEVModelError>
     where
-        Const<P>: Dim + DimName,
         DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
             + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
             + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
         VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
     {
-        match ParticleRefPDF::new(None, &self.ensbl, range, &self.weights) {
+        match ParticlePDF::new(None, self.ensbl, range, self.weights) {
             Ok(result) => Ok(result),
             Err(err) => Err(FEVModelError::Stats(err)),
         }
@@ -92,13 +89,9 @@ where
     /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
     pub fn as_ptpdf_ref(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, FEVModelError>
     where
-        Const<P>: Dim + DimName,
         DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>>
             + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
             + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        <DefaultAllocator as Allocator<Const<P>, Const<P>>>::Buffer<Fp>:
-            for<'b> Deserialize<'b> + Serialize,
         VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
     {
         match ParticleRefPDF::new(None, &self.ensbl, range, &self.weights) {
@@ -133,7 +126,7 @@ where
 }
 
 /// The trait that must be implemented for any FEVM with N-dimensional vector observables.
-pub trait ForwardEnsembleVectorModel<S, const P: usize, const N: usize>
+pub trait ForwardEnsembleVectorModel<S, const P: usize, const N: usize>: OcnusModel<P>
 where
     S: OcnusState,
     Self: Sync,
@@ -159,10 +152,7 @@ where
         optional_pdf: Option<impl PDF<P>>,
         seed: u64,
     ) -> Result<(), FEVModelError> {
-        debug!(
-            "initializing a forward ensemble vector model (size={})",
-            fevme.len()
-        );
+        let start = Instant::now();
 
         fevme
             .ensbl
@@ -195,6 +185,12 @@ where
                 Ok(())
             })?;
 
+        debug!(
+            "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
+            (fevme.len()) as Fp / 1e6,
+            start.elapsed().as_millis() as Fp / 1e3
+        );
+
         Ok(())
     }
 
@@ -206,10 +202,7 @@ where
         optional_pdf: Option<impl PDF<P>>,
         seed: u64,
     ) -> Result<(), FEVModelError> {
-        debug!(
-            "initializing params of a forward ensemble vector model (size={})",
-            fevme.len()
-        );
+        let start = Instant::now();
 
         fevme
             .ensbl
@@ -239,6 +232,12 @@ where
                 Ok(())
             })?;
 
+        debug!(
+            "fevm_initialize_params_only: {:2.2}M evaluations in {:.2} sec",
+            (fevme.len()) as Fp / 1e6,
+            start.elapsed().as_millis() as Fp / 1e3
+        );
+
         Ok(())
     }
 
@@ -248,10 +247,7 @@ where
         scconf: &[ScConf],
         fevme: &mut FEVMEnsbl<S, P>,
     ) -> Result<(), FEVModelError> {
-        debug!(
-            "initializing states of a forward ensemble vector model (size={})",
-            fevme.len()
-        );
+        let start = Instant::now();
 
         fevme
             .ensbl
@@ -267,6 +263,12 @@ where
 
                 Ok(())
             })?;
+
+        debug!(
+            "fevm_initialize_states_only: {:2.2}M evaluations in {:.2} sec",
+            (fevme.len()) as Fp / 1e6,
+            start.elapsed().as_millis() as Fp / 1e3
+        );
 
         Ok(())
     }
@@ -286,6 +288,7 @@ where
         fevme: &mut FEVMEnsbl<S, P>,
         output: &mut ModelObserArray<N>,
     ) -> Result<(), FEVModelError> {
+        let start = Instant::now();
         let mut timer = 0.0;
 
         if scconf.len() != output.shape()[0] {
@@ -303,12 +306,6 @@ where
                 output.shape()[1],
             )));
         }
-
-        debug!(
-            "performing an forward ensemble vector model simulation (size={} x {})",
-            scconf.len(),
-            fevme.len()
-        );
 
         zip_eq(scconf.iter(), output.outer_iter_mut()).try_for_each(
             |(scconf_i, mut output_t)| {
@@ -349,6 +346,12 @@ where
             },
         )?;
 
+        debug!(
+            "fevm_simulate: {:2.2}M evaluations in {:.2} sec",
+            (scconf.len() * fevme.len()) as Fp / 1e6,
+            start.elapsed().as_millis() as Fp / 1e3
+        );
+
         Ok(())
     }
 
@@ -363,5 +366,3 @@ where
     /// Returns a reference to the underlying model prior.
     fn model_prior(&self) -> impl PDF<P>;
 }
-
-pub trait ForwardEnsembleVectorModelPDF {}

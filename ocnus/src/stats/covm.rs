@@ -2,10 +2,7 @@ use crate::{stats::StatsError, Fp, PMatrix, FP_EPSILON};
 use derive_more::From;
 use itertools::zip_eq;
 use log::error;
-use nalgebra::{
-    allocator::{Allocator, Reallocator},
-    DVector, DefaultAllocator, Dim, DimName, Dyn, Matrix, OMatrix, StorageMut, VecStorage,
-};
+use nalgebra::{Const, DMatrix, DVector};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -19,33 +16,23 @@ use std::{
 /// These associated matrices are computed from a modified covariance matrix where any
 /// zero-columns/rows are removed to handle constant model parameters.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CovMatrix<D>
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D, D>,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
-{
+pub struct CovMatrix {
     /// The lower triangular matrix result the Cholesky decomposition.
-    cholesky: OMatrix<Fp, D, D>,
+    cholesky: DMatrix<Fp>,
 
     /// The matrix determinant.
     determinant: Fp,
 
     /// The inverse of the covariance matrix.
-    inverse: OMatrix<Fp, D, D>,
+    inverse: DMatrix<Fp>,
 
     /// The covariance matrix itself.
-    matrix: OMatrix<Fp, D, D>,
+    matrix: DMatrix<Fp>,
 }
 
-impl<D> CovMatrix<D>
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D, D>,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
-{
+impl CovMatrix {
     /// Returns the lower triangular matrix of the Cholesky decomposition.
-    pub fn cholesky_ltm(&self) -> &OMatrix<Fp, D, D> {
+    pub fn cholesky_ltm(&self) -> &DMatrix<Fp> {
         &self.cholesky
     }
 
@@ -55,7 +42,7 @@ where
     }
 
     /// Returns the inverse of the covariance matrix.
-    pub fn inverse(&self) -> &OMatrix<Fp, D, D> {
+    pub fn inverse(&self) -> &DMatrix<Fp> {
         &self.inverse
     }
 
@@ -93,7 +80,7 @@ where
     }
 
     /// Create a new [`CovMatrix`] object from a positive-definite matrix.
-    pub fn from_matrix(matrix: OMatrix<Fp, D, D>) -> Result<Self, StatsError> {
+    pub fn from_matrix(matrix: DMatrix<Fp>) -> Result<Self, StatsError> {
         let (cholesky, determinant) = match matrix.clone().cholesky() {
             Some(value) => (value.l(), value.determinant()),
             None => {
@@ -132,21 +119,16 @@ where
     /// Create a new [`CovMatrix`] object from an array of D-dimensional parameter vectors.
     ///
     /// This function properly handles constant parameters (resulting in empty columns/rows) and can also optionally use weights.
-    pub fn from_particles(
-        particles: &PMatrix<D>,
+    pub fn from_particles<const P: usize>(
+        particles: &PMatrix<Const<P>>,
         optional_weights: Option<&Vec<Fp>>,
-    ) -> Result<CovMatrix<D>, StatsError>
-    where
-        D: DimName,
-        DefaultAllocator: Allocator<D>
-            + Allocator<D, D, Buffer<Fp> = VecStorage<Fp, D, D>>
-            + Reallocator<Fp, D, D, D, Dyn>,
-        VecStorage<Fp, D, D>: StorageMut<Fp, D, D>,
-    {
-        let mut matrix = Matrix::<Fp, D, D, VecStorage<Fp, D, D>>::from_iterator(
-            (0..(D::USIZE.pow(2))).map(|idx| {
-                let jdx = idx / D::USIZE;
-                let kdx = idx % D::USIZE;
+    ) -> Result<CovMatrix, StatsError> {
+        let mut matrix = DMatrix::from_iterator(
+            P,
+            P,
+            (0..(P.pow(2))).map(|idx| {
+                let jdx = idx / P;
+                let kdx = idx % P;
 
                 if jdx <= kdx {
                     let x = particles.row(jdx);
@@ -162,8 +144,7 @@ where
             }),
         );
 
-        matrix += matrix.transpose()
-            - Matrix::<Fp, D, D, VecStorage<Fp, D, D>>::from_diagonal(&matrix.diagonal());
+        matrix += matrix.transpose() - DMatrix::<Fp>::from_diagonal(&matrix.diagonal());
 
         // Remove vanishing columns/rows.
         let remove_indices = (0..matrix.nrows())
@@ -220,28 +201,17 @@ where
             cholesky_rec = cholesky_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
         }
 
-        let inverse_proper =
-            Matrix::<Fp, D, D, VecStorage<Fp, D, D>>::from_iterator(inverse_rec.iter().cloned());
-
-        let cholesky_proper: Matrix<f32, D, D, VecStorage<f32, D, D>> =
-            Matrix::<Fp, D, D, VecStorage<Fp, D, D>>::from_iterator(cholesky_rec.iter().cloned());
-
         Ok(Self {
             matrix,
-            inverse: inverse_proper,
-            cholesky: cholesky_proper,
+            inverse: inverse_rec,
+            cholesky: cholesky_rec,
             determinant,
         })
     }
 }
 
-impl<D> Mul<Fp> for CovMatrix<D>
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D, D>,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
-{
-    type Output = CovMatrix<D>;
+impl Mul<Fp> for CovMatrix {
+    type Output = CovMatrix;
 
     fn mul(self, rhs: Fp) -> Self::Output {
         let dim = self.matrix.ncols() as i32;
@@ -255,14 +225,9 @@ where
     }
 }
 
-impl<D> Mul<CovMatrix<D>> for Fp
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D, D>,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
-{
-    type Output = CovMatrix<D>;
-    fn mul(self, rhs: CovMatrix<D>) -> Self::Output {
+impl Mul<CovMatrix> for Fp {
+    type Output = CovMatrix;
+    fn mul(self, rhs: CovMatrix) -> Self::Output {
         let dim = rhs.matrix.ncols() as i32;
 
         Self::Output {
@@ -274,12 +239,7 @@ where
     }
 }
 
-impl<D> MulAssign<Fp> for CovMatrix<D>
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D, D>,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
-{
+impl MulAssign<Fp> for CovMatrix {
     fn mul_assign(&mut self, rhs: Fp) {
         let dim = self.matrix.ncols() as i32;
 
@@ -290,15 +250,10 @@ where
     }
 }
 
-impl<D> TryFrom<OMatrix<Fp, D, D>> for CovMatrix<D>
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D, D>,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<Fp>: for<'a> Deserialize<'a> + Serialize,
-{
+impl TryFrom<DMatrix<Fp>> for CovMatrix {
     type Error = StatsError;
 
-    fn try_from(value: OMatrix<Fp, D, D>) -> Result<Self, Self::Error> {
+    fn try_from(value: DMatrix<Fp>) -> Result<Self, Self::Error> {
         Self::from_matrix(value)
     }
 }

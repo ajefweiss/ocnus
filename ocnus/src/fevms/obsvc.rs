@@ -6,54 +6,87 @@ use num_traits::Float;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     fmt::{Display, Formatter},
     ops::{Add, Mul, Sub},
 };
 
 /// Generic N-dimensional observation array.
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, Serialize)]
-pub struct ModelObserArray<const N: usize>(pub Array2<Option<ModelObserVec<N>>>);
+pub struct ModelObserArray<const N: usize>(Array2<Option<ModelObserVec<N>>>);
 
 impl<const N: usize> ModelObserArray<N> {
-    /// Computes the column-wise maximum RMSE value over multiple spacecraft observations.
-    pub fn rmse_maximum(&self, scobs: &ScObs<ModelObserVec<N>>, flags: Option<&[bool]>) -> Vec<Fp> {
+    /// Create a new [`ModelObserArray`] object.
+    pub fn new(scobs: &ScObs<ModelObserVec<N>>, size: usize) -> Self {
+        Self(Array2::<Option<ModelObserVec<N>>>::default((
+            scobs.len(),
+            size,
+        )))
+    }
+
+    /// Computes the column-wise maximum MSE value over multiple spacecraft observations.
+    pub fn mse_maximum(
+        &self,
+        scobs: &ScObs<ModelObserVec<N>>,
+        optional_flags: Option<&[bool]>,
+    ) -> Vec<Fp> {
         let mut baseline = vec![0.0; scobs.nseries()];
 
         scobs.iter().for_each(|(_, obs, idx)| {
             if let Some(obsvec) = obs {
-                baseline[idx] += obsvec.rmse(&ModelObserVec::zeros())
+                baseline[idx] += obsvec.mse(&ModelObserVec::zeros())
             }
         });
 
-        match flags {
-            Some(flags) => {
-                let mut rmse_by_sc = vec![vec![[0.0, 0.0]; scobs.nseries()]; self.ncols()];
+        let flags = match optional_flags {
+            Some(value) => value,
+            None => &vec![true; self.ncols()],
+        };
 
-                rmse_by_sc
-                    .par_iter_mut()
-                    .zip(self.0.axis_iter(Axis(1)).into_par_iter())
-                    .zip(flags)
-                    .chunks(64)
-                    .for_each(|mut chunks| {
-                        chunks.iter_mut().for_each(|((rmse, obs), flag)| {
-                            if *flag {
-                                zip_eq(scobs.iter(), obs.iter()).for_each(
-                                    |((_, opt_refv, idx), opt_obsv)| match (opt_refv, opt_obsv) {
-                                        (Some(refv), Some(obsv)) => {
-                                            rmse[idx][0] += refv.mse(&obsv);
-                                            rmse[idx][1] += 1.0;
-                                        }
-                                        (None, None) => (),
-                                        _ => rmse[idx][0] = Fp::NAN,
-                                    },
-                                );
+        {
+            let mut mse_by_sc = vec![vec![[0.0, 0.0]; scobs.nseries()]; self.ncols()];
+
+            mse_by_sc
+                .par_iter_mut()
+                .zip(self.0.axis_iter(Axis(1)).into_par_iter())
+                .zip(flags)
+                .chunks(64)
+                .for_each(|mut chunks| {
+                    chunks.iter_mut().for_each(|((mse, obs), flag)| {
+                        if **flag {
+                            zip_eq(scobs.iter(), obs.iter()).for_each(
+                                |((_, opt_refv, idx), opt_obsv)| match (opt_refv, opt_obsv) {
+                                    (Some(refv), Some(obsv)) => {
+                                        mse[idx][0] += refv.mse(obsv);
+                                        mse[idx][1] += 1.0;
+                                    }
+                                    (None, None) => (),
+                                    _ => mse[idx][0] = Fp::NAN,
+                                },
+                            );
+                        }
+                    })
+                });
+
+            mse_by_sc
+                .iter()
+                .map(|mses| {
+                    mses.iter()
+                        .zip(baseline.iter())
+                        .fold(Fp::INFINITY, |acc, (next, base)| {
+                            match next[0].partial_cmp(&acc) {
+                                Some(ord) => {
+                                    if ord == Ordering::Less {
+                                        next[0] / base
+                                    } else {
+                                        acc
+                                    }
+                                }
+                                None => acc,
                             }
                         })
-                    });
-
-                Vec::new()
-            }
-            None => Vec::new(),
+                })
+                .collect::<Vec<Fp>>()
         }
     }
 }
