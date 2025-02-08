@@ -57,13 +57,7 @@ where
     S: OcnusState,
 {
     // Creates a [`MultivariatePDF`] object from the underlying FEVM ensemble.
-    pub fn as_mvpdf(&self, range: [(Fp, Fp); P]) -> Result<MultivariatePDF<P>, FEVModelError>
-    where
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
+    pub fn as_mvpdf(&self, range: [(Fp, Fp); P]) -> Result<MultivariatePDF<P>, FEVModelError> {
         let covm = match CovMatrix::<Const<P>>::from_particles(&self.ensbl, Some(&self.weights)) {
             Ok(result) => result,
             Err(err) => return Err(FEVModelError::Stats(err)),
@@ -73,13 +67,7 @@ where
     }
 
     /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
-    pub fn as_ptpdf(self, range: [(Fp, Fp); P]) -> Result<ParticlePDF<P>, FEVModelError>
-    where
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
+    pub fn as_ptpdf(self, range: [(Fp, Fp); P]) -> Result<ParticlePDF<P>, FEVModelError> {
         match ParticlePDF::new(None, self.ensbl, range, self.weights) {
             Ok(result) => Ok(result),
             Err(err) => Err(FEVModelError::Stats(err)),
@@ -87,13 +75,7 @@ where
     }
 
     /// Creates a [`ParticleRefPDF`] object from the underlying FEVM ensemble.
-    pub fn as_ptpdf_ref(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, FEVModelError>
-    where
-        DefaultAllocator: Allocator<Const<P>>
-            + Allocator<Const<P>, Const<P>, Buffer<Fp> = VecStorage<Fp, Const<P>, Const<P>>>
-            + Reallocator<Fp, Const<P>, Const<P>, Const<P>, Dyn>,
-        VecStorage<Fp, Const<P>, Const<P>>: StorageMut<Fp, Const<P>, Const<P>>,
-    {
+    pub fn as_ptpdf_ref(&self, range: [(Fp, Fp); P]) -> Result<ParticleRefPDF<P>, FEVModelError> {
         match ParticleRefPDF::new(None, &self.ensbl, range, &self.weights) {
             Ok(result) => Ok(result),
             Err(err) => Err(FEVModelError::Stats(err)),
