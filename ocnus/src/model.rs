@@ -1,7 +1,19 @@
 use nalgebra::SVectorView;
 use serde::Serialize;
+use thiserror::Error;
 
-/// A trait that must be implemented for any type that acts as a model within the ocnus framework.
+use crate::{fevms::FEVMError, stats::OcnusStatsError};
+
+/// Generic error type returned by types that implement [`OcnusModel`].
+#[derive(Debug, Error)]
+pub enum OcnusError {
+    #[error(transparent)]
+    FEVM(FEVMError),
+    #[error(transparent)]
+    Stats(#[from] OcnusStatsError),
+}
+
+/// A trait that must be implemented for any type that acts as a generic model.
 ///
 /// This trait, by itself, does not provide much useful functionality and only provides access
 /// to the model parameters and the valid parameter range.
@@ -29,7 +41,7 @@ pub trait OcnusModel<const P: usize> {
     fn param_step_sizes(&self) -> [f32; P] {
         Self::PARAM_RANGES
             .iter()
-            .map(|(min, max)| 4.0 * (max - min) * f32::EPSILON)
+            .map(|(min, max)| 16.0 * (max - min) * f32::EPSILON)
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap()

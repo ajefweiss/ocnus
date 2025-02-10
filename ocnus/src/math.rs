@@ -6,26 +6,26 @@ pub fn bessel_jn(x: f32, k: usize) -> f32 {
     match x.total_cmp(&0.0) {
         Ordering::Equal => (matches!(k, 0) as usize) as f32,
         _ => {
-            let result = (1..11).try_fold((x / 2.0).powi(k as i32), |sum, idx| {
+            let sum = (1..11).try_fold((x / 2.0).powi(k as i32), |acc, idx| {
                 let next = i32::pow(-1, idx as u32) as f32 * (x / 2.0).powi((2 * idx + k) as i32)
                     / (factorial(idx).unwrap() * factorial(idx + k).unwrap()) as f32;
 
                 match next.partial_cmp(&0.0).unwrap() {
                     std::cmp::Ordering::Greater => match next.partial_cmp(&f32::EPSILON).unwrap() {
-                        Ordering::Less => Err(sum + next),
-                        _ => Ok(sum + next),
+                        Ordering::Less => Err(acc + next),
+                        _ => Ok(acc + next),
                     },
                     std::cmp::Ordering::Less => match next.partial_cmp(&(-f32::EPSILON)).unwrap() {
-                        Ordering::Greater => Err(sum + next),
-                        _ => Ok(sum + next),
+                        Ordering::Greater => Err(acc + next),
+                        _ => Ok(acc + next),
                     },
-                    std::cmp::Ordering::Equal => Err(sum),
+                    std::cmp::Ordering::Equal => Err(acc),
                 }
             });
 
-            match result {
-                Ok(value) => value,
-                Err(value) => value,
+            match sum {
+                Ok(result) => result,
+                Err(result) => result,
             }
         }
     }
@@ -106,7 +106,7 @@ mod tests {
     fn test_quaternions() {
         assert!(quaternion_xyz(0.0, 0.0, 0.0) == UnitQuaternion::identity());
 
-        let rad90 = 90.0_f64.to_radians();
+        let rad90 = 90.0_f32.to_radians();
 
         assert!(
             quaternion_xyz(rad90, 0.0, 0.0)

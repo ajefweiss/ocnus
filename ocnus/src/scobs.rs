@@ -1,4 +1,5 @@
 use crate::OcnusObser;
+use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -7,7 +8,7 @@ use std::{
     ops::{Add, AddAssign},
 };
 
-/// The configuration of a single spacecraft observation as used in [`ScObs`].
+/// The configuration of a single spacecraft observation, as used in [`ScObs`].
 ///
 /// The following variants are currently available and implemented:
 /// - [`ScConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate system.
@@ -16,9 +17,9 @@ use std::{
 #[serde(tag = "type", content = "content")]
 pub enum ScConf {
     /// Timestamp & Distance from the Sun.
-    Distance(f64),
+    Distance(f32),
     /// Timestamp & Position in space in an arbitrary Solar-centric coordiante system.
-    Position([f64; 3]),
+    Position([f32; 3]),
 }
 
 /// Represents a single spacecraft observation in time with an optional observation.
@@ -27,25 +28,49 @@ pub struct ScObs<O>
 where
     O: OcnusObser,
 {
-    timestamp: f64,
+    timestamp: f32,
     configuration: ScConf,
     observation: Option<O>,
 }
 
-/// Represents a time series of spacecraft observations tied
-/// to a specific generic observation type that implements [`OcnusObser`].
+impl<O> ScObs<O>
+where
+    O: OcnusObser,
+{
+    /// Acces the configuration field.
+    pub fn configuration(&self) -> &ScConf {
+        &self.configuration
+    }
+
+    /// Create a new [`ScObs`].
+    pub fn new(timestamp: f32, configuration: ScConf, observation: Option<O>) -> Self {
+        Self {
+            timestamp,
+            configuration,
+            observation,
+        }
+    }
+
+    /// Acces the timestamp field.
+    pub fn timestamp(&self) -> f32 {
+        self.timestamp
+    }
+}
+
+/// Represents a time series of spacecraft observations with optional observations.
 ///
 /// [`ScObsSeries`] has, among others, three important implementations:
 /// - [`ScObsSeries::add`] : Allows composition of two [`ScObsSeries`] objects.
 /// - [`ScObsSeries::sort_by_timestamp`] : Sorts the underlying vector of [`ScObs`] objets by their timestamps.
 /// - [`ScObsSeries::split`] : The reciprocal of one or multiple [`ScObs::add`] calls.
 ///   Calling this function consumes a composite [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, IntoIterator, Serialize)]
 pub struct ScObsSeries<O>
 where
     O: OcnusObser,
 {
     /// Vector of spacecraft observations.
+    #[into_iterator(ref)]
     scobs: Vec<ScObs<O>>,
 
     /// The sorting indices used to recover the original [`ScObsSeries`] objects from a composite.
@@ -60,7 +85,7 @@ where
     ///
     /// This value corresponds to the length of the vector returned by [`ScObs::sort_by_time`].
     pub fn count_series(&self) -> usize {
-        self.sorti.iter().fold(0, |acc, value| max(acc, *value)) + 1
+        self.sorti.iter().fold(0, |acc, next| max(acc, *next)) + 1
     }
 
     /// Create a [`ScObsSeries`] from an iterator over `ScObs`.
@@ -155,7 +180,7 @@ where
         scobs.extend(rhs.scobs);
 
         // Calculate the maximum existing spacecraft index within self.
-        let idx_offset = self.sorti.iter().fold(0, |maxv, &v| max(maxv, v)) + 1;
+        let idx_offset = self.sorti.iter().fold(0, |acc: usize, &v| max(acc, v)) + 1;
 
         let mut sorti = self.sorti;
 
@@ -185,7 +210,7 @@ where
         self.scobs.extend(rhs.scobs);
 
         // Calculate the maximum existing spacecraft index within self.
-        let idx_offset = self.sorti.iter().fold(0, |maxv, &v| max(maxv, v)) + 1;
+        let idx_offset = self.sorti.iter().fold(0, |acc, &v| max(acc, v)) + 1;
 
         // Add index_offset to all indices in rhs.
         self.sorti.extend(

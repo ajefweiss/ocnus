@@ -1,22 +1,22 @@
 use core::f32;
 use itertools::zip_eq;
 use log::error;
-use nalgebra::{Const, DMatrix, DVector, Dyn, Matrix, MatrixView};
+use nalgebra::{Const, DMatrix, DVector, Dyn, Matrix, VecStorage, ViewStorage};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     ops::{Mul, MulAssign},
 };
 
-/// A data structure for holding a dynamically or statically sized covariance matrix.
+/// A data structure for holding a covariance matrix.
 ///
 /// This struct not only stores the covariance matrix itself, but also holds the lower triangular
 /// matrix result from the Cholesky decomposition, the determinant and the covariance inverse.
-/// These associated matrices are computed from a modified covariance matrix where any
-/// zero-columns/rows are modified to handle constant model parameters.
+/// These associated matrices are computed from a modified covariance matrix to properly account
+/// for constant model parameters.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CovMatrix {
-    /// The lower triangular matrix result the Cholesky decomposition.
+    /// The lower triangular matrix result from the Cholesky decomposition.
     cholesky_ltm: DMatrix<f32>,
 
     /// The matrix determinant.
@@ -30,32 +30,43 @@ pub struct CovMatrix {
 }
 
 impl CovMatrix {
-    /// Returns the lower triangular matrix of the Cholesky decomposition.
+    /// Returns the lower triangular matrix from the Cholesky decomposition.
+    ///
+    /// This function is a getter function and performs no calculations.
     pub fn cholesky_ltm(&self) -> &DMatrix<f32> {
         &self.cholesky_ltm
     }
 
     /// Returns the determinant of the covariance matrix.
+    ///
+    /// This function is a getter function and performs no calculations.
     pub fn determinant(&self) -> f32 {
         self.determinant
     }
 
     /// Returns the inverse of the covariance matrix.
+    ///
+    /// This function is a getter function and performs no calculations.
     pub fn inverse(&self) -> &DMatrix<f32> {
         &self.inverse
     }
 
-    /// Compute the multivariate likelihood from two vectors with of length k x D.
+    /// Compute the multivariate likelihood from two iterators over `f32`.
+    /// The length of both iterators must be equal (panic) and a multiple
+    /// of the dimension of the covariance matrix.
     pub fn multivarate_likelihood(
         &self,
         x: impl IntoIterator<Item = f32>,
         mu: impl IntoIterator<Item = f32>,
-    ) -> f32 {
+    ) -> Option<f32> {
         let xminmu = DVector::from(zip_eq(x, mu).map(|(i, j)| i - j).collect::<Vec<f32>>());
         let ndim = xminmu.len() / self.ndim();
 
-        let mut lh =
-            (self.determinant.ln() + ndim as f32 * std::f64::consts::PI as f32 * 2.0) / 2.0;
+        if xminmu.len() % self.ndim() != 0 {
+            return None;
+        }
+
+        let mut lh = (self.determinant.ln() + ndim as f32 * std::f32::consts::PI * 2.0) / 2.0;
 
         for idx in 0..ndim {
             let view = xminmu.rows_with_step(idx, self.inverse.nrows(), ndim - 1);
@@ -66,10 +77,10 @@ impl CovMatrix {
                 / 2.0;
         }
 
-        lh
+        Some(lh)
     }
 
-    /// Returns the dimensionality of the covariance matrix.
+    /// Returns the number of dimensions of the covariance matrix.
     pub fn ndim(&self) -> usize {
         self.matrix.nrows()
     }
@@ -77,7 +88,7 @@ impl CovMatrix {
     /// Create a [`CovMatrix`] from a positive-definite matrix.
     pub fn from_matrix(matrix: DMatrix<f32>) -> Option<Self> {
         let (cholesky_ltm, determinant) = match matrix.clone().cholesky() {
-            Some(value) => (value.l(), value.determinant()),
+            Some(result) => (result.l(), result.determinant()),
             None => {
                 error!("failed to perform a cholesky decomposition: {}", matrix);
                 return None;
@@ -96,7 +107,7 @@ impl CovMatrix {
         }
 
         let inverse = match matrix.clone().try_inverse() {
-            Some(value) => value,
+            Some(result) => result,
             None => {
                 error!("failed to invert matrix: {}", matrix);
                 return None;
@@ -113,9 +124,9 @@ impl CovMatrix {
 
     /// Create a [`CovMatrix`] from an array of P-dimensional parameter vectors.
     ///
-    /// This function properly handles constant parameters (resulting in empty columns/rows) and can also optionally use weights.
+    /// This function properly handles constant parameters (resulting in empty columns/rows) and can optionally also use weights.
     pub fn from_particles<const P: usize>(
-        particles: &Matrix<f32, Const<P>, Dyn, nalgebra::VecStorage<f32, Const<P>, Dyn>>,
+        particles: &Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>,
         optional_weights: Option<&[f32]>,
     ) -> Option<CovMatrix> {
         let mut matrix = DMatrix::from_iterator(
@@ -139,31 +150,46 @@ impl CovMatrix {
             }),
         );
 
+        // Fill up the other side of the matrix.
         matrix += matrix.transpose() - DMatrix::<f32>::from_diagonal(&matrix.diagonal());
 
-        // Remove vanishing columns/rows.
-        let remove_indices = (0..matrix.nrows())
+        // Detect columns/rows that need to be modified using alternate sums.
+        // Normally we would select any columns/rows with zero variance
+        // but floating-point arithmetic makes this unreliable.
+        let zero_variance_indices = (0..matrix.nrows())
             .filter(|idx| {
-                matches!(
-                    matrix[(*idx, *idx)]
-                        .partial_cmp(&(512.0 * f32::EPSILON))
-                        .expect("matrix has NaN values"),
-                    Ordering::Less
-                )
+                let row = particles.row(*idx);
+
+                let pos = &row.columns_with_step(0, particles.ncols() / 2, 1);
+                let neg: &Matrix<
+                    f32,
+                    Const<1>,
+                    Dyn,
+                    ViewStorage<'_, f32, Const<1>, Dyn, Const<1>, Dyn>,
+                > = &row.columns_with_step(1, particles.ncols() / 2, 1);
+
+                let altsum = (pos - neg).iter().sum::<f32>() / (particles.ncols() / 2) as f32;
+
+                if altsum.abs() < f32::EPSILON {
+                    matrix
+                        .column_mut(*idx)
+                        .iter_mut()
+                        .for_each(|cov| *cov = 0.0);
+                    matrix.row_mut(*idx).iter_mut().for_each(|cov| *cov = 0.0);
+
+                    matrix[(*idx, *idx)] = 1.0;
+
+                    true
+                } else {
+                    false
+                }
             })
             .collect::<Vec<usize>>();
 
-        let matrix_copy = matrix.clone();
-
-        // Remove the empty columns and rows.
-        let matrix_red = matrix_copy
-            .remove_columns_at(&remove_indices)
-            .remove_rows_at(&remove_indices);
-
-        let (cholesky_red, determinant) = match matrix_red.clone().cholesky() {
-            Some(value) => (value.l(), value.determinant()),
+        let (mut cholesky_ltm, determinant) = match matrix.clone().cholesky() {
+            Some(result) => (result.l(), result.determinant()),
             None => {
-                error!("failed to perform a cholesky decomposition: {}", matrix_red);
+                error!("failed to perform a cholesky decomposition: {}", matrix);
                 return None;
             }
         };
@@ -174,32 +200,30 @@ impl CovMatrix {
         ) {
             error!(
                 "matrix determinant is below precision threshold: {}",
-                matrix_red
+                matrix
             );
             return None;
         }
 
-        let inverse_red = match matrix_red.clone().try_inverse() {
-            Some(value) => value,
+        let mut inverse = match matrix.clone().try_inverse() {
+            Some(result) => result,
             None => {
-                error!("failed to invert matrix: {}", matrix_red);
+                error!("failed to invert matrix: {}", matrix);
                 return None;
             }
         };
 
-        let mut inverse_rec = inverse_red.clone();
-        let mut cholesky_rec = cholesky_red.clone();
-
-        // Re-insert empty columns/rows.
-        for idx in remove_indices.iter() {
-            inverse_rec = inverse_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
-            cholesky_rec = cholesky_rec.insert_column(*idx, 0.0).insert_row(*idx, 0.0);
+        // Reset zero variance columns/rows to zero.
+        for idx in zero_variance_indices.iter() {
+            matrix[(*idx, *idx)] = 0.0;
+            inverse[(*idx, *idx)] = 0.0;
+            cholesky_ltm[(*idx, *idx)] = 0.0;
         }
 
         Some(Self {
             matrix,
-            inverse: inverse_rec,
-            cholesky_ltm: cholesky_rec,
+            inverse,
+            cholesky_ltm,
             determinant,
         })
     }
@@ -212,7 +236,7 @@ impl Mul<f32> for CovMatrix {
         let dim = self.matrix.ncols() as i32;
 
         Self::Output {
-            cholesky: self.cholesky_ltm * rhs.sqrt(),
+            cholesky_ltm: self.cholesky_ltm * rhs.sqrt(),
             determinant: self.determinant * rhs.powi(dim),
             inverse: self.inverse / rhs,
             matrix: self.matrix * rhs,
@@ -226,7 +250,7 @@ impl Mul<CovMatrix> for f32 {
         let dim = rhs.matrix.ncols() as i32;
 
         Self::Output {
-            cholesky: rhs.cholesky * self.sqrt(),
+            cholesky_ltm: rhs.cholesky_ltm * self.sqrt(),
             determinant: rhs.determinant * self.powi(dim),
             inverse: rhs.inverse / self,
             matrix: rhs.matrix * self,
@@ -257,6 +281,8 @@ impl TryFrom<DMatrix<f32>> for CovMatrix {
 }
 
 /// Computes the unbiased covariance over two slices.
+///
+/// The length of both iterators must be equal (panic).
 pub fn covariance<'a, I>(x: I, y: I) -> f32
 where
     I: IntoIterator<Item = &'a f32>,
@@ -265,10 +291,10 @@ where
     let x_iter = x.into_iter();
     let y_iter = y.into_iter();
 
-    let mu_x = x_iter.clone().sum::<f32>();
-    let mu_y = x_iter.clone().sum::<f32>();
-
     let length = x_iter.clone().fold(0, |acc, _| acc + 1);
+
+    let mu_x = x_iter.clone().sum::<f32>() / length as f32;
+    let mu_y = x_iter.clone().sum::<f32>() / length as f32;
 
     zip_eq(x_iter, y_iter)
         .map(|(val_x, val_y)| (mu_x - val_x) * (mu_y - val_y))
@@ -276,13 +302,15 @@ where
         / (length - 1) as f32
 }
 
-/// Computes the unbiased covariance over two slices.
-pub fn covariance_with_weights<'a, I1, I2>(x: I1, y: I1, w: I2) -> f32
+/// Computes the unbiased covariance over two slices with weights.
+///
+/// The length of all three iterators must be equal (panic).
+pub fn covariance_with_weights<'a, IV, IW>(x: IV, y: IV, w: IW) -> f32
 where
-    I1: IntoIterator<Item = &'a f32>,
-    I2: IntoIterator<Item = &'a f32>,
-    <I1 as IntoIterator>::IntoIter: Clone,
-    <I2 as IntoIterator>::IntoIter: Clone,
+    IV: IntoIterator<Item = &'a f32>,
+    IW: IntoIterator<Item = &'a f32>,
+    <IV as IntoIterator>::IntoIter: Clone,
+    <IW as IntoIterator>::IntoIter: Clone,
 {
     let x_iter = x.into_iter();
     let y_iter = y.into_iter();
@@ -297,6 +325,7 @@ where
         .map(|(val_x, val_w)| val_x * val_w)
         .sum::<f32>()
         / wsum;
+
     let mu_y = zip_eq(y_iter.clone(), w_iter.clone())
         .map(|(val_y, val_w)| val_y * val_w)
         .sum::<f32>()
@@ -306,4 +335,61 @@ where
         .map(|(val_x, (val_y, val_w))| val_w * (mu_x - val_x) * (mu_y - val_y))
         .sum::<f32>()
         / wfac
+}
+
+#[cfg(test)]
+mod tests {
+    use nalgebra::{VecStorage, U3};
+    use rand::{Rng, SeedableRng};
+    use rand_distr::Uniform;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    use super::*;
+
+    #[test]
+    fn test_covariance() {
+        assert!(
+            covariance(
+                &[10.0, 34.0, 23.0, 54.0, 9.0],
+                &[4.0, 5.0, 11.0, 15.0, 20.0]
+            ) == 5.75
+        );
+
+        assert!(
+            (covariance_with_weights(
+                &[10.0, 34.0, 23.0, 54.0, 9.0],
+                &[4.0, 5.0, 11.0, 15.0, 20.0],
+                &[1.0, 0.8, 1.1, 1.3, 0.9]
+            ) - 19.523237)
+                .abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_covmat() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let uniform = Uniform::new(-0.5, 0.5).unwrap();
+
+        let array = Matrix::<f32, U3, Dyn, VecStorage<f32, U3, Dyn>>::from_iterator(
+            10,
+            (0..30).map(|idx| {
+                if idx % 3 == 1 {
+                    0.0
+                } else {
+                    (idx % 3) as f32 + rng.sample(uniform)
+                }
+            }),
+        );
+
+        let covm = CovMatrix::from_particles(&array, None).unwrap();
+
+        assert!((covm.cholesky_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
+        assert!((covm.cholesky_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);
+
+        assert!((covm.inverse[(0, 0)] - 6.915894).abs() < f32::EPSILON);
+        assert!((covm.inverse[(2, 0)] + 4.5933948).abs() < f32::EPSILON);
+
+        assert!((covm.determinant() - 0.0069507807).abs() < f32::EPSILON);
+    }
 }

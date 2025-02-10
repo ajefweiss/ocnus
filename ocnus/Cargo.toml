@@ -19,7 +19,6 @@ env_logger = "*"
 itertools = "*"
 log = "*"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
-ndarray = { version = "*", features = ["rayon", "serde"] }
 num-traits = "*"
 rand = "*"
 rand_chacha = "*"
