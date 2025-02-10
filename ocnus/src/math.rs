@@ -1,22 +1,21 @@
-use crate::{Fp, FP_EPSILON};
 use nalgebra::{RealField, Unit, UnitQuaternion, Vector3};
 use std::cmp::Ordering;
 
 /// Bessel function of the first kind.
-pub fn bessel_jn(x: Fp, k: usize) -> Fp {
+pub fn bessel_jn(x: f32, k: usize) -> f32 {
     match x.total_cmp(&0.0) {
-        Ordering::Equal => (matches!(k, 0) as usize) as Fp,
+        Ordering::Equal => (matches!(k, 0) as usize) as f32,
         _ => {
             let result = (1..11).try_fold((x / 2.0).powi(k as i32), |sum, idx| {
-                let next = i32::pow(-1, idx as u32) as Fp * (x / 2.0).powi((2 * idx + k) as i32)
-                    / (factorial(idx).unwrap() * factorial(idx + k).unwrap()) as Fp;
+                let next = i32::pow(-1, idx as u32) as f32 * (x / 2.0).powi((2 * idx + k) as i32)
+                    / (factorial(idx).unwrap() * factorial(idx + k).unwrap()) as f32;
 
                 match next.partial_cmp(&0.0).unwrap() {
-                    std::cmp::Ordering::Greater => match next.partial_cmp(&FP_EPSILON).unwrap() {
+                    std::cmp::Ordering::Greater => match next.partial_cmp(&f32::EPSILON).unwrap() {
                         Ordering::Less => Err(sum + next),
                         _ => Ok(sum + next),
                     },
-                    std::cmp::Ordering::Less => match next.partial_cmp(&(-FP_EPSILON)).unwrap() {
+                    std::cmp::Ordering::Less => match next.partial_cmp(&(-f32::EPSILON)).unwrap() {
                         Ordering::Greater => Err(sum + next),
                         _ => Ok(sum + next),
                     },

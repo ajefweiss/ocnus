@@ -1,4 +1,4 @@
-use crate::{Fp, OcnusObser};
+use crate::OcnusObser;
 use itertools::zip_eq;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -9,157 +9,127 @@ use std::{
 
 /// The configuration of a single spacecraft observation as used in [`ScObs`].
 ///
-/// The following variants are currently implemented:
-/// - [`ScConf::TimeDistance`] : Time & (x)-position of the spacecraft in a heliocentric coordinate system.
-/// - [`ScConf::TimePosition`] : Time & (x,y,z)-position of the spacecraft in a heliocentric coordinate system.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+/// The following variants are currently available and implemented:
+/// - [`ScConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate system.
+/// - [`ScConf::Position`] : (x,y,z) - position of the spacecraft in a heliocentric coordinate system.
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "content")]
 pub enum ScConf {
     /// Timestamp & Distance from the Sun.
-    TimeDistance(Fp, Fp),
+    Distance(f64),
     /// Timestamp & Position in space in an arbitrary Solar-centric coordiante system.
-    TimePosition(Fp, [Fp; 3]),
+    Position([f64; 3]),
 }
 
-impl ScConf {
-    pub fn get_timestamp(&self) -> Fp {
-        match self {
-            ScConf::TimeDistance(timestamp, ..) => *timestamp,
-            ScConf::TimePosition(timestamp, ..) => *timestamp,
-        }
-    }
+/// Represents a single spacecraft observation in time with an optional observation.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ScObs<O>
+where
+    O: OcnusObser,
+{
+    timestamp: f64,
+    configuration: ScConf,
+    observation: Option<O>,
 }
 
 /// Represents a time series of spacecraft observations tied
 /// to a specific generic observation type that implements [`OcnusObser`].
 ///
-/// [`ScObs`] has, among others, two important implementations:
-/// - [`ScObs::add`] : Allows composition of two [`ScObs`] objects, and sorts the underlying vectors by the time stamp value.
-/// - [`ScObs::split`] : The reciprocal of one or multiple [`ScObs::add`] calls.
-///   Calling this function consumes a composite [`ScObs`] object and returns the original [`ScObs`] objects in a vector.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct ScObs<O: OcnusObser> {
-    /// Vector of (optional) spacecraft observations.
-    obser: Vec<Option<O>>,
+/// [`ScObsSeries`] has, among others, three important implementations:
+/// - [`ScObsSeries::add`] : Allows composition of two [`ScObsSeries`] objects.
+/// - [`ScObsSeries::sort_by_timestamp`] : Sorts the underlying vector of [`ScObs`] objets by their timestamps.
+/// - [`ScObsSeries::split`] : The reciprocal of one or multiple [`ScObs::add`] calls.
+///   Calling this function consumes a composite [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ScObsSeries<O>
+where
+    O: OcnusObser,
+{
+    /// Vector of spacecraft observations.
+    scobs: Vec<ScObs<O>>,
 
-    /// Vector of spacecraft configurations.
-    sccnf: Vec<ScConf>,
-
-    /// The sorting indices used to recover the original [`ScObs`] objects from a composite.
+    /// The sorting indices used to recover the original [`ScObsSeries`] objects from a composite.
     sorti: Vec<usize>,
 }
 
-impl<O: OcnusObser> ScObs<O> {
-    /// Return a reference to the underlying `Vec<Option<O>>` vector as a slice.
-    pub fn as_obser_slice(&self) -> &[Option<O>] {
-        self.obser.as_slice()
+impl<O> ScObsSeries<O>
+where
+    O: OcnusObser,
+{
+    /// Returns the number of individual [`ScObsSeries`] contained within.
+    ///
+    /// This value corresponds to the length of the vector returned by [`ScObs::sort_by_time`].
+    pub fn count_series(&self) -> usize {
+        self.sorti.iter().fold(0, |acc, value| max(acc, *value)) + 1
     }
 
-    /// Return a reference to the underlying `Vec<ScConf>` vector as a slice.
-    pub fn as_scconf_slice(&self) -> &[ScConf] {
-        self.sccnf.as_slice()
-    }
-
-    /// Create a new [`ScObs`] object from an iterator over `ScConf` and `Option<impl OcnusObser>`.
-    /// Returns [None] if the two iterators do not match in length.
-    pub fn from_iterator<I: IntoIterator<Item = (Option<O>, ScConf)>>(iter: I) -> Self {
-        let (obser_list, scconf_list): (Vec<Option<O>>, Vec<ScConf>) = iter.into_iter().unzip();
-
-        let length = obser_list.len();
+    /// Create a [`ScObsSeries`] from an iterator over `ScObs`.
+    pub fn from_iterator<I: IntoIterator<Item = ScObs<O>>>(iter: I) -> Self {
+        let scobs = iter.into_iter().collect::<Vec<ScObs<O>>>();
+        let length = scobs.len();
 
         Self {
-            obser: obser_list,
-            sccnf: scconf_list,
+            scobs,
             sorti: vec![0; length],
         }
     }
 
     /// Returns `true`` if the observation contains no elements.
     pub fn is_empty(&self) -> bool {
-        self.sccnf.is_empty()
+        self.scobs.is_empty()
     }
 
     /// Returns an iterator over the observations.
-    pub fn iter(&self) -> impl Iterator<Item = (&ScConf, &Option<O>, usize)> {
-        zip_eq(
-            zip_eq(self.sccnf.iter(), self.obser.iter()),
-            self.sorti.iter(),
-        )
-        .map(|((a, b), c)| (a, b, *c))
-    }
-
-    /// Returns an iterator that allows modifying each observation (except the sorting index).
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut ScConf, &mut Option<O>, usize)> {
-        zip_eq(
-            zip_eq(self.sccnf.iter_mut(), self.obser.iter_mut()),
-            self.sorti.iter(),
-        )
-        .map(|((a, b), c)| (a, b, *c))
+    pub fn iter(&self) -> impl Iterator<Item = (&ScObs<O>, usize)> {
+        zip_eq(self.scobs.iter(), self.sorti.iter()).map(|(scobs, sorti)| (scobs, *sorti))
     }
 
     /// Returns the number of elements in the observation, also referred to as its 'length'.
     pub fn len(&self) -> usize {
-        self.sccnf.len()
+        self.scobs.len()
     }
 
-    /// Returns the number of individual [`ScObs`] contained within.
-    ///
-    /// This value corresponds to the length of the vector returned by [`ScObs::sort_by_time`].
-    pub fn nseries(&self) -> usize {
-        self.sorti.iter().fold(0, |acc, value| max(acc, *value)) + 1
-    }
-
-    /// Sorts the underlying `Vec<ScTC>` object by the time stamp field.
-    pub fn sort_by_time(&mut self) {
+    /// Sorts the underlying `Vec<ScObs>` object by the time stamp field.
+    pub fn sort_by_timestamp(&mut self) {
         // Implements the bubble sort algorithm for re-ordering all vectors according to the time stamp values.
-        let bubble_sort_closure =
-            |obser: &mut Vec<Option<O>>, sccnf: &mut Vec<ScConf>, sorti: &mut Vec<usize>| {
-                let mut counter = 0;
+        let bubble_sort_closure = |scobs: &mut Vec<ScObs<O>>, sorti: &mut Vec<usize>| {
+            let mut counter = 0;
 
-                for idx in 0..(sccnf.len() - 1) {
-                    if sccnf[idx].get_timestamp() > sccnf[idx + 1].get_timestamp() {
-                        obser.swap(idx, idx + 1);
-                        sccnf.swap(idx, idx + 1);
-                        sorti.swap(idx, idx + 1);
+            for idx in 0..(scobs.len() - 1) {
+                if scobs[idx].timestamp > scobs[idx + 1].timestamp {
+                    scobs.swap(idx, idx + 1);
+                    sorti.swap(idx, idx + 1);
 
-                        counter += 1
-                    }
+                    counter += 1
                 }
+            }
 
-                counter
-            };
+            counter
+        };
 
         let mut counter = 1;
 
         while counter != 0 {
-            counter = bubble_sort_closure(&mut self.obser, &mut self.sccnf, &mut self.sorti);
+            counter = bubble_sort_closure(&mut self.scobs, &mut self.sorti);
         }
     }
 
-    /// The reciprocal of [`ScObs::sort_by_time`].
-    /// Calling this function consumes the [`ScObs`] object and returns the original [`ScObs`] objects in a vector.
-    pub fn split(self) -> Vec<ScObs<O>> {
-        (0..self.nseries())
+    /// The reciprocal of [`ScObsSeries::sort_by_time`].
+    /// Calling this function consumes the [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
+    pub fn split(self) -> Vec<ScObsSeries<O>> {
+        (0..self.count_series())
             .map(|idx| {
-                let copy_obser = zip_eq(&self.obser, &self.sorti)
+                let copy_scobs = zip_eq(&self.scobs, &self.sorti)
                     .filter_map(|(obs, sdx)| match sdx.cmp(&idx) {
                         Ordering::Equal => Some(obs.clone()),
                         _ => None,
                     })
-                    .collect::<Vec<Option<O>>>();
+                    .collect::<Vec<ScObs<O>>>();
 
-                let copy_sctcl = zip_eq(&self.sccnf, &self.sorti)
-                    .filter_map(|(sccnf, sdx)| match sdx.cmp(&idx) {
-                        Ordering::Equal => Some(sccnf.clone()),
-                        _ => None,
-                    })
-                    .collect::<Vec<ScConf>>();
+                let length = copy_scobs.len();
 
-                let length = copy_obser.len();
-
-                ScObs {
-                    obser: copy_obser,
-                    sccnf: copy_sctcl,
+                Self {
+                    scobs: copy_scobs,
                     sorti: vec![0; length],
                 }
             })
@@ -167,57 +137,52 @@ impl<O: OcnusObser> ScObs<O> {
     }
 }
 
-impl<O: OcnusObser> Add for ScObs<O> {
+impl<O> Add for ScObsSeries<O>
+where
+    O: OcnusObser,
+{
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let mut new_obser = self.obser;
-        let mut new_sctcl = self.sccnf;
+        let mut scobs = self.scobs;
 
         debug!(
             "merging two ScObs objects ({} + {})",
-            new_sctcl.len(),
-            rhs.sccnf.len()
+            scobs.len(),
+            rhs.scobs.len()
         );
 
-        new_obser.extend(rhs.obser);
-        new_sctcl.extend(rhs.sccnf);
+        scobs.extend(rhs.scobs);
 
         // Calculate the maximum existing spacecraft index within self.
         let idx_offset = self.sorti.iter().fold(0, |maxv, &v| max(maxv, v)) + 1;
 
-        let mut new_sorti = self.sorti;
+        let mut sorti = self.sorti;
 
         // Add index_offset to all indices in rhs.
-        new_sorti.extend(
+        sorti.extend(
             rhs.sorti
                 .iter()
                 .map(|sdx| sdx + idx_offset)
                 .collect::<Vec<usize>>(),
         );
 
-        let mut result = Self {
-            obser: new_obser,
-            sccnf: new_sctcl,
-            sorti: new_sorti,
-        };
-
-        result.sort_by_time();
-
-        result
+        Self { scobs, sorti }
     }
 }
 
-impl<O: OcnusObser> AddAssign for ScObs<O> {
+impl<O> AddAssign for ScObsSeries<O>
+where
+    O: OcnusObser,
+{
     fn add_assign(&mut self, rhs: Self) {
         debug!(
             "merging two ScObs objects ({} + {})",
-            self.sccnf.len(),
-            rhs.sccnf.len()
+            self.scobs.len(),
+            rhs.scobs.len()
         );
 
-        self.obser.extend(rhs.obser);
-        self.sccnf.extend(rhs.sccnf);
+        self.scobs.extend(rhs.scobs);
 
         // Calculate the maximum existing spacecraft index within self.
         let idx_offset = self.sorti.iter().fold(0, |maxv, &v| max(maxv, v)) + 1;
@@ -229,8 +194,6 @@ impl<O: OcnusObser> AddAssign for ScObs<O> {
                 .map(|sdx| sdx + idx_offset)
                 .collect::<Vec<usize>>(),
         );
-
-        self.sort_by_time();
     }
 }
 
@@ -240,35 +203,55 @@ mod tests {
 
     #[test]
     fn test_scobs_slice() {
-        let sctc1 = (None, ScConf::TimeDistance(0.0, 1.0));
-        let sctc2 = (None, ScConf::TimeDistance(1.0, 1.0));
-        let sctc3 = (None, ScConf::TimeDistance(0.5, 1.0));
+        let sctc1 = ScObs {
+            timestamp: 0.0,
+            configuration: ScConf::Distance(1.0),
+            observation: None::<f32>,
+        };
 
-        let mut ts3: ScObs<Fp> = ScObs::<Fp>::from_iterator([sctc1, sctc2]);
-        let ts4: ScObs<Fp> = ScObs::<Fp>::from_iterator([sctc3]);
+        let sctc2 = ScObs {
+            timestamp: 1.0,
+            configuration: ScConf::Distance(1.0),
+            observation: None::<f32>,
+        };
 
-        assert!(ts3.nseries() == 1);
-        assert!(ts4.nseries() == 1);
-        assert!(ts4.iter().last().unwrap().0.get_timestamp() == 0.5);
+        let sctc3 = ScObs {
+            timestamp: 0.5,
+            configuration: ScConf::Distance(1.0),
+            observation: None::<f32>,
+        };
+
+        let mut ts3 = ScObsSeries::from_iterator([sctc1, sctc2]);
+        let ts4 = ScObsSeries::from_iterator([sctc3]);
+
+        assert!(ts3.count_series() == 1);
+        assert!(ts4.count_series() == 1);
+        assert!(ts4.iter().last().unwrap().0.timestamp == 0.5);
 
         ts3 += ts4.clone();
 
-        assert!(ts3.nseries() == 2);
+        assert!(ts3.count_series() == 2);
+        assert!(ts3.len() == 3);
+        assert!(!ts3.is_empty());
 
-        assert!(ts3.sccnf.first().unwrap().get_timestamp() == 0.0);
-        assert!(ts3.sccnf.last().unwrap().get_timestamp() == 1.0);
+        ts3.sort_by_timestamp();
+
+        assert!(ts3.scobs.first().unwrap().timestamp == 0.0);
+        assert!(ts3.scobs.last().unwrap().timestamp == 1.0);
 
         let unsort = ts3.clone().split();
 
         assert!(unsort.len() == 2);
-        assert!(unsort[0].sccnf.first().unwrap().get_timestamp() == 0.0);
-        assert!(unsort[0].sccnf.last().unwrap().get_timestamp() == 1.0);
+        assert!(unsort[0].scobs.first().unwrap().timestamp == 0.0);
+        assert!(unsort[0].scobs.last().unwrap().timestamp == 1.0);
 
-        assert!(unsort[1].sccnf.first().unwrap().get_timestamp() == 0.5);
+        assert!(unsort[1].scobs.first().unwrap().timestamp == 0.5);
 
-        let ts5 = ts3 + ts4;
+        let mut ts5 = ts3 + ts4;
 
-        assert!(ts5.sccnf.first().unwrap().get_timestamp() == 0.0);
-        assert!(ts5.sccnf.last().unwrap().get_timestamp() == 1.0);
+        ts5.sort_by_timestamp();
+
+        assert!(ts5.scobs.first().unwrap().timestamp == 0.0);
+        assert!(ts5.scobs.last().unwrap().timestamp == 1.0);
     }
 }
