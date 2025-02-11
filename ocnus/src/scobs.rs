@@ -51,6 +51,11 @@ where
         }
     }
 
+    /// Acces the observation field.
+    pub fn obersvation(&self) -> Option<&O> {
+        self.observation.as_ref()
+    }
+
     /// Acces the timestamp field.
     pub fn timestamp(&self) -> f32 {
         self.timestamp

@@ -7,7 +7,7 @@ use num_traits::Float;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Debug, Display, Formatter},
-    ops::{Add, Mul, Sub},
+    ops::{Add, AddAssign, Mul, Sub, SubAssign},
 };
 
 /// Generic N-dimensional observation vector.
@@ -107,6 +107,12 @@ impl<'a, const N: usize> Add<&'a ObserVec<N>> for &'a ObserVec<N> {
     }
 }
 
+impl<const N: usize> AddAssign for ObserVec<N> {
+    fn add_assign(&mut self, rhs: Self) {
+        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += rhs);
+    }
+}
+
 impl<const N: usize> Mul<f32> for ObserVec<N> {
     type Output = ObserVec<N>;
 
@@ -174,6 +180,12 @@ impl<const N: usize> Sub for ObserVec<N> {
                 .try_into()
                 .unwrap(),
         )
+    }
+}
+
+impl<const N: usize> SubAssign for ObserVec<N> {
+    fn sub_assign(&mut self, rhs: Self) {
+        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= rhs);
     }
 }
 

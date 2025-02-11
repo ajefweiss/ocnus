@@ -26,6 +26,21 @@ where
     pub states: Vec<S>,
 }
 
+impl<S, const P: usize> FEVMData<S, P>
+where
+    S: OcnusState,
+{
+    /// Returns `true`` if the ensemble contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.ptpdf.is_empty()
+    }
+
+    /// Returns the number of particles in the ensemble, also referred to as its 'length'.
+    pub fn len(&self) -> usize {
+        self.ptpdf.len()
+    }
+}
+
 /// Errors associated with types that implement the [`FEVM`] trait.
 #[derive(Debug, Error)]
 pub enum FEVMError {
@@ -109,7 +124,7 @@ where
 
         debug!(
             "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
-            fevmd.ptpdf.len() as f32 / 1e6,
+            fevmd.len() as f32 / 1e6,
             start.elapsed().as_millis() as f32 / 1e3
         );
 
@@ -151,7 +166,7 @@ where
 
         debug!(
             "fevm_initialize_params_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.ptpdf.len() as f32 / 1e6,
+            fevmd.len() as f32 / 1e6,
             start.elapsed().as_millis() as f32 / 1e3
         );
 
@@ -184,7 +199,7 @@ where
 
         debug!(
             "fevm_initialize_states_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.ptpdf.len() as f32 / 1e6,
+            fevmd.len() as f32 / 1e6,
             start.elapsed().as_millis() as f32 / 1e3
         );
 
@@ -210,9 +225,9 @@ where
         let start = Instant::now();
         let mut timer = 0.0;
 
-        if (series.len() != output.nrows()) || (fevmd.ptpdf.len() != output.ncols()) {
+        if (series.len() != output.nrows()) || (fevmd.len() != output.ncols()) {
             return Err(OcnusError::FEVM(FEVMError::InvalidOutputShape {
-                expected_cols: fevmd.ptpdf.len(),
+                expected_cols: fevmd.len(),
                 expected_rows: series.len(),
                 output_cols: output.ncols(),
                 output_rows: output.nrows(),
@@ -251,7 +266,7 @@ where
 
         debug!(
             "fevm_simulate: {:2.2}M evaluations in {:.2} sec",
-            (series.len() * fevmd.ptpdf.len()) as f32 / 1e6,
+            (series.len() * fevmd.len()) as f32 / 1e6,
             start.elapsed().as_millis() as f32 / 1e3
         );
 
@@ -266,30 +281,26 @@ where
         series: &[ScObs<ObserVec<N>>],
         fevmd: &mut FEVMData<S, P>,
         output: &mut DMatrix<ObserVec<N>>,
-    ) -> Result<Vec<usize>, OcnusError> {
+    ) -> Result<Vec<bool>, OcnusError> {
         self.fevm_simulate(series, fevmd, output)?;
 
-        let mut valid_indices_flags = vec![false; ensbl.len()];
+        let mut valid_indices_flags = vec![false; fevmd.len()];
 
         // Collect indices that produce valid results and add random noise.
-        ensbl_out
-            .axis_chunks_iter_mut(Axis(1), Self::RCS)
-            .into_par_iter()
-            .zip(valid_indices_flags.par_chunks_mut(Self::RCS))
-            .for_each(|(mut chunks_out, flag_chunks)| {
-                chunks_out
-                    .axis_iter_mut(Axis(1))
-                    .zip(flag_chunks.iter_mut())
-                    .for_each(|(out, is_valid)| {
-                        *is_valid = out.iter().zip(scobs.as_obser_slice()).fold(true, |acc, (o, r)| {
-                            acc & ((o.is_some() && r.is_some()) || (o.is_none() && r.is_none()))
-                        });
-                    });
+        output
+            .par_column_iter_mut()
+            .zip(valid_indices_flags.par_iter_mut())
+            .chunks(Self::RCS)
+            .for_each(|mut chunks| {
+                chunks.iter_mut().for_each(|(out, flag)| {
+                    **flag = zip_eq(out.iter(), series.iter()).fold(true, |acc, (o, r)| {
+                        let obs = r.obersvation();
+                        acc & ((!o.any_nan() && obs.is_some()) || (o.any_nan() && obs.is_none()))
+                    })
+                });
             });
 
         Ok(valid_indices_flags)
-
-        Ok(Vec::new())
     }
 
     /// Initialize a model state (model specific).

@@ -1,8 +1,8 @@
+use crate::{fevms::FEVMError, stats::OcnusStatsError};
 use nalgebra::SVectorView;
 use serde::Serialize;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 use thiserror::Error;
-
-use crate::{fevms::FEVMError, stats::OcnusStatsError};
 
 /// Generic error type returned by types that implement [`OcnusModel`].
 #[derive(Debug, Error)]
@@ -49,7 +49,10 @@ pub trait OcnusModel<const P: usize> {
 }
 
 /// A trait that must be implemented for any type that acts as a model observable.
-pub trait OcnusObser: Clone + Default + Send + Serialize + Sync {}
+pub trait OcnusObser:
+    Add + AddAssign + Sub + SubAssign + Clone + Default + Send + Serialize + Sync
+{
+}
 
 // Implement the [`OcnusObser`] traits for Fp.
 impl OcnusObser for f32 {}
