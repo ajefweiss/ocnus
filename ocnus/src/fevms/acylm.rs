@@ -406,10 +406,11 @@ mod tests {
 
         let model = OCModel_CC_LFF(prior_density);
 
-        let sc = ScObs::<ObserVec<3>>::from_iterator((0..8).map(|i| {
-            (
+        let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f32 * 3600.0 * 2.0,
+                ScConf::Distance(1.0),
                 None,
-                ScConf::TimeDistance(224640.0 + i as f32 * 3600.0 * 2.0, 1.0),
             )
         }));
 
@@ -509,13 +510,13 @@ mod tests {
 
         let model = OCModel_CC_NC18(prior_density);
 
-        let sc = ScObs::<ObserVec<3>>::from_iterator((0..8).map(|i| {
-            (
+        let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f32 * 3600.0 * 2.0,
+                ScConf::Distance(1.0),
                 None,
-                ScConf::TimeDistance(224640.0 + i as f32 * 3600.0 * 2.0, 1.0),
             )
         }));
-
         let mut data = FEVMEnsbl::new(1);
 
         let mut output = ModelObserArray::new(&sc, 1);

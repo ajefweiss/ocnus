@@ -9,6 +9,5 @@ pub mod obser;
 mod scobs;
 pub mod stats;
 
-pub use fevms::*;
 pub use model::*;
 pub use scobs::*;

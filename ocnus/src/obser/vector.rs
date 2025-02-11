@@ -3,7 +3,7 @@
 use crate::model::OcnusObser;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use num_traits::Float;
+use num_traits::{Float, Zero};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Debug, Display, Formatter},
@@ -75,6 +75,20 @@ impl<const N: usize> PartialEq for ObserVec<N> {
             .zip(other.iter())
             .map(|(val_x, val_y)| val_x == val_y)
             .fold(true, |acc, next| acc & next)
+    }
+}
+
+impl<const N: usize> Zero for ObserVec<N> {
+    fn is_zero(&self) -> bool {
+        self.0.iter().all(|value| value == &0.0)
+    }
+
+    fn set_zero(&mut self) {
+        self.0 = [0.0; N]
+    }
+
+    fn zero() -> Self {
+        Self([0.0; N])
     }
 }
 

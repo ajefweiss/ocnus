@@ -1,12 +1,14 @@
 use core::f32;
 use itertools::zip_eq;
 use log::error;
-use nalgebra::{Const, DMatrix, DVector, Dyn, Matrix, VecStorage, ViewStorage};
+use nalgebra::{Const, DMatrix, DVector, Dyn, Matrix, ViewStorage};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     ops::{Mul, MulAssign},
 };
+
+use crate::fevms::PMatrix;
 
 /// A data structure for holding a covariance matrix.
 ///
@@ -126,8 +128,8 @@ impl CovMatrix {
     ///
     /// This function properly handles constant parameters (resulting in empty columns/rows) and can optionally also use weights.
     pub fn from_particles<const P: usize>(
-        particles: &Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>,
-        optional_weights: Option<&[f32]>,
+        particles: &PMatrix<P>,
+        opt_weights: Option<&[f32]>,
     ) -> Option<CovMatrix> {
         let mut matrix = DMatrix::from_iterator(
             P,
@@ -140,7 +142,7 @@ impl CovMatrix {
                     let x = particles.row(jdx);
                     let y = particles.row(kdx);
 
-                    match optional_weights {
+                    match opt_weights {
                         Some(w) => covariance_with_weights(x, y, w),
                         None => covariance(x, y),
                     }

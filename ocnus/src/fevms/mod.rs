@@ -1,8 +1,10 @@
 //! Implementations of forward ensemble vector models (FEVMs).
 
-mod acylm;
+// mod acylm;
+mod noise;
 
 // pub use acylm:
+pub use noise::*;
 
 use crate::{
     obser::ObserVec,
@@ -11,23 +13,31 @@ use crate::{
 };
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{DMatrix, SVectorView};
+use nalgebra::{Const, DMatrix, DVectorView, Dyn, Matrix, SVectorView, VecStorage, U1};
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::time::Instant;
 use thiserror::Error;
 
-pub struct FEVMData<S, const P: usize>
+pub type PMatrix<const P: usize> = Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>;
+pub type ScObserVec<const N: usize> = ScObs<ObserVec<N>>;
+
+/// A data structure that stores a FEVM ensemble particles, model states, and noise configuration.
+pub struct FEVMData<G, S, const P: usize, const N: usize>
 where
+    G: FEVMNoiseGen<N>,
     S: OcnusState,
 {
     pub ptpdf: ParticlePDF<P>,
     pub states: Vec<S>,
+    pub opt_noise: Option<G>,
+    pub seed: u64,
 }
 
-impl<S, const P: usize> FEVMData<S, P>
+impl<G, S, const P: usize, const N: usize> FEVMData<G, S, P, N>
 where
+    G: FEVMNoiseGen<N>,
     S: OcnusState,
 {
     /// Returns `true`` if the ensemble contains no elements.
@@ -68,12 +78,73 @@ where
     const RCS: usize;
 
     /// Create a new [`FEVMData`] from "valid" simulations.
-    fn fevm_data(
+    fn fevm_data<G>(
         &self,
-        series: &[ScObs<ObserVec<N>>],
-        fevmd: &mut FEVMData<S, P>,
+        series: &[ScObserVec<N>],
         output: &mut DMatrix<ObserVec<N>>,
-    ) -> Result<(), OcnusError> {
+        size: usize,
+        opt_pdf: Option<&impl PDF<P>>,
+        opt_noise: Option<G>,
+        seed: u64,
+    ) -> Result<(), OcnusError>
+    where
+        G: FEVMNoiseGen<N>,
+    {
+        let mut counter = 0;
+        let mut fevmd = FEVMData {
+            ptpdf: ParticlePDF::new(
+                Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::zeros(size),
+                Self::PARAM_RANGES,
+                vec![1.0 / size as f32; size],
+            ),
+            states: vec![S::default(); size],
+            opt_noise: None::<&FEVMNoiseZero>,
+            seed,
+        };
+        let mut new_ptpdf = ParticlePDF::new(
+            Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::zeros(size),
+            Self::PARAM_RANGES,
+            vec![1.0 / size as f32; size],
+        );
+
+        while counter != size {
+            self.fevm_initialize(series, &mut fevmd, opt_pdf)?;
+
+            let mut indices = self.fevm_simulate_filter(
+                series,
+                &mut fevmd,
+                output,
+                None::<fn(&DVectorView<ObserVec<N>>, &[ScObserVec<N>]) -> bool>,
+            )?;
+
+            let mut indices_valid = indices
+                .into_iter()
+                .enumerate()
+                .filter_map(|(idx, flag)| if flag { Some(idx) } else { None })
+                .collect::<Vec<usize>>();
+
+            // Remove excessive ensemble members.
+            if counter + indices_valid.len() > size {
+                debug!(
+                    "removing excessive ensemble members simulations n={}",
+                    counter + indices_valid.len() - size
+                );
+                indices_valid.drain((size - counter)..indices_valid.len());
+            }
+
+            // Copy over results.
+            indices_valid.iter().enumerate().for_each(|(edx, idx)| {
+                new_ptpdf
+                    .particles_mut()
+                    .column_mut(counter + edx)
+                    .iter_mut()
+                    .zip(fevmd.ptpdf.particles_ref().column(idx).iter())
+                    .for_each(|(target, value)| *target = *value);
+            });
+
+            counter += indices_valid.len();
+        }
+
         Ok(())
     }
 
@@ -87,13 +158,15 @@ where
 
     /// Initialize parameters and states for a FEVM.
     /// If no pdf is given, the underlying model prior is used instead.
-    fn fevm_initialize(
+    fn fevm_initialize<G>(
         &self,
-        series: &[ScObs<ObserVec<N>>],
-        fevmd: &mut FEVMData<S, P>,
-        optional_pdf: Option<&impl PDF<P>>,
-        seed: u64,
-    ) -> Result<(), OcnusError> {
+        series: &[ScObserVec<N>],
+        fevmd: &mut FEVMData<G, S, P, N>,
+        opt_pdf: Option<&impl PDF<P>>,
+    ) -> Result<(), OcnusError>
+    where
+        G: FEVMNoiseGen<N>,
+    {
         let start = Instant::now();
 
         fevmd
@@ -104,10 +177,10 @@ where
             .chunks(Self::RCS)
             .enumerate()
             .try_for_each(|(cdx, mut chunks)| {
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + (cdx * 17) as u64);
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(fevmd.seed + (cdx * 17) as u64);
 
                 chunks.iter_mut().try_for_each(|(params, state)| {
-                    let sample = match optional_pdf.as_ref() {
+                    let sample = match opt_pdf.as_ref() {
                         Some(pdf) => pdf.draw_sample(&mut rng),
                         None => self.model_prior().draw_sample(&mut rng),
                     }?;
@@ -133,12 +206,14 @@ where
 
     /// Initialize parameters and states for a FEVM.
     /// If no pdf is given, the underlying model prior is used instead.
-    fn fevm_initialize_params_only(
+    fn fevm_initialize_params_only<G>(
         &self,
-        fevmd: &mut FEVMData<S, P>,
-        optional_pdf: Option<&impl PDF<P>>,
-        seed: u64,
-    ) -> Result<(), OcnusError> {
+        fevmd: &mut FEVMData<G, S, P, N>,
+        opt_pdf: Option<&impl PDF<P>>,
+    ) -> Result<(), OcnusError>
+    where
+        G: FEVMNoiseGen<N>,
+    {
         let start = Instant::now();
 
         fevmd
@@ -148,10 +223,10 @@ where
             .chunks(Self::RCS)
             .enumerate()
             .try_for_each(|(cdx, mut chunks)| {
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed + (cdx * 17) as u64);
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(fevmd.seed + (cdx * 17) as u64);
 
                 chunks.iter_mut().try_for_each(|params| {
-                    let sample = match optional_pdf.as_ref() {
+                    let sample = match opt_pdf.as_ref() {
                         Some(pdf) => pdf.draw_sample(&mut rng),
                         None => self.model_prior().draw_sample(&mut rng),
                     }?;
@@ -174,11 +249,14 @@ where
     }
 
     /// Initialize the model states within a [`FEVMEnsbl`] object.
-    fn fevm_initialize_states_only(
+    fn fevm_initialize_states_only<G>(
         &self,
-        series: &[ScObs<ObserVec<N>>],
-        fevmd: &mut FEVMData<S, P>,
-    ) -> Result<(), OcnusError> {
+        series: &[ScObserVec<N>],
+        fevmd: &mut FEVMData<G, S, P, N>,
+    ) -> Result<(), OcnusError>
+    where
+        G: FEVMNoiseGen<N>,
+    {
         let start = Instant::now();
 
         fevmd
@@ -209,19 +287,22 @@ where
     /// Generate a vector observable.
     fn fevm_observe(
         &self,
-        scobs: &ScObs<ObserVec<N>>,
+        scobs: &ScObserVec<N>,
         params: &SVectorView<f32, P>,
         state: &S,
     ) -> Result<ObserVec<N>, OcnusError>;
 
     /// Perform an ensemble forward simulation and generate synthetic vector observables
     /// for the given spacecraft observers.
-    fn fevm_simulate(
+    fn fevm_simulate<G>(
         &self,
-        series: &[ScObs<ObserVec<N>>],
-        fevmd: &mut FEVMData<S, P>,
+        series: &[ScObserVec<N>],
+        fevmd: &mut FEVMData<G, S, P, N>,
         output: &mut DMatrix<ObserVec<N>>,
-    ) -> Result<(), OcnusError> {
+    ) -> Result<(), OcnusError>
+    where
+        G: FEVMNoiseGen<N>,
+    {
         let start = Instant::now();
         let mut timer = 0.0;
 
@@ -264,6 +345,24 @@ where
             Ok::<(), OcnusError>(())
         })?;
 
+        if let Some(noise) = fevmd.opt_noise.as_ref() {
+            output
+                .par_column_iter_mut()
+                .chunks(Self::RCS)
+                .enumerate()
+                .for_each(|(cdx, mut chunks)| {
+                    let mut rng = Xoshiro256PlusPlus::seed_from_u64(fevmd.seed + (cdx * 73) as u64);
+
+                    chunks.iter_mut().for_each(|col| {
+                        let size = col.nrows();
+
+                        col.iter_mut()
+                            .zip(&noise.generate_noise(size, &mut rng))
+                            .for_each(|(value, noisevec)| *value += noisevec.clone());
+                    });
+                });
+        }
+
         debug!(
             "fevm_simulate: {:2.2}M evaluations in {:.2} sec",
             (series.len() * fevmd.len()) as f32 / 1e6,
@@ -276,29 +375,61 @@ where
     /// Perform an ensemble forward simulation and generate synthetic vector observables
     /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t. the
     /// observation series.
-    fn fevm_simulate_valid_indices(
+    fn fevm_simulate_filter<F, G>(
         &self,
-        series: &[ScObs<ObserVec<N>>],
-        fevmd: &mut FEVMData<S, P>,
+        series: &[ScObserVec<N>],
+        fevmd: &mut FEVMData<G, S, P, N>,
         output: &mut DMatrix<ObserVec<N>>,
-    ) -> Result<Vec<bool>, OcnusError> {
+        opt_filter: Option<F>,
+    ) -> Result<Vec<bool>, OcnusError>
+    where
+        G: FEVMNoiseGen<N>,
+        F: Send + Sync + Fn(&DVectorView<ObserVec<N>>, &[ScObserVec<N>]) -> bool,
+    {
         self.fevm_simulate(series, fevmd, output)?;
 
         let mut valid_indices_flags = vec![false; fevmd.len()];
 
         // Collect indices that produce valid results and add random noise.
-        output
-            .par_column_iter_mut()
-            .zip(valid_indices_flags.par_iter_mut())
-            .chunks(Self::RCS)
-            .for_each(|mut chunks| {
-                chunks.iter_mut().for_each(|(out, flag)| {
-                    **flag = zip_eq(out.iter(), series.iter()).fold(true, |acc, (o, r)| {
-                        let obs = r.obersvation();
-                        acc & ((!o.any_nan() && obs.is_some()) || (o.any_nan() && obs.is_none()))
-                    })
+        if let Some(filter) = opt_filter {
+            output
+                .par_column_iter()
+                .zip(valid_indices_flags.par_iter_mut())
+                .chunks(Self::RCS)
+                .for_each(|mut chunks| {
+                    chunks.iter_mut().for_each(|(out, flag)| {
+                        if zip_eq(out.iter(), series.iter()).fold(true, |acc, (out, obs)| {
+                            let scenario_1 = !out.any_nan()
+                                && !obs.obersvation().unwrap_or(&ObserVec::default()).any_nan();
+
+                            let scenario_2 = out.is_nan()
+                                && obs.obersvation().unwrap_or(&ObserVec::default()).is_nan();
+
+                            acc & (scenario_1 || scenario_2)
+                        }) {
+                            **flag = filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series)
+                        }
+                    });
                 });
-            });
+        } else {
+            output
+                .par_column_iter()
+                .zip(valid_indices_flags.par_iter_mut())
+                .chunks(Self::RCS)
+                .for_each(|mut chunks| {
+                    chunks.iter_mut().for_each(|(out, flag)| {
+                        **flag = zip_eq(out.iter(), series.iter()).fold(true, |acc, (out, obs)| {
+                            let scenario_1 = !out.any_nan()
+                                && !obs.obersvation().unwrap_or(&ObserVec::default()).any_nan();
+
+                            let scenario_2 = out.is_nan()
+                                && obs.obersvation().unwrap_or(&ObserVec::default()).is_nan();
+
+                            acc & (scenario_1 || scenario_2)
+                        });
+                    });
+                });
+        }
 
         Ok(valid_indices_flags)
     }
@@ -306,7 +437,7 @@ where
     /// Initialize a model state (model specific).
     fn fevm_state(
         &self,
-        series: &[ScObs<ObserVec<N>>],
+        series: &[ScObserVec<N>],
         params: &SVectorView<f32, P>,
         state: &mut S,
     ) -> Result<(), OcnusError>;

@@ -1,6 +1,6 @@
-use crate::covmat::CovMatrix;
+use crate::{covmat::CovMatrix, fevms::PMatrix};
 use log::warn;
-use nalgebra::{Const, Dyn, Matrix, SVector, VecStorage};
+use nalgebra::SVector;
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use rayon::prelude::*;
@@ -15,7 +15,7 @@ pub struct ParticlePDF<const P: usize> {
     covm: CovMatrix,
 
     /// The particle ensemble that describes the overarching PDF.
-    particles: Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>,
+    particles: PMatrix<P>,
 
     /// Valid parameter range.
     #[serde(with = "serde_arrays")]
@@ -42,11 +42,7 @@ impl<const P: usize> ParticlePDF<P> {
     }
 
     /// Create a new [`ParticlePDF`].
-    pub fn new(
-        particles: Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>,
-        range: [(f32, f32); P],
-        weights: Vec<f32>,
-    ) -> Self {
+    pub fn new(particles: PMatrix<P>, range: [(f32, f32); P], weights: Vec<f32>) -> Self {
         let covm = CovMatrix::from_particles(&particles, Some(&weights)).unwrap();
 
         Self {
@@ -58,14 +54,12 @@ impl<const P: usize> ParticlePDF<P> {
     }
 
     /// Access the ensemble particle matrix.
-    pub fn particles_ref(&self) -> &Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>> {
+    pub fn particles_ref(&self) -> &PMatrix<P> {
         &self.particles
     }
 
     /// Mutably access the ensemble particle matrix.
-    pub fn particles_mut(
-        &mut self,
-    ) -> &mut Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>> {
+    pub fn particles_mut(&mut self) -> &mut PMatrix<P> {
         &mut self.particles
     }
 }
