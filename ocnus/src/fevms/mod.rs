@@ -98,7 +98,7 @@ where
                 vec![1.0 / size as f32; size],
             ),
             states: vec![S::default(); size],
-            opt_noise: None::<&FEVMNoiseZero>,
+            opt_noise,
             seed,
         };
         let mut new_ptpdf = ParticlePDF::new(
@@ -110,7 +110,7 @@ where
         while counter != size {
             self.fevm_initialize(series, &mut fevmd, opt_pdf)?;
 
-            let mut indices = self.fevm_simulate_filter(
+            let indices = self.fevm_simulate_filter(
                 series,
                 &mut fevmd,
                 output,
@@ -138,7 +138,7 @@ where
                     .particles_mut()
                     .column_mut(counter + edx)
                     .iter_mut()
-                    .zip(fevmd.ptpdf.particles_ref().column(idx).iter())
+                    .zip(fevmd.ptpdf.particles_ref().column(*idx).iter())
                     .for_each(|(target, value)| *target = *value);
             });
 
