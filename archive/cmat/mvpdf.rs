@@ -1,8 +1,8 @@
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
+    cmat::{OcnusStatsError, PDFExactDensity, PDF},
     covmat::CovMatrix,
-    stats::{OcnusStatsError, PDFExactDensity, PDF},
 };
 use log::warn;
 use nalgebra::SVector;

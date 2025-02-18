@@ -7,8 +7,8 @@ mod noise;
 pub use noise::*;
 
 use crate::{
+    cmat::{ParticlePDF, PDF},
     obser::ObserVec,
-    stats::{ParticlePDF, PDF},
     OcnusError, OcnusModel, OcnusState, ScObs,
 };
 use itertools::zip_eq;

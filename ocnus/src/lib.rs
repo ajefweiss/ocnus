@@ -1,13 +1,12 @@
 #![doc = include_str!("../../README.md")]
 
+pub mod covm;
 // pub mod fevms;
-mod covmat;
-pub mod fevms;
-mod math;
-mod model;
-pub mod obser;
-mod scobs;
-pub mod stats;
+// mod math;
+// mod model;
+// pub mod obser;
+// mod scobs;
 
-pub use model::*;
-pub use scobs::*;
+// pub use cmat::CovMatrix;
+// pub use model::*;
+// pub use scobs::*;

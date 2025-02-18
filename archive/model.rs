@@ -1,4 +1,4 @@
-use crate::{fevms::FEVMError, stats::OcnusStatsError};
+use crate::{cmat::OcnusStatsError, fevms::FEVMError};
 use nalgebra::SVectorView;
 use serde::Serialize;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
