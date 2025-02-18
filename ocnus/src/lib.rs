@@ -1,12 +1,11 @@
 #![doc = include_str!("../../README.md")]
+#![deny(missing_docs)]
 
-pub mod covm;
-// pub mod fevms;
-// mod math;
-// mod model;
-// pub mod obser;
-// mod scobs;
+pub mod math;
+mod model;
+pub mod obser;
+mod scobs;
+pub mod statistics;
 
-// pub use cmat::CovMatrix;
-// pub use model::*;
-// pub use scobs::*;
+pub use model::*;
+pub use scobs::*;
