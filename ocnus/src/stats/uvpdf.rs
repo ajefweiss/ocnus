@@ -1,6 +1,6 @@
 use derive_more::{Deref, DerefMut, IntoIterator};
 use log::warn;
-use nalgebra::{Const, Dim, MatrixView, SVector, U1};
+use nalgebra::{MatrixView, SVector, SVectorView, U1};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use serde::{Deserialize, Serialize};
@@ -9,29 +9,26 @@ use super::{OcnusStatisticsError, PDF};
 
 /// A P-dimensional PDF composed of independent univariate PDFs.
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, IntoIterator, Serialize)]
-pub struct PDFPUnivariate<const P: usize>(
+pub struct PDFUnivariates<const P: usize>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
     [PDFUnivariate; P],
 );
 
-impl<const P: usize> PDFPUnivariate<P> {
-    /// Create a new [`PDFPUnivariate`].
+impl<const P: usize> PDFUnivariates<P> {
+    /// Create a new [`PDFUnivariates`].
     pub fn new(uvpdfs: [PDFUnivariate; P]) -> Self {
         Self(uvpdfs)
     }
 }
 
-impl<const P: usize> PDF<P> for &PDFPUnivariate<P> {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, Const<P>, U1, RStride, CStride>,
-    ) -> f32 {
+impl<const P: usize> PDF<P> for &PDFUnivariates<P> {
+    fn relative_density(&self, x: &SVectorView<f32, P>) -> f32 {
         let mut rlh = 1.0;
 
         self.0.iter().zip(x.iter()).for_each(|(uvpdf, value)| {
             let vec = SVector::from([*value]);
-            rlh *= uvpdf.relative_density::<U1, U1>(&vec.as_view());
+            rlh *= uvpdf.relative_density(&vec.as_view());
         });
 
         rlh
@@ -75,10 +72,7 @@ pub enum PDFUnivariate {
 }
 
 impl PDF<1> for &PDFUnivariate {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, U1, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, x: &MatrixView<f32, U1, U1>) -> f32 {
         match self {
             PDFUnivariate::Constant(pdf) => pdf.relative_density(x),
             PDFUnivariate::Cosine(pdf) => pdf.relative_density(x),
@@ -130,10 +124,7 @@ impl PDFConstant {
 }
 
 impl PDF<1> for &PDFConstant {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        _x: &MatrixView<f32, U1, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, _x: &MatrixView<f32, U1, U1>) -> f32 {
         1.0
     }
 
@@ -178,10 +169,7 @@ impl PDFCosine {
 }
 
 impl PDF<1> for &PDFCosine {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, U1, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, x: &MatrixView<f32, U1, U1>) -> f32 {
         x[0].cos()
     }
 
@@ -239,10 +227,7 @@ impl PDFNormal {
 }
 
 impl PDF<1> for &PDFNormal {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, U1, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, x: &MatrixView<f32, U1, U1>) -> f32 {
         ((x[0] - self.mean).powi(2) / 2.0 / self.std_dev.powi(2)).exp()
     }
 
@@ -308,10 +293,7 @@ impl PDFReciprocal {
 }
 
 impl PDF<1> for &PDFReciprocal {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, U1, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, x: &MatrixView<f32, U1, U1>) -> f32 {
         let (minv, maxv) = self.range;
 
         1.0 / (x[0] * (maxv.ln() - minv.ln()))
@@ -370,10 +352,7 @@ impl PDFUniform {
 }
 
 impl PDF<1> for &PDFUniform {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        _x: &MatrixView<f32, U1, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, _x: &MatrixView<f32, U1, U1>) -> f32 {
         1.0
     }
 

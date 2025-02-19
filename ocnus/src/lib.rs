@@ -5,7 +5,7 @@ pub mod math;
 mod model;
 pub mod obser;
 mod scobs;
-pub mod statistics;
+pub mod stats;
 
 pub use model::*;
 pub use scobs::*;

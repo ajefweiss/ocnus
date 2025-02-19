@@ -7,7 +7,7 @@ mod noise;
 pub use noise::*;
 
 use crate::{
-    cmat::{ParticlePDF, PDF},
+    cmat::{PDFParticles, PDF},
     obser::ObserVec,
     OcnusError, OcnusModel, OcnusState, ScObs,
 };
@@ -29,7 +29,7 @@ where
     G: FEVMNoiseGen<N>,
     S: OcnusState,
 {
-    pub ptpdf: ParticlePDF<P>,
+    pub ptpdf: PDFParticles<P>,
     pub states: Vec<S>,
     pub opt_noise: Option<G>,
     pub seed: u64,
@@ -92,7 +92,7 @@ where
     {
         let mut counter = 0;
         let mut fevmd = FEVMData {
-            ptpdf: ParticlePDF::new(
+            ptpdf: PDFParticles::new(
                 Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::zeros(size),
                 Self::PARAM_RANGES,
                 vec![1.0 / size as f32; size],
@@ -101,7 +101,7 @@ where
             opt_noise,
             seed,
         };
-        let mut new_ptpdf = ParticlePDF::new(
+        let mut new_ptpdf = PDFParticles::new(
             Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::zeros(size),
             Self::PARAM_RANGES,
             vec![1.0 / size as f32; size],

@@ -3,7 +3,7 @@
 use derive_more::Deref;
 use itertools::{zip_eq, Itertools};
 use log::error;
-use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dim, Dyn, MatrixView};
+use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -84,14 +84,10 @@ impl CovMatrix {
     }
 
     /// Create a [`CovMatrix`] from a matrix of D-dimensional vectors.
-    pub fn from_vectors<const D: usize, RStride, CStride>(
-        vectors: &MatrixView<f32, Const<D>, Dyn, RStride, CStride>,
+    pub fn from_vectors<const D: usize>(
+        vectors: &MatrixView<f32, Const<D>, Dyn>,
         optional_weights: Option<&[f32]>,
-    ) -> Result<Self, OcnusStatisticsError>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Result<Self, OcnusStatisticsError> {
         let mut matrix = DMatrix::from_iterator(
             D,
             D,
@@ -361,7 +357,7 @@ mod tests {
 
         let array_view = &array.as_view();
 
-        let covmat = CovMatrix::from_vectors::<3, Dyn, Const<3>>(array_view, None).unwrap();
+        let covmat = CovMatrix::from_vectors(array_view, None).unwrap();
 
         assert!((covmat.cholesky_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
         assert!((covmat.cholesky_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);

@@ -11,7 +11,7 @@ pub use ptpdf::*;
 pub use uvpdf::*;
 
 use itertools::zip_eq;
-use nalgebra::{Const, DMatrix, Dim, MatrixView, SVector, U1};
+use nalgebra::{DMatrix, SVector, SVectorView};
 use rand::Rng;
 use thiserror::Error;
 
@@ -40,19 +40,13 @@ where
     /// Estimates the relative density  at a specific position `x`.
     /// The result is not necessarily normalized,
     /// for an exact calculation or estimate of the density see the [`PDFExactDensity`] trait.
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, Const<P>, U1, RStride, CStride>,
-    ) -> f32;
+    fn relative_density(&self, x: &SVectorView<f32, P>) -> f32;
 
     /// Draw a single parameter vector from the underlying density.
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, OcnusStatisticsError>;
 
     /// Validate a single sample by checking for values that are out of the valid parameter range.
-    fn validate_sample<RStride: Dim, CStride: Dim>(
-        &self,
-        sample: &MatrixView<f32, Const<P>, U1, RStride, CStride>,
-    ) -> bool {
+    fn validate_sample(&self, sample: &SVectorView<f32, P>) -> bool {
         zip_eq(sample.iter(), self.valid_range().iter()).fold(true, |acc, (c, range)| {
             acc & ((&range.0 <= c) & (c <= &range.1))
         })
@@ -65,8 +59,5 @@ where
 /// A trait that provides a function that calculates or estimates the exact density .
 pub trait PDFExactDensity<const P: usize>: PDF<P> {
     /// Calculates or estimates the exact density  at a specific position `x`.
-    fn exact_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, Const<P>, U1, RStride, CStride>,
-    ) -> f32;
+    fn exact_density(&self, x: &SVectorView<f32, P>) -> f32;
 }

@@ -1,24 +1,20 @@
-use crate::statistics::{CovMatrix, PDF};
+use crate::stats::{CovMatrix, PDF};
 use log::warn;
-use nalgebra::{Const, Dim, Dyn, MatrixView, MatrixViewMut, SVector};
+use nalgebra::{Const, Dyn, MatrixView, MatrixViewMut, SVector, SVectorView};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use rayon::prelude::*;
 
 use super::OcnusStatisticsError;
 
-/// A probability density function (PDF) defined by a reference to an ensemble of particles.
+/// A PDF defined by a view of a matrix of ensemble particles.
 #[derive(Debug)]
-pub struct ParticlePDF<'a, const P: usize, RStride, CStride>
-where
-    RStride: Dim,
-    CStride: Dim,
-{
+pub struct PDFParticles<'a, const P: usize> {
     /// A [`CovMatrix`] that describes an estimate of the underlying particle PDF.
     covmat: CovMatrix,
 
     /// The particle ensemble that describes the overarching PDF.
-    particles: MatrixViewMut<'a, f32, Const<P>, Dyn, RStride, CStride>,
+    particles: MatrixViewMut<'a, f32, Const<P>, Dyn>,
 
     /// Valid parameter range.
     range: [(f32, f32); P],
@@ -27,19 +23,15 @@ where
     weights: Vec<f32>,
 }
 
-impl<'a, const P: usize, RStride, CStride> ParticlePDF<'a, P, RStride, CStride>
-where
-    RStride: Dim,
-    CStride: Dim,
-{
+impl<'a, const P: usize> PDFParticles<'a, P> {
     /// Access the covariance matrix.
     pub fn covmat(&self) -> &CovMatrix {
         &self.covmat
     }
 
-    /// Create a new [`ParticlePDF`] from a particle matrix view.
+    /// Create a new [`PDFParticles`] from a particle matrix view.
     pub fn from_particles(
-        particles: MatrixViewMut<'a, f32, Const<P>, Dyn, RStride, CStride>,
+        particles: MatrixViewMut<'a, f32, Const<P>, Dyn>,
         range: [(f32, f32); P],
         optional_weights: Option<Vec<f32>>,
     ) -> Result<Self, OcnusStatisticsError> {
@@ -73,24 +65,18 @@ where
     }
 
     /// Access the ensemble particle matrix.
-    pub fn particles_ref(&self) -> MatrixView<f32, Const<P>, Dyn, RStride, CStride> {
+    pub fn particles_ref(&self) -> MatrixView<f32, Const<P>, Dyn> {
         self.particles.as_view()
     }
 
     /// Mutably access the ensemble particle matrix.
-    pub fn particles_mut(
-        &mut self,
-    ) -> &mut MatrixViewMut<'a, f32, Const<P>, Dyn, RStride, CStride> {
+    pub fn particles_mut(&mut self) -> &mut MatrixViewMut<'a, f32, Const<P>, Dyn> {
         &mut self.particles
     }
 }
 
-impl<'a, const P: usize, RStride, CStride> PDF<P> for ParticlePDF<'a, P, RStride, CStride>
-where
-    RStride: Dim,
-    CStride: Dim,
-{
-    fn relative_density(&self, x: &MatrixView<f32, Const<P>, U1, RStride, CStride>) -> f32 {
+impl<'a, const P: usize> PDF<P> for PDFParticles<'a, P> {
+    fn relative_density(&self, _x: &SVectorView<f32, P>) -> f32 {
         unimplemented!()
     }
 
@@ -140,7 +126,7 @@ where
 
             if (attempts > 250) && (attempts % 250 == 0) {
                 warn!(
-                    "ParticlePDF::draw_sample has failed to draw a valid sample after {} tries",
+                    "PDFParticles::draw_sample has failed to draw a valid sample after {} tries",
                     attempts
                 );
             }
@@ -155,14 +141,11 @@ where
 }
 
 /// Compute new importance weights for `ptpdf` assuming a transition from `ptpdf_from`.
-pub fn compute_importance_weights<const P: usize, RStride, CStride>(
-    ptpdf: &mut ParticlePDF<P, RStride, CStride>,
-    ptpdf_from: &ParticlePDF<P, RStride, CStride>,
+pub fn ptpdf_importance_weighting<const P: usize>(
+    ptpdf: &mut PDFParticles<P>,
+    ptpdf_from: &PDFParticles<P>,
     prior: &impl PDF<P>,
-) where
-    RStride: Dim,
-    CStride: Dim,
-{
+) {
     let covmat_inv = ptpdf_from.covmat().inverse_matrix();
 
     let mut weights = ptpdf
@@ -172,7 +155,7 @@ pub fn compute_importance_weights<const P: usize, RStride, CStride>(
             let value = &ptpdf_from
                 .particles
                 .par_column_iter()
-                .zip(ptpdf_from.weights)
+                .zip(&ptpdf_from.weights)
                 .map(|(params_old, weight_old)| {
                     let delta = params_new - params_old;
 

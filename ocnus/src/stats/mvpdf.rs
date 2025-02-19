@@ -1,11 +1,11 @@
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
-    statistics::CovMatrix,
-    statistics::{OcnusStatisticsError, PDFExactDensity, PDF},
+    stats::CovMatrix,
+    stats::{OcnusStatisticsError, PDFExactDensity, PDF},
 };
 use log::warn;
-use nalgebra::{Const, Dim, MatrixView, SVector, U1};
+use nalgebra::{SVector, SVectorView};
 use rand::Rng;
 use rand_distr::Normal;
 use serde::{Deserialize, Serialize};
@@ -36,10 +36,7 @@ impl<const P: usize> PDFMultivariate<P> {
 }
 
 impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
-    fn relative_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, Const<P>, U1, RStride, CStride>,
-    ) -> f32 {
+    fn relative_density(&self, x: &SVectorView<f32, P>) -> f32 {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
 
@@ -56,7 +53,7 @@ impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
         // Counter for rejected proposals.
         let mut attempts = 0;
 
-        while !self.validate_sample::<Const<1>, Const<P>>(&proposal.as_view()) {
+        while !self.validate_sample(&proposal.as_view()) {
             proposal = self.mean
                 + self.covmat.cholesky_ltm()
                     * SVector::<f32, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
@@ -80,10 +77,7 @@ impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
 }
 
 impl<const P: usize> PDFExactDensity<P> for &PDFMultivariate<P> {
-    fn exact_density<RStride: Dim, CStride: Dim>(
-        &self,
-        x: &MatrixView<f32, Const<P>, U1, RStride, CStride>,
-    ) -> f32 {
+    fn exact_density(&self, x: &SVectorView<f32, P>) -> f32 {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
 
