@@ -33,11 +33,11 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
     pub fn from_particles(
         particles: MatrixViewMut<'a, f32, Const<P>, Dyn>,
         range: [(f32, f32); P],
-        optional_weights: Option<Vec<f32>>,
+        opt_weights: Option<Vec<f32>>,
     ) -> Result<Self, OcnusStatisticsError> {
-        let (covmat, weights) = match optional_weights {
+        let (covmat, weights) = match opt_weights {
             Some(weights) => (
-                CovMatrix::from_vectors(&particles.as_view(), Some(&weights.as_slice()))?,
+                CovMatrix::from_vectors(&particles.as_view(), Some(weights.as_slice()))?,
                 weights,
             ),
             None => (
@@ -75,7 +75,7 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
     }
 }
 
-impl<'a, const P: usize> PDF<P> for PDFParticles<'a, P> {
+impl<const P: usize> PDF<P> for PDFParticles<'_, P> {
     fn relative_density(&self, _x: &SVectorView<f32, P>) -> f32 {
         unimplemented!()
     }

@@ -1,8 +1,9 @@
 //! Implementation of a `N`-dimensional vector observable.
 
-use crate::model::OcnusObser;
+use crate::OcnusObser;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
+use nalgebra::SVector;
 use num_traits::{Float, Zero};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,8 +18,6 @@ pub struct ObserVec<const N: usize>(
     #[serde(with = "serde_arrays")]
     pub [f32; N],
 );
-
-impl<const N: usize> OcnusObser for ObserVec<N> {}
 
 impl<const N: usize> ObserVec<N> {
     /// Returns true if any entry within the observation vector is `NaN`.
@@ -36,7 +35,7 @@ impl<const N: usize> ObserVec<N> {
         (self - other).ss() / N as f32
     }
 
-    /// Calculate the sum of squares over the entries within the obersvation vector.
+    /// Calculate the sum of squares over the entries within the observation vector.
     pub fn ss(&self) -> f32 {
         self.iter().map(|value| value.powi(2)).sum::<f32>()
     }
@@ -47,52 +46,6 @@ impl<const N: usize> ObserVec<N> {
     }
 }
 
-impl<const N: usize> Default for ObserVec<N> {
-    fn default() -> Self {
-        ObserVec([f32::nan(); N])
-    }
-}
-
-impl Display for ObserVec<3> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:.2} | {:.2} | {:.2}]", self[0], self[1], self[2])
-    }
-}
-
-impl Display for ObserVec<4> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[{:.2} | {:.2} | {:.2} | {:.2}]",
-            self[0], self[1], self[2], self[3]
-        )
-    }
-}
-
-impl<const N: usize> PartialEq for ObserVec<N> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter()
-            .zip(other.iter())
-            .map(|(val_x, val_y)| val_x == val_y)
-            .fold(true, |acc, next| acc & next)
-    }
-}
-
-impl<const N: usize> Zero for ObserVec<N> {
-    fn is_zero(&self) -> bool {
-        self.0.iter().all(|value| value == &0.0)
-    }
-
-    fn set_zero(&mut self) {
-        self.0 = [0.0; N]
-    }
-
-    fn zero() -> Self {
-        Self([0.0; N])
-    }
-}
-
-// Implement addition, subtraction and commutative multiplication for both ObserVec< N> and its references.
 impl<const N: usize> Add for ObserVec<N> {
     type Output = ObserVec<N>;
 
@@ -124,6 +77,34 @@ impl<'a, const N: usize> Add<&'a ObserVec<N>> for &'a ObserVec<N> {
 impl<const N: usize> AddAssign for ObserVec<N> {
     fn add_assign(&mut self, rhs: Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += rhs);
+    }
+}
+
+impl<const N: usize> Default for ObserVec<N> {
+    fn default() -> Self {
+        ObserVec([f32::nan(); N])
+    }
+}
+
+impl Display for ObserVec<3> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{:.2} | {:.2} | {:.2}]", self[0], self[1], self[2])
+    }
+}
+
+impl Display for ObserVec<4> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{:.2} | {:.2} | {:.2} | {:.2}]",
+            self[0], self[1], self[2], self[3]
+        )
+    }
+}
+
+impl<const N: usize> From<SVector<f32, N>> for ObserVec<N> {
+    fn from(value: SVector<f32, N>) -> Self {
+        ObserVec::from(value.data.0[0])
     }
 }
 
@@ -183,6 +164,17 @@ impl<'a, const N: usize> Mul<&'a ObserVec<N>> for f32 {
     }
 }
 
+impl<const N: usize> OcnusObser for ObserVec<N> {}
+
+impl<const N: usize> PartialEq for ObserVec<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter()
+            .zip(other.iter())
+            .map(|(val_x, val_y)| val_x == val_y)
+            .fold(true, |acc, next| acc & next)
+    }
+}
+
 impl<const N: usize> Sub for ObserVec<N> {
     type Output = ObserVec<N>;
 
@@ -214,6 +206,20 @@ impl<'a, const N: usize> Sub<&'a ObserVec<N>> for &'a ObserVec<N> {
                 .try_into()
                 .unwrap(),
         )
+    }
+}
+
+impl<const N: usize> Zero for ObserVec<N> {
+    fn is_zero(&self) -> bool {
+        self.0.iter().all(|value| value == &0.0)
+    }
+
+    fn set_zero(&mut self) {
+        self.0 = [0.0; N]
+    }
+
+    fn zero() -> Self {
+        Self([0.0; N])
     }
 }
 

@@ -86,7 +86,7 @@ impl CovMatrix {
     /// Create a [`CovMatrix`] from a matrix of D-dimensional vectors.
     pub fn from_vectors<const D: usize>(
         vectors: &MatrixView<f32, Const<D>, Dyn>,
-        optional_weights: Option<&[f32]>,
+        opt_weights: Option<&[f32]>,
     ) -> Result<Self, OcnusStatisticsError> {
         let mut matrix = DMatrix::from_iterator(
             D,
@@ -99,7 +99,7 @@ impl CovMatrix {
                     let x = vectors.row(jdx);
                     let y = vectors.row(kdx);
 
-                    match optional_weights {
+                    match opt_weights {
                         Some(w) => covariance_with_weights(x, y, w),
                         None => covariance(x, y),
                     }

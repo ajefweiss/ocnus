@@ -1,4 +1,4 @@
-//! Model observables, i.e. types that implement [`OcnusObser`](crate::model::OcnusOber).
+//! Observable types, i.e. implementations of [`OcnusObser`](crate::OcnusObser).
 
 mod vector;
 

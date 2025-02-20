@@ -36,16 +36,16 @@ impl<O> ScObs<O> {
     }
 
     /// Create a new [`ScObs`].
-    pub fn new(timestamp: f32, configuration: ScConf, optional_observation: Option<O>) -> Self {
+    pub fn new(timestamp: f32, configuration: ScConf, opt_observation: Option<O>) -> Self {
         Self {
             timestamp,
             configuration,
-            observation: optional_observation,
+            observation: opt_observation,
         }
     }
 
     /// Acces the observation field.
-    pub fn obersvation(&self) -> Option<&O> {
+    pub fn observation(&self) -> Option<&O> {
         self.observation.as_ref()
     }
 
@@ -60,7 +60,7 @@ impl<O> ScObs<O> {
 /// [`ScObsSeries`] has, among others, three important implementations:
 /// - [`ScObsSeries::add`] : Allows composition of two [`ScObsSeries`] objects.
 /// - [`ScObsSeries::sort_by_timestamp`] : Sorts the underlying vector of [`ScObs`] objets by their timestamps.
-/// - [`ScObsSeries::split`] : The reciprocal of one or multiple [`ScObs::add`] calls.
+/// - [`ScObsSeries::split`] : The reciprocal of one or multiple [`ScObsSeries::add`] calls.
 ///   Calling this function consumes a composite [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
 #[derive(Clone, Debug, Deserialize, IntoIterator, Serialize)]
 pub struct ScObsSeries<O> {
@@ -75,7 +75,7 @@ pub struct ScObsSeries<O> {
 impl<O> ScObsSeries<O> {
     /// Returns the number of individual [`ScObsSeries`] contained within.
     ///
-    /// This value corresponds to the length of the vector returned by [`ScObs::sort_by_time`].
+    /// This value corresponds to the length of the vector returned by [`ScObsSeries::sort_by_timestamp`].
     pub fn count_series(&self) -> usize {
         self.sorti.iter().fold(0, |acc, next| max(acc, *next)) + 1
     }
@@ -94,11 +94,6 @@ impl<O> ScObsSeries<O> {
     /// Returns `true`` if the observation contains no elements.
     pub fn is_empty(&self) -> bool {
         self.scobs.is_empty()
-    }
-
-    /// Returns an iterator over the observations.
-    pub fn iter(&self) -> impl Iterator<Item = (&ScObs<O>, usize)> {
-        zip_eq(self.scobs.iter(), self.sorti.iter()).map(|(scobs, sorti)| (scobs, *sorti))
     }
 
     /// Returns the number of elements in the observation.
@@ -131,7 +126,7 @@ impl<O> ScObsSeries<O> {
         }
     }
 
-    /// The reciprocal of [`ScObsSeries::sort_by_time`].
+    /// The reciprocal of [`ScObsSeries::sort_by_timestamp`].
     /// Calling this function consumes the [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
     pub fn split(self) -> Vec<ScObsSeries<O>>
     where
@@ -240,7 +235,7 @@ mod tests {
 
         assert!(ts3.count_series() == 1);
         assert!(ts4.count_series() == 1);
-        assert!(ts4.iter().last().unwrap().0.timestamp == 0.5);
+        assert!((&ts4).into_iter().last().unwrap().timestamp == 0.5);
 
         ts3 += ts4.clone();
 
