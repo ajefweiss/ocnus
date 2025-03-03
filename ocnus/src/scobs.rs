@@ -3,7 +3,7 @@ use itertools::zip_eq;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::{
-    cmp::{max, Ordering},
+    cmp::{Ordering, max},
     ops::{Add, AddAssign},
 };
 

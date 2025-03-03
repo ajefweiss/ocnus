@@ -1,0 +1,524 @@
+use crate::{
+    OcnusModel, OcnusState, ScConf, ScObs, ScObsSeries,
+    fevm::{FEVM, FEVMError},
+    geometry::{CCModel, ECModel, XCModelState},
+    math::bessel_jn,
+    obser::ObserVec,
+    stats::PDF,
+};
+use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
+use std::cmp::Ordering;
+
+/// Linear force-free magnetic field observable.
+pub fn cc_lff_obs<const P: usize, M, S>(
+    (r, _phi, _psi): (f32, f32, f32),
+    params: &SVectorView<f32, P>,
+    _state: &XCModelState,
+) -> Option<Vector3<f32>>
+where
+    M: OcnusModel<P, S>,
+    S: OcnusState,
+{
+    // Extract parameters using their identifiers.
+    let b = M::get_param_value("B", params);
+    let y_offset = M::get_param_value("y", params);
+    let alpha_signed = M::get_param_value("alpha", params);
+
+    let (alpha, sign) = match alpha_signed.partial_cmp(&0.0) {
+        Some(ord) => match ord {
+            Ordering::Less => (-alpha_signed, -1.0),
+            _ => (alpha_signed, 1.0),
+        },
+        None => {
+            return None;
+        }
+    };
+
+    match r.partial_cmp(&1.0) {
+        Some(ord) => match ord {
+            Ordering::Greater => None,
+            _ => {
+                let b_linearized = b / (1.0 - y_offset.powi(2));
+
+                // Bessel function evaluation uses 11 terms.
+                let b_s = b_linearized * bessel_jn(alpha * r, 0);
+                let b_phi = b_linearized * sign * bessel_jn(alpha * r, 1);
+
+                Some(Vector3::new(0.0, b_phi, b_s))
+            }
+        },
+        None => None,
+    }
+}
+
+/// Uniform twist magnetic field observable.
+pub fn cc_ut_obs<const P: usize, M, S>(
+    (r, _phi, _psi): (f32, f32, f32),
+    params: &SVectorView<f32, P>,
+    _state: &XCModelState,
+) -> Option<Vector3<f32>>
+where
+    M: OcnusModel<P, S>,
+    S: OcnusState,
+{
+    // Extract parameters using their identifiers.
+    let b = M::get_param_value("B", params);
+    let y_offset = M::get_param_value("y", params);
+    let tau = M::get_param_value("tau", params);
+
+    match r.partial_cmp(&1.0) {
+        Some(ord) => match ord {
+            Ordering::Greater => None,
+            _ => {
+                let b_linearized = b / (1.0 - y_offset.powi(2));
+
+                let b_s = b_linearized / (1.0 + tau.powi(2) * (r).powi(2));
+                let b_phi = r * b_linearized * tau / (1.0 + tau.powi(2) * (r).powi(2));
+
+                Some(Vector3::new(0.0, b_phi, b_s))
+            }
+        },
+        None => None,
+    }
+}
+
+/// Magnetic field configuration as is used in Nieves-Chinchilla et al. (2018).
+pub fn ec_c10_obs<const P: usize, M, S>(
+    (r, _phi, _psi): (f32, f32, f32),
+    params: &SVectorView<f32, P>,
+    _state: &XCModelState,
+) -> Option<Vector3<f32>>
+where
+    M: OcnusModel<P, S>,
+    S: OcnusState,
+{
+    // Extract parameters using their identifiers.
+    let b = M::get_param_value("B", params);
+    let c_10 = M::get_param_value("c10", params);
+    let delta = M::get_param_value("delta", params);
+    let tau = M::get_param_value("tau", params);
+
+    match r.partial_cmp(&1.0) {
+        Some(ord) => match ord {
+            Ordering::Greater => None,
+            _ => {
+                let b_s = b * delta * (tau - r.powi(2));
+                let b_phi = -2.0 * b * delta / (delta.powi(2) + 1.0) / c_10 * r;
+
+                Some(Vector3::new(0.0, b_phi, b_s))
+            }
+        },
+        None => None,
+    }
+}
+
+macro_rules! concat_arrays {
+    ($a: expr, $b: expr) => {{
+        let mut c = [$a[0]; $a.len() + $b.len()];
+
+        let mut i1 = 0;
+        let mut i2 = 0;
+
+        while i1 < $a.len() {
+            c[i1] = $a[i1];
+
+            i1 += 1;
+        }
+
+        while i2 < $b.len() {
+            c[$a.len() + i2] = $b[i2];
+
+            i2 += 1;
+        }
+
+        c
+    }};
+}
+
+macro_rules! impl_fevm {
+    ($model: ident, $parent: ident, $params: expr, $param_ranges:expr, $fn_obs: tt, $docs: literal) => {
+        #[doc=$docs]
+        pub struct $model<T>(T)
+        where
+            for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>;
+
+        impl<T> OcnusModel<{ $parent::PARAMS.len() + $params.len() }, XCModelState> for $model<T>
+        where
+            for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>,
+        {
+            const PARAMS: [&'static str; { $parent::PARAMS.len() + $params.len() }] =
+                concat_arrays!($parent::PARAMS, $params);
+            const PARAM_RANGES: [(f32, f32); { $parent::PARAMS.len() + $params.len() }] =
+                concat_arrays!($parent::PARAM_RANGES, $param_ranges);
+
+            fn basis_from_ics<CStride: Dim>(
+                ics: &VectorView3<f32>,
+                vec: &VectorView3<f32>,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                state: &XCModelState,
+            ) -> Vector3<f32> {
+                $parent::basis_from_ics(
+                    ics,
+                    vec,
+                    &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
+                    state,
+                )
+            }
+
+            fn coords_basis_ics<CStride: Dim>(
+                ics: &VectorView3<f32>,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                state: &XCModelState,
+            ) -> [Vector3<f32>; 3] {
+                $parent::coords_basis_ics(
+                    ics,
+                    &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
+                    state,
+                )
+            }
+
+            fn coords_from_ics<CStride: Dim>(
+                ics: &VectorView3<f32>,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                state: &XCModelState,
+            ) -> Vector3<f32> {
+                $parent::coords_from_ics(
+                    ics,
+                    &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
+                    state,
+                )
+            }
+
+            fn coords_into_ics<CStride: Dim>(
+                xyz: &VectorView3<f32>,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                state: &XCModelState,
+            ) -> Vector3<f32> {
+                $parent::coords_into_ics(
+                    xyz,
+                    &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
+                    state,
+                )
+            }
+        }
+
+        impl<T> FEVM<{ $parent::PARAMS.len() + $params.len() }, 3, XCModelState> for $model<T>
+        where
+            T: Sync,
+            for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>,
+            Self: OcnusModel<{ $parent::PARAMS.len() + $params.len() }, XCModelState>,
+        {
+            const RCS: usize = 128;
+
+            fn fevm_forward(
+                &self,
+                time_step: f32,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                >,
+                state: &mut XCModelState,
+            ) -> Result<(), FEVMError> {
+                // Extract parameters using their identifiers.
+                let vel = Self::get_param_value("v", params) / 1.496e8;
+                state.t += time_step;
+                state.x += vel * time_step as f32;
+
+                Ok(())
+            }
+
+            fn fevm_observe(
+                &self,
+                scobs: &ScObs<ObserVec<3>>,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                >,
+                state: &XCModelState,
+            ) -> Result<ObserVec<3>, FEVMError> {
+                let sc_pos = Vector3::from(match scobs.configuration() {
+                    ScConf::Distance(x) => [*x, 0.0, 0.0],
+                    ScConf::Position(r) => *r,
+                });
+
+                let q = Self::coords_into_ics(&sc_pos.as_view(), params, state);
+
+                let (r, phi, z) = (q[0], q[1], q[2]);
+
+                let obs = $fn_obs::<{ $parent::PARAMS.len() + $params.len() }, Self, XCModelState>(
+                    (r, phi, z),
+                    params,
+                    state,
+                );
+
+                match obs {
+                    Some(b_q) => {
+                        let b_s = Self::basis_from_ics(&q.as_view(), &b_q.as_view(), params, state);
+
+                        Ok(ObserVec::<3>::from(b_s))
+                    }
+                    None => Ok(ObserVec::default()),
+                }
+            }
+
+            fn fevm_state(
+                &self,
+                _series: &ScObsSeries<ObserVec<3>>,
+                params: &VectorView<
+                    f32,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                    U1,
+                    Const<{ $parent::PARAMS.len() + $params.len() }>,
+                >,
+                state: &mut XCModelState,
+            ) -> Result<(), FEVMError> {
+                // Extract parameters using their identifiers.
+                let phi = Self::get_param_value("phi", params);
+                let theta = Self::get_param_value("theta", params);
+                let y = Self::get_param_value("y", params);
+                let radius = Self::get_param_value("radius", params);
+                let x_init = Self::get_param_value("x_0", params);
+
+                state.t = 0.0;
+                state.x = x_init;
+                state.z = radius * y * ((1.0 - (phi.sin() * theta.cos()).powi(2)) as f32).sqrt()
+                    / phi.cos()
+                    / theta.cos();
+
+                Ok(())
+            }
+
+            fn model_prior(&self) -> impl PDF<{ $parent::PARAMS.len() + $params.len() }> {
+                &self.0
+            }
+
+            fn validate_model_prior(&self) -> bool {
+                (&self.0)
+                    .valid_range()
+                    .iter()
+                    .zip(&Self::PARAM_RANGES)
+                    .fold(true, |acc, (pr, mr)| {
+                        acc & ((pr.0 >= mr.0) & (pr.1 <= mr.1))
+                    })
+            }
+        }
+    };
+}
+
+impl_fevm!(
+    CCLFFModel,
+    CCModel,
+    ["v", "B", "alpha", "x_0"],
+    [(250.0, 2500.0), (5.0, 100.0), (-2.4, 2.4), (0.0, 1.0),],
+    cc_lff_obs,
+    "Circular cylindrical linear force-free magnetic flux rope model."
+);
+
+impl_fevm!(
+    CCUTModel,
+    CCModel,
+    ["v", "B", "tau", "x_0"],
+    [(250.0, 2500.0), (5.0, 100.0), (-10.0, 10.0), (0.0, 1.0),],
+    cc_ut_obs,
+    "Circular cylindrical uniform twist magnetic flux rope model."
+);
+
+impl_fevm!(
+    NC18Model,
+    ECModel,
+    ["v", "B", "tau", "c10", "x_0"],
+    [
+        (250.0, 2500.0),
+        (5.0, 100.0),
+        (1.0, 2.0),
+        (-10.0, 10.0),
+        (0.0, 1.0),
+    ],
+    ec_c10_obs,
+    "Elliptical cylindrical magnetic flux rope model, implemented as described in Nieves-Chinchilla et al. (2018)."
+);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        fevm::{FEVMData, noise::FEVMNoiseZero},
+        stats::{PDFConstant, PDFUniform, PDFUnivariates},
+    };
+    use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
+
+    #[test]
+    fn test_cclffmodel() {
+        let prior = PDFUnivariates::new([
+            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
+            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
+            PDFConstant::new_uvpdf(1125.0),
+            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
+            PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
+            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
+        ]);
+
+        let model = CCLFFModel(prior);
+
+        assert!(model.validate_model_prior());
+
+        let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f32 * 3600.0 * 2.0,
+                ScConf::Distance(1.0),
+                None,
+            )
+        }));
+
+        let mut data = FEVMData {
+            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            states: vec![XCModelState::default(); 1],
+            rseed: 42,
+        };
+
+        let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
+
+        data.params.set_column(
+            0,
+            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+        );
+
+        model
+            .fevm_initialize_states_only(&sc, &mut data)
+            .expect("initialization failed");
+        model
+            .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
+            .expect("simulation failed");
+
+        assert!((output[(0, 0)][1] - 18.7926).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.7875).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 0.8228).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_ccutmodel() {
+        let prior = PDFUnivariates::new([
+            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
+            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
+            PDFConstant::new_uvpdf(1125.0),
+            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
+            PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
+            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
+        ]);
+
+        let model = CCUTModel(prior);
+
+        assert!(model.validate_model_prior());
+
+        let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f32 * 3600.0 * 2.0,
+                ScConf::Distance(1.0),
+                None,
+            )
+        }));
+
+        let mut data = FEVMData {
+            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            states: vec![XCModelState::default(); 1],
+            rseed: 42,
+        };
+
+        let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
+
+        data.params.set_column(
+            0,
+            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+        );
+
+        model
+            .fevm_initialize_states_only(&sc, &mut data)
+            .expect("initialization failed");
+        model
+            .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
+            .expect("simulation failed");
+
+        assert!((output[(0, 0)][1] - 16.0615).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.1827).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 1.636).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_nc18model() {
+        let prior = PDFUnivariates::new([
+            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
+            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
+            PDFConstant::new_uvpdf(1125.0),
+            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
+            PDFUniform::new_uvpdf((1.0, 2.0)).unwrap(),
+            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
+        ]);
+
+        let model = CCUTModel(prior);
+
+        assert!(model.validate_model_prior());
+
+        let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f32 * 3600.0 * 2.0,
+                ScConf::Distance(1.0),
+                None,
+            )
+        }));
+
+        let mut data = FEVMData {
+            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            states: vec![XCModelState::default(); 1],
+            rseed: 42,
+        };
+
+        let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
+
+        data.params.set_column(
+            0,
+            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+        );
+
+        model
+            .fevm_initialize_states_only(&sc, &mut data)
+            .expect("initialization failed");
+        model
+            .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
+            .expect("simulation failed");
+
+        assert!((output[(0, 0)][1] - 16.0615).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.1827).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 1.636).abs() < 1e-4);
+    }
+}

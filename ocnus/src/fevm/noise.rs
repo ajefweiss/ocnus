@@ -9,10 +9,19 @@ pub trait FEVMNoiseGen<const N: usize>: Sync {
     fn generate_noise(&self, size: usize, rng: &mut impl Rng) -> DVector<ObserVec<N>>;
 }
 
+/// A zero noise generator. Meant be used as None::<FEVMNoiseZero>.
+pub struct FEVMNoiseZero;
+
+impl<const N: usize> FEVMNoiseGen<N> for FEVMNoiseZero {
+    fn generate_noise(&self, _size: usize, _rng: &mut impl Rng) -> DVector<ObserVec<N>> {
+        DVector::zeros(N)
+    }
+}
+
 /// A univariate random normal FEVM noise generator.
 pub struct FEVMNoiseGaussian(f32);
 
-impl<const N: usize> FEVMNoiseGen<N> for &FEVMNoiseGaussian {
+impl<const N: usize> FEVMNoiseGen<N> for FEVMNoiseGaussian {
     fn generate_noise(&self, size: usize, rng: &mut impl Rng) -> DVector<ObserVec<N>> {
         let normal = Normal::new(0.0, self.0).unwrap();
 

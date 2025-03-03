@@ -1,11 +1,10 @@
+use crate::stats::{StatsError, PDF};
 use derive_more::{Deref, DerefMut, IntoIterator};
 use log::warn;
 use nalgebra::{MatrixView, SVector, SVectorView, U1};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use serde::{Deserialize, Serialize};
-
-use super::{OcnusStatisticsError, PDF};
 
 /// A P-dimensional PDF composed of independent univariate PDFs.
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, IntoIterator, Serialize)]
@@ -34,7 +33,7 @@ impl<const P: usize> PDF<P> for &PDFUnivariates<P> {
         rlh
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, StatsError> {
         let mut sample = [0.0; P];
 
         sample
@@ -82,7 +81,7 @@ impl PDF<1> for &PDFUnivariate {
         }
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, StatsError> {
         let sample = match self {
             PDFUnivariate::Constant(pdf) => pdf.draw_sample(rng),
             PDFUnivariate::Cosine(pdf) => pdf.draw_sample(rng),
@@ -128,7 +127,7 @@ impl PDF<1> for &PDFConstant {
         1.0
     }
 
-    fn draw_sample(&self, _rng: &mut impl Rng) -> Result<SVector<f32, 1>, OcnusStatisticsError> {
+    fn draw_sample(&self, _rng: &mut impl Rng) -> Result<SVector<f32, 1>, StatsError> {
         Ok(SVector::from([self.constant]))
     }
 
@@ -145,14 +144,14 @@ pub struct PDFCosine {
 
 impl PDFCosine {
     /// Create a new [`PDFCosine`].
-    pub fn new(range: (f32, f32)) -> Result<Self, OcnusStatisticsError> {
+    pub fn new(range: (f32, f32)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if (minv < -std::f32::consts::PI / 2.0)
             || (maxv > std::f32::consts::PI / 2.0)
             || (minv > maxv)
         {
-            return Err(OcnusStatisticsError::InvalidRange {
+            return Err(StatsError::InvalidRange {
                 name: "PDFCosine",
                 maxv,
                 minv,
@@ -163,7 +162,7 @@ impl PDFCosine {
     }
 
     /// Create a new [`PDFCosine`] wrapped within the [`PDFUnivariate`] ADT.
-    pub fn new_uvpdf(range: (f32, f32)) -> Result<PDFUnivariate, OcnusStatisticsError> {
+    pub fn new_uvpdf(range: (f32, f32)) -> Result<PDFUnivariate, StatsError> {
         Ok(PDFUnivariate::Cosine(Self::new(range)?))
     }
 }
@@ -173,7 +172,7 @@ impl PDF<1> for &PDFCosine {
         x[0].cos()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, StatsError> {
         // The range is limited to the interval [-π/2, π/2].
         // This invariant is guaranteed by the constructor.
         let (minv, maxv) = self.range;
@@ -198,11 +197,11 @@ pub struct PDFNormal {
 
 impl PDFNormal {
     /// Create a new [`PDFNormal`].
-    pub fn new(mean: f32, std_dev: f32, range: (f32, f32)) -> Result<Self, OcnusStatisticsError> {
+    pub fn new(mean: f32, std_dev: f32, range: (f32, f32)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if (minv < mean) || (maxv > mean) || (minv > maxv) {
-            return Err(OcnusStatisticsError::InvalidRange {
+            return Err(StatsError::InvalidRange {
                 name: "PDFNormal",
                 maxv,
                 minv,
@@ -221,7 +220,7 @@ impl PDFNormal {
         mean: f32,
         std_dev: f32,
         range: (f32, f32),
-    ) -> Result<PDFUnivariate, OcnusStatisticsError> {
+    ) -> Result<PDFUnivariate, StatsError> {
         Ok(PDFUnivariate::Normal(Self::new(mean, std_dev, range)?))
     }
 }
@@ -231,7 +230,7 @@ impl PDF<1> for &PDFNormal {
         ((x[0] - self.mean).powi(2) / 2.0 / self.std_dev.powi(2)).exp()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, StatsError> {
         let (minv, maxv) = self.range;
         let normal = Normal::new(self.mean, self.std_dev).expect("invalid variance");
 
@@ -272,11 +271,11 @@ pub struct PDFReciprocal {
 
 impl PDFReciprocal {
     /// Create a new [`PDFReciprocal`].
-    pub fn new(range: (f32, f32)) -> Result<Self, OcnusStatisticsError> {
+    pub fn new(range: (f32, f32)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if (minv < 0.0) || (maxv < 0.0) || (minv > maxv) {
-            return Err(OcnusStatisticsError::InvalidRange {
+            return Err(StatsError::InvalidRange {
                 name: "PDFReciprocal",
                 maxv,
                 minv,
@@ -287,7 +286,7 @@ impl PDFReciprocal {
     }
 
     /// Create a new [`PDFReciprocal`] wrapped within the [`PDFUnivariate`] ADT.
-    pub fn new_uvpdf(range: (f32, f32)) -> Result<PDFUnivariate, OcnusStatisticsError> {
+    pub fn new_uvpdf(range: (f32, f32)) -> Result<PDFUnivariate, StatsError> {
         Ok(PDFUnivariate::Reciprocal(Self::new(range)?))
     }
 }
@@ -299,11 +298,11 @@ impl PDF<1> for &PDFReciprocal {
         1.0 / (x[0] * (maxv.ln() - minv.ln()))
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, StatsError> {
         let (minv, maxv) = self.range;
 
         if (minv < 0.0) || (maxv < 0.0) {
-            return Err(OcnusStatisticsError::InvalidRange {
+            return Err(StatsError::InvalidRange {
                 name: "PDFReciprocal",
                 maxv,
                 minv,
@@ -331,11 +330,11 @@ pub struct PDFUniform {
 
 impl PDFUniform {
     /// Create a new [`PDFUniform`].
-    pub fn new(range: (f32, f32)) -> Result<Self, OcnusStatisticsError> {
+    pub fn new(range: (f32, f32)) -> Result<Self, StatsError> {
         let (minv, maxv) = range;
 
         if minv >= maxv {
-            return Err(OcnusStatisticsError::InvalidRange {
+            return Err(StatsError::InvalidRange {
                 name: "PDFUniform",
                 maxv,
                 minv,
@@ -346,7 +345,7 @@ impl PDFUniform {
     }
 
     /// Create a new [`PDFUniform`] wrapped within the [`PDFUnivariate`] ADT.
-    pub fn new_uvpdf(range: (f32, f32)) -> Result<PDFUnivariate, OcnusStatisticsError> {
+    pub fn new_uvpdf(range: (f32, f32)) -> Result<PDFUnivariate, StatsError> {
         Ok(PDFUnivariate::Uniform(Self::new(range)?))
     }
 }
@@ -356,7 +355,7 @@ impl PDF<1> for &PDFUniform {
         1.0
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, 1>, StatsError> {
         let (minv, maxv) = self.range;
         let uniform = Uniform::new_inclusive(minv, maxv).unwrap();
 

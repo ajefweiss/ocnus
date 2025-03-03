@@ -71,47 +71,6 @@ where
     [Vector3::new(r, phi, y), Vector3::zeros(), dphi, dpsi]
 }
 
-/// Linear force-free magnetic field observable.
-pub fn cc_lff_obs<M, const P: usize>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
-    _state: &LinearModelState,
-) -> Option<[f32; 3]>
-where
-    M: OcnusModel<P>,
-{
-    // Extract parameters using their identifiers.
-    let b = M::get_param_value("B", params).unwrap();
-    let y_offset = M::get_param_value("y", params).unwrap();
-    let alpha_signed = M::get_param_value("alpha", params).unwrap();
-
-    let (alpha, sign) = match alpha_signed.partial_cmp(&0.0) {
-        Some(ord) => match ord {
-            Ordering::Less => (-alpha_signed, -1.0),
-            _ => (alpha_signed, 1.0),
-        },
-        None => {
-            return None;
-        }
-    };
-
-    match r.partial_cmp(&1.0) {
-        Some(ord) => match ord {
-            Ordering::Greater => None,
-            _ => {
-                let b_linearized = b / (1.0 - y_offset.powi(2));
-
-                // Bessel function evaluation uses 11 terms.
-                let b_s = b_linearized * bessel_jn(alpha * r, 0);
-                let b_phi = b_linearized * sign * bessel_jn(alpha * r, 1);
-
-                Some([0.0, b_phi, b_s])
-            }
-        },
-        None => None,
-    }
-}
-
 /// Uniform twist magnetic field observable.
 pub fn cc_ut_obs<M, const P: usize>(
     (r, _phi, _psi): (f32, f32, f32),
@@ -233,7 +192,7 @@ macro_rules! impl_acylm {
 
                 let sc_fr_pos = quaternion.conjugate().transform_vector(&sc_pos.into());
 
-                // Compute q (internal) coordinates.
+                // Compute the intrinsic coordinates.
                 let [q, _dr, dphi, dpsi] = $fn_coords::<Self, { $params.len() }>(
                     (sc_fr_pos[0], sc_fr_pos[1], sc_fr_pos[2]),
                     params,

@@ -1,8 +1,11 @@
 //! Implementations of forward ensemble vector models (FEVMs).
 
+mod aclym;
 mod noise;
 
-use crate::stats::{OcnusStatisticsError, PDFParticles};
+pub use aclym::*;
+
+use crate::stats::StatsError;
 use crate::ScObs;
 use crate::{obser::ObserVec, stats::PDF, OcnusModel, OcnusState, ScObsSeries};
 use itertools::zip_eq;
@@ -47,7 +50,7 @@ pub enum FEVMError {
     #[error("attempted to simulate backwards in time (dt={0:.2}sec)")]
     NegativeTimeStep(f32),
     #[error("stats error")]
-    Stats(#[from] OcnusStatisticsError),
+    Stats(#[from] StatsError),
 }
 
 /// The trait that must be implemented for any FEVM with an N-dimensional vector observable.
@@ -218,7 +221,7 @@ where
         Ok(())
     }
 
-    /// Initialize the model states within a [`FEVMEnsbl`] object.
+    /// Initialize the model states within a [`FEVMData`] object.
     fn fevm_initialize_states_only(
         &self,
         series: &ScObsSeries<ObserVec<N>>,

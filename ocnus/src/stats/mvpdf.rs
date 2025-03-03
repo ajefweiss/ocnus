@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
     stats::CovMatrix,
-    stats::{OcnusStatisticsError, PDFExactDensity, PDF},
+    stats::{PDFExactDensity, StatsError, PDF},
 };
 use log::warn;
 use nalgebra::{SVector, SVectorView};
@@ -43,7 +43,7 @@ impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
         (-0.5 * value).exp()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
 
         let mut proposal = self.mean

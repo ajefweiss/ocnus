@@ -1,11 +1,9 @@
-use crate::stats::{CovMatrix, PDF};
+use crate::stats::{CovMatrix, StatsError, PDF};
 use log::warn;
 use nalgebra::{Const, Dyn, MatrixView, MatrixViewMut, SVector, SVectorView};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use rayon::prelude::*;
-
-use super::OcnusStatisticsError;
 
 /// A PDF defined by a view of a matrix of ensemble particles.
 #[derive(Debug)]
@@ -34,7 +32,7 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
         particles: MatrixViewMut<'a, f32, Const<P>, Dyn>,
         range: [(f32, f32); P],
         opt_weights: Option<Vec<f32>>,
-    ) -> Result<Self, OcnusStatisticsError> {
+    ) -> Result<Self, StatsError> {
         let (covmat, weights) = match opt_weights {
             Some(weights) => (
                 CovMatrix::from_vectors(&particles.as_view(), Some(weights.as_slice()))?,
@@ -80,7 +78,7 @@ impl<const P: usize> PDF<P> for PDFParticles<'_, P> {
         unimplemented!()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, OcnusStatisticsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let uniform = Uniform::new(0.0, 1.0).unwrap();
 

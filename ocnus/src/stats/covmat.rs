@@ -10,7 +10,7 @@ use std::{
     ops::{Mul, MulAssign},
 };
 
-use super::OcnusStatisticsError;
+use crate::stats::StatsError;
 
 /// A dynamically sized covariance matrix.
 #[derive(Clone, Debug, Deref, Deserialize, Serialize)]
@@ -36,14 +36,14 @@ impl CovMatrix {
     }
 
     /// Create a [`CovMatrix`] from a semi positive-definite square matrix.
-    pub fn from_matrix(matrix: &DMatrixView<f32>) -> Result<Self, OcnusStatisticsError> {
+    pub fn from_matrix(matrix: &DMatrixView<f32>) -> Result<Self, StatsError> {
         let matrix_owned = matrix.into_owned();
 
         let (cholesky_ltm, determinant) = match matrix.cholesky() {
             Some(result) => (result.l(), result.determinant()),
             None => {
                 error!("failed to perform the cholesky decomposition: {}", matrix);
-                return Err(OcnusStatisticsError::InvalidMatrix {
+                return Err(StatsError::InvalidMatrix {
                     msg: "failed to perform the cholesky decomposition",
                     matrix: matrix.into_owned(),
                 });
@@ -58,7 +58,7 @@ impl CovMatrix {
                 "input matrix determinant is below precision threshold: {}",
                 matrix
             );
-            return Err(OcnusStatisticsError::InvalidMatrix {
+            return Err(StatsError::InvalidMatrix {
                 msg: "input matrix determinant is below precision threshold",
                 matrix: matrix.into_owned(),
             });
@@ -68,7 +68,7 @@ impl CovMatrix {
             Some(result) => result,
             None => {
                 error!("input matrix is singular: {}", matrix);
-                return Err(OcnusStatisticsError::InvalidMatrix {
+                return Err(StatsError::InvalidMatrix {
                     msg: "input matrix is singular",
                     matrix: matrix.into_owned(),
                 });
@@ -87,7 +87,7 @@ impl CovMatrix {
     pub fn from_vectors<const D: usize>(
         vectors: &MatrixView<f32, Const<D>, Dyn>,
         opt_weights: Option<&[f32]>,
-    ) -> Result<Self, OcnusStatisticsError> {
+    ) -> Result<Self, StatsError> {
         let mut matrix = DMatrix::from_iterator(
             D,
             D,
@@ -195,7 +195,7 @@ impl CovMatrix {
 }
 
 impl TryFrom<&[f32]> for CovMatrix {
-    type Error = OcnusStatisticsError;
+    type Error = StatsError;
 
     fn try_from(value: &[f32]) -> Result<Self, Self::Error> {
         Self::from_matrix(
@@ -206,7 +206,7 @@ impl TryFrom<&[f32]> for CovMatrix {
 }
 
 impl<'a> TryFrom<&DMatrixView<'a, f32>> for CovMatrix {
-    type Error = OcnusStatisticsError;
+    type Error = StatsError;
 
     fn try_from(value: &DMatrixView<'a, f32>) -> Result<Self, Self::Error> {
         Self::from_matrix(value)

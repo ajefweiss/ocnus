@@ -18,7 +18,7 @@ use thiserror::Error;
 /// Errors associated with the [`stats`](crate::stats) module.
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
-pub enum OcnusStatisticsError {
+pub enum StatsError {
     #[error("matrix does not obey required invariants: {msg}")]
     InvalidMatrix {
         msg: &'static str,
@@ -43,7 +43,7 @@ where
     fn relative_density(&self, x: &SVectorView<f32, P>) -> f32;
 
     /// Draw a single parameter vector from the underlying density.
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, OcnusStatisticsError>;
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, StatsError>;
 
     /// Validate a single sample by checking for values that are out of the valid parameter range.
     fn validate_sample(&self, sample: &SVectorView<f32, P>) -> bool {
