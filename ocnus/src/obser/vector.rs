@@ -1,6 +1,6 @@
 //! Implementation of a `N`-dimensional vector observable.
 
-use crate::OcnusObser;
+use crate::obser::OcnusObser;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
 use nalgebra::SVector;

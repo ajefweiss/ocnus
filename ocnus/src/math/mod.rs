@@ -1,5 +1,4 @@
-//! Generic math and statistic data structures and routines.
-//!
+//! Generic mathematical functions and/or routines.
 
 mod bessel;
 mod factorial;

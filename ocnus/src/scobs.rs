@@ -10,11 +10,11 @@ use std::{
 /// The configuration of a single spacecraft observation, as used in [`ScObs`].
 ///
 /// The following variants are currently available and implemented:
-/// - [`ScConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate system.
-/// - [`ScConf::Position`] : (x, y, z) - position of the spacecraft in a heliocentric coordinate system.
+/// - [`ScObsConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate system.
+/// - [`ScObsConf::Position`] : (x, y, z) - position of the spacecraft in a heliocentric coordinate system.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "content")]
-pub enum ScConf {
+pub enum ScObsConf {
     /// Timestamp & Distance from the Sun.
     Distance(f32),
     /// Timestamp & Position in space in an arbitrary Solar-centric coordiante system.
@@ -25,18 +25,18 @@ pub enum ScConf {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScObs<O> {
     timestamp: f32,
-    configuration: ScConf,
+    configuration: ScObsConf,
     observation: Option<O>,
 }
 
 impl<O> ScObs<O> {
     /// Acces the configuration field.
-    pub fn configuration(&self) -> &ScConf {
+    pub fn configuration(&self) -> &ScObsConf {
         &self.configuration
     }
 
     /// Create a new [`ScObs`].
-    pub fn new(timestamp: f32, configuration: ScConf, opt_observation: Option<O>) -> Self {
+    pub fn new(timestamp: f32, configuration: ScObsConf, opt_observation: Option<O>) -> Self {
         Self {
             timestamp,
             configuration,
@@ -214,19 +214,19 @@ mod tests {
     fn test_scobs_slice() {
         let sctc1 = ScObs {
             timestamp: 0.0,
-            configuration: ScConf::Distance(1.0),
+            configuration: ScObsConf::Distance(1.0),
             observation: None::<f32>,
         };
 
         let sctc2 = ScObs {
             timestamp: 1.0,
-            configuration: ScConf::Distance(1.0),
+            configuration: ScObsConf::Distance(1.0),
             observation: None::<f32>,
         };
 
         let sctc3 = ScObs {
             timestamp: 0.5,
-            configuration: ScConf::Distance(1.0),
+            configuration: ScObsConf::Distance(1.0),
             observation: None::<f32>,
         };
 
