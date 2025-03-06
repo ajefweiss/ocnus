@@ -32,3 +32,7 @@ thiserror = "*"
 
 [dev-dependencies]
 criterion = "0.5.1"
+
+[[bench]]
+name = "acylm"
+harness = false

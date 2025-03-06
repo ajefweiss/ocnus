@@ -4,6 +4,7 @@ mod aclym;
 mod noise;
 
 pub use aclym::*;
+pub use noise::*;
 
 use crate::ScObs;
 use crate::stats::StatsError;
@@ -12,7 +13,6 @@ use itertools::zip_eq;
 use log::debug;
 use nalgebra::{Const, DMatrix, DVectorView, Dyn, Matrix, U1};
 use nalgebra::{SVectorView, VecStorage};
-use noise::{FEVMNoiseGen, FEVMNoiseZero};
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
@@ -358,7 +358,7 @@ where
 
     /// Perform an ensemble forward simulation and generate synthetic vector observables
     /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t. the
-    /// observation series.
+    /// observation series and filter.
     fn fevm_simulate_filter<F>(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
@@ -396,16 +396,16 @@ where
 
                             acc & (scenario_1 || scenario_2)
                         }) {
-                            **flag = filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series)
-                        }
+                            **flag = filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series);
 
-                        if **flag {
-                            if let Some(noise) = opt_noise {
-                                let size = out.nrows();
+                            if **flag {
+                                if let Some(noise) = opt_noise {
+                                    let size = out.nrows();
 
-                                out.iter_mut()
-                                    .zip(&noise.generate_noise(size, &mut rng))
-                                    .for_each(|(value, noisevec)| *value += noisevec.clone());
+                                    out.iter_mut()
+                                        .zip(&noise.generate_noise(size, &mut rng))
+                                        .for_each(|(value, noisevec)| *value += noisevec.clone());
+                                }
                             }
                         }
                     });

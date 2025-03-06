@@ -140,7 +140,7 @@ macro_rules! concat_arrays {
 macro_rules! impl_fevm {
     ($model: ident, $parent: ident, $params: expr, $param_ranges:expr, $fn_obs: tt, $docs: literal) => {
         #[doc=$docs]
-        pub struct $model<T>(T)
+        pub struct $model<T>(pub T)
         where
             for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>;
 
@@ -359,21 +359,6 @@ impl_fevm!(
     "Circular cylindrical uniform twist magnetic flux rope model."
 );
 
-// impl_fevm!(
-//     NC18Model,
-//     ECModel,
-//     ["v", "B", "tau", "c10", "x_0"],
-//     [
-//         (250.0, 2500.0),
-//         (5.0, 100.0),
-//         (1.0, 2.0),
-//         (-10.0, 10.0),
-//         (0.0, 1.0),
-//     ],
-//     ec_c10_obs,
-//     "Elliptical cylindrical magnetic flux rope model, implemented as described in Nieves-Chinchilla et al. (2018)."
-// );
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,60 +469,4 @@ mod tests {
         assert!((output[(2, 0)][1] - 19.1827).abs() < 1e-4);
         assert!((output[(4, 0)][2] + 1.636).abs() < 1e-4);
     }
-
-    // #[test]
-    // fn test_nc18model() {
-    //     let prior = PDFUnivariates::new([
-    //         PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
-    //         PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
-    //         PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
-    //         PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
-    //         PDFUniform::new_uvpdf((0.2, 1.0)).unwrap(),
-    //         PDFConstant::new_uvpdf(1125.0),
-    //         PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
-    //         PDFUniform::new_uvpdf((1.0, 2.0)).unwrap(),
-    //         PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
-    //         PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
-    //     ]);
-
-    //     let model = NC18Model(prior);
-
-    //     assert!(model.validate_model_prior());
-
-    //     let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
-    //         ScObs::new(
-    //             224640.0 + i as f32 * 3600.0 * 2.0,
-    //             ScObsConf::Distance(1.0),
-    //             None,
-    //         )
-    //     }));
-
-    //     let mut data = FEVMData {
-    //         params: Matrix::<f32, Const<10>, Dyn, VecStorage<f32, Const<10>, Dyn>>::zeros(1),
-    //         states: vec![XCState::default(); 1],
-    //         rseed: 42,
-    //     };
-
-    //     let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
-
-    //     data.params.set_column(
-    //         0,
-    //         &SVector::<f32, 10>::from([0.0, 0.0, 0.0, 0.2, 0.5, 600.0, 20.0, 1.25, 0.5, 0.0]),
-    //     );
-
-    //     model
-    //         .fevm_initialize_states_only(&sc, &mut data)
-    //         .expect("initialization failed");
-    //     model
-    //         .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
-    //         .expect("simulation failed");
-
-    //     println!("{}", output[(0, 0)][1]);
-    //     println!("{}", output[(2, 0)][1]);
-    //     println!("{}", output[(4, 0)][2]);
-
-    //     assert!((output[(0, 0)][1] - 10.047894).abs() < 1e-4);
-    //     assert!((output[(2, 0)][1] - 12.073919).abs() < 1e-4);
-    //     assert!((output[(4, 0)][2] - 0.0434046).abs() < 1e-4);
-    // }
 }
