@@ -11,7 +11,7 @@ use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
 use std::cmp::Ordering;
 
 /// An empty FEVM state.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FEVMNullState {}
 
 /// Linear force-free magnetic field observable.
@@ -397,7 +397,6 @@ mod tests {
             params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
-            rseed: 42,
         };
 
         let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
@@ -411,7 +410,7 @@ mod tests {
             .fevm_initialize_states_only(&sc, &mut data)
             .expect("initialization failed");
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
+            .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseZero, u64)>)
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 18.7926).abs() < 1e-4);
@@ -448,7 +447,6 @@ mod tests {
             params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
-            rseed: 42,
         };
 
         let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
@@ -462,7 +460,7 @@ mod tests {
             .fevm_initialize_states_only(&sc, &mut data)
             .expect("initialization failed");
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
+            .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseZero, u64)>)
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 16.0615).abs() < 1e-4);

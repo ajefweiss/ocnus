@@ -1,4 +1,4 @@
-use crate::stats::{CovMatrix, StatsError, PDF};
+use crate::stats::{CovMatrix, PDF, StatsError};
 use log::warn;
 use nalgebra::{Const, Dyn, MatrixView, MatrixViewMut, SVector, SVectorView};
 use rand::Rng;
@@ -139,10 +139,10 @@ impl<const P: usize> PDF<P> for PDFParticles<'_, P> {
 }
 
 /// Compute new importance weights for `ptpdf` assuming a transition from `ptpdf_from`.
-pub fn ptpdf_importance_weighting<const P: usize>(
+pub fn ptpdf_importance_weighting<T: PDF<P>, const P: usize>(
     ptpdf: &mut PDFParticles<P>,
     ptpdf_from: &PDFParticles<P>,
-    prior: &impl PDF<P>,
+    prior: &T,
 ) {
     let covmat_inv = ptpdf_from.covmat().inverse_matrix();
 

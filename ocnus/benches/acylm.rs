@@ -54,7 +54,6 @@ fn benchmark_lff(c: &mut Criterion) {
         params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(ENSEMBLE_SIZE),
         fevm_states: vec![FEVMNullState::default(); ENSEMBLE_SIZE],
         geom_states: vec![XCState::default(); ENSEMBLE_SIZE],
-        rseed: 42,
     };
 
     let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), ENSEMBLE_SIZE);
@@ -71,11 +70,12 @@ fn benchmark_lff(c: &mut Criterion) {
                 .fevm_initialize(
                     black_box(&sc),
                     black_box(&mut data),
-                    black_box(None::<&&PDFUnivariates<8>>),
+                    black_box(None::<&PDFUnivariates<8>>),
+                    42,
                 )
                 .unwrap();
             model
-                .fevm_simulate(&sc, &mut data, &mut output, None::<&FEVMNoiseZero>)
+                .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseZero, u64)>)
                 .unwrap();
         });
     });
