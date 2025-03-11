@@ -1,13 +1,13 @@
 use crate::{
     ScObsSeries,
-    fevm::{FEVM, FEVMData, FEVMError, FEVMNoiseGenerator, FEVMNoiseNull},
+    fevm::{FEVM, FEVMData, FEVMError, FEVMNoiseGenerator},
     obser::ObserVec,
     stats::{PDF, PDFParticles, ptpdf_importance_weighting},
 };
 use derive_builder::Builder;
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{DMatrix, DVector, DVectorView, Dyn, U1};
+use nalgebra::{DMatrix, DVectorView, Dyn, U1};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -44,53 +44,47 @@ where
 /// A data structure holding the results of any particle filtering method.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ParticleFilterResults<const P: usize, const N: usize, FS, GS> {
-    /// [`FEVMData`] object.
+    /// FEVM data object.
     pub fevmd: FEVMData<P, FS, GS>,
 
-    /// Output array with noise.
+    /// Output array.
     pub output: DMatrix<ObserVec<N>>,
 
     /// Error values.
     pub errors: Vec<f64>,
-
-    /// Error quantiles values (25%, 50% = mean, 75%).
-    pub error_quantiles: [f64; 3],
 }
 
 /// ABC-SMC algorithm mode.
-#[derive(Clone, Debug)]
-pub enum ABCParticleFilterMode<'a, F, const N: usize>
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ABCPFMode<const N: usize, F>
 where
     F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
 {
     /// ABC-SMC runs are filtered by a threshold value.
-    Threshold((&'a F, f64)),
+    Threshold((f64, F)),
 
     /// ABC-SMC runs are filtered by a fixed acceptance rate.
-    AcceptanceRate((&'a F, f64)),
+    AcceptanceRate((f64, F)),
 }
 
-/// A trait that enables the use of generic particle filter methods for a [`FEVM`].
-pub trait ParticleFilter<const P: usize, const N: usize, FS, GS>: FEVM<P, N, FS, GS>
+/// A trait that enables the use of approximate Bayesian computation (ABC) particle filter methods
+/// for a [`FEVM`].
+pub trait ABCParticleFilter<const P: usize, const N: usize, FS, GS>: FEVM<P, N, FS, GS>
 where
     FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Serialize + Send,
     GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Serialize + Send,
 {
-    /// Creates a new [`FEVMData`], optionally using filter (recommended).
-    ///
-    /// This function is intended to be used as the initialization step in any particle filtering algorithm.
-    fn pf_initialize_data<F, T>(
+    /// Creates a new [`FEVMDataOutput`] filled with valid simulations.
+    fn fevm_data<T>(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
         opt_pdf: Option<&T>,
-        opt_filter: Option<(&F, f64)>,
         rseed: u64,
     ) -> Result<FEVMData<P, FS, GS>, FEVMError>
     where
         for<'a> &'a T: PDF<P>,
-        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
     {
         let mut counter = 0;
         let mut iteration = 0;
@@ -102,36 +96,12 @@ where
         while counter != target.size() {
             self.fevm_initialize(series, &mut temp_data, opt_pdf, rseed + 17 * iteration)?;
 
-            let mut indices = self.fevm_simulate(
+            let indices = self.fevm_simulate(
                 series,
                 &mut temp_data,
                 &mut temp_output,
                 None::<(&FEVMNoiseNull, u64)>,
             )?;
-
-            if let Some((filter, theshold)) = opt_filter {
-                temp_output
-                    .par_column_iter()
-                    .zip(indices.par_iter_mut())
-                    .chunks(Self::RCS)
-                    .map(|mut chunks| {
-                        chunks
-                            .iter_mut()
-                            .map(|(out, flag)| {
-                                if **flag {
-                                    let value = filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series);
-                                    **flag = value < theshold;
-
-                                    value
-                                } else {
-                                    f64::NAN
-                                }
-                            })
-                            .collect::<Vec<f64>>()
-                    })
-                    .flatten()
-                    .collect::<Vec<f64>>();
-            }
 
             let mut indices_valid = indices
                 .into_iter()
@@ -164,25 +134,16 @@ where
 
         Ok(target)
     }
-}
 
-/// A trait that enables the use of approximate Bayesian computation (ABC) particle filter methods
-/// for a [`FEVM`].
-pub trait ABCParticleFilter<const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<P, N, FS, GS>
-where
-    FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
-    GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
-{
     /// Basic ABC-SMC algorithm (single iteration) with fixed acceptance ratio.
-    fn abcpf_run_iteration<F, NG>(
+    fn abcpf_run<F, NG>(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
         mut fevmd: FEVMData<P, FS, GS>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
-        mode: ABCParticleFilterMode<F, N>,
         settings: &mut ParticleFilterSettings<N, NG>,
+        mode: ABCPFMode<N, F>,
     ) -> Result<ParticleFilterResults<P, N, FS, GS>, FEVMError>
     where
         F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
@@ -192,10 +153,10 @@ where
 
         let mut counter = 0;
         let mut iteration = 0;
+        let mut errors = Vec::<f64>::with_capacity(ensemble_size);
 
         let mut target_data = FEVMData::<P, FS, GS>::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
-        let mut target_filter_values = Vec::<f64>::with_capacity(ensemble_size);
 
         let mut temp_data = FEVMData::<P, FS, GS>::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
@@ -204,7 +165,7 @@ where
         let mut density_old = PDFParticles::from_particles(
             fevmd.params.as_view_mut(),
             self.model_prior().valid_range(),
-            &mut fevmd.weights,
+            fevmd.weights,
         )? * settings.exploration_factor;
 
         while counter != ensemble_size {
@@ -215,7 +176,7 @@ where
                 settings.rseed + 23 * iteration,
             )?;
 
-            let mut flags = self.fevm_simulate(
+            let mut indices = self.fevm_simulate(
                 series,
                 &mut temp_data,
                 &mut temp_output,
@@ -223,7 +184,7 @@ where
             )?;
 
             let filter_values = match mode {
-                ABCParticleFilterMode::AcceptanceRate((filter, accrate)) => {
+                ABCPFMode::AcceptanceRate((accrate, ref _ranking)) => {
                     if !(0.01..0.99).contains(&accrate) {
                         return Err(FEVMError::InvalidParameter {
                             name: "acceptance rate",
@@ -231,57 +192,11 @@ where
                         });
                     }
 
-                    let values = temp_output
-                        .par_column_iter()
-                        .zip(flags.par_iter_mut())
-                        .chunks(Self::RCS)
-                        .map(|mut chunks| {
-                            chunks
-                                .iter_mut()
-                                .map(|(out, flag)| {
-                                    if **flag {
-                                        let value =
-                                            filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series);
-
-                                        value
-                                    } else {
-                                        f64::NAN
-                                    }
-                                })
-                                .collect::<Vec<f64>>()
-                        })
-                        .flatten()
-                        .collect::<Vec<f64>>();
-
-                    let values_sorted = values
-                        .iter()
-                        .sorted_by(|a, b| a.partial_cmp(b).unwrap())
-                        .copied()
-                        .collect::<Vec<f64>>();
-
-                    let mut epsilon = values_sorted[ensemble_size * accrate as usize];
-
-                    if !epsilon.is_finite() {
-                        epsilon = f64::MAX;
-                    }
-
-                    flags
-                        .par_iter_mut()
-                        .zip(values.par_iter())
-                        .chunks(Self::RCS)
-                        .for_each(|mut chunks| {
-                            chunks.iter_mut().for_each(|(flag, value)| {
-                                if **flag {
-                                    **flag = **value < epsilon;
-                                }
-                            });
-                        });
-
-                    values
+                    unimplemented!()
                 }
-                ABCParticleFilterMode::Threshold((filter, epsilon)) => temp_output
+                ABCPFMode::Threshold((epsilon, ref filter)) => temp_output
                     .par_column_iter()
-                    .zip(flags.par_iter_mut())
+                    .zip(indices.par_iter_mut())
                     .chunks(Self::RCS)
                     .map(|mut chunks| {
                         chunks
@@ -302,7 +217,7 @@ where
                     .collect::<Vec<f64>>(),
             };
 
-            let mut indices_valid = flags
+            let mut indices_valid = indices
                 .into_iter()
                 .enumerate()
                 .filter_map(|(idx, flag)| if flag { Some(idx) } else { None })
@@ -327,7 +242,7 @@ where
 
                 target_output.set_column(counter + edx, &temp_output.column(*idx));
 
-                target_filter_values.push(filter_values[*idx]);
+                errors.push(filter_values[*idx]);
             });
 
             counter += indices_valid.len();
@@ -335,39 +250,36 @@ where
             iteration += 1;
         }
 
-        // Create a Particle PDF from our result.
+        // Create a Particle PDF from input and multiply by the exploration factor.
         let mut density_new = PDFParticles::from_particles(
             target_data.params.as_view_mut(),
             self.model_prior().valid_range(),
-            &mut target_data.weights,
+            target_data.weights.clone(),
         )?;
+
+        // density_old *= 1.0 / settings.exploration_factor;
 
         ptpdf_importance_weighting(&mut density_new, &density_old, &self.model_prior());
 
-        // Reset the covariance matrix in the old density.
-        density_old *= 1.0 / settings.exploration_factor;
-
-        // Compute the effective sample size.
-        let effective_sample_size = 1.0
+        let ess = 1.0
             / density_new
                 .weights()
                 .iter()
                 .map(|value| value.powi(2))
                 .sum::<f64>();
 
-        let filter_values_sorted = target_filter_values
+        let errors_sorted = errors
             .iter()
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
             .copied()
             .collect::<Vec<f64>>();
 
-        // Compute quantiles for logging purposes.
-        let eps_25 = filter_values_sorted[ensemble_size / 4];
-        let eps_50 = filter_values_sorted[ensemble_size / 2];
-        let eps_75 = filter_values_sorted[3 * ensemble_size / 4];
+        let eps_25 = errors_sorted[ensemble_size / 4];
+        let eps_50 = errors_sorted[ensemble_size / 2];
+        let eps_75 = errors_sorted[3 * ensemble_size / 4];
 
         info!(
-            "abcpf_run_iteration\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
+            "abc pf step\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
             0.0,
             2.0,
             eps_25,
@@ -375,43 +287,14 @@ where
             eps_75,
             (iteration as usize * sim_ensemble_size) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3,
-            effective_sample_size,
+            ess,
             ensemble_size,
         );
 
         Ok(ParticleFilterResults {
             fevmd: target_data,
             output: target_output,
-            errors: target_filter_values,
-            error_quantiles: [eps_25, eps_50, eps_75],
+            errors,
         })
     }
-}
-
-/// Mean square error filter for particle filtering methods.
-pub fn mean_square_filter<const N: usize>(
-    out: &DVectorView<ObserVec<N>>,
-    series: &ScObsSeries<ObserVec<N>>,
-) -> f64 {
-    out.into_iter()
-        .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-        .sum::<f64>()
-        / series.len() as f64
-}
-
-/// Normalized mean square error filter for particle filtering methods.
-pub fn mean_square_normalized_filter<const N: usize>(
-    out: &DVectorView<ObserVec<N>>,
-    series: &ScObsSeries<ObserVec<N>>,
-) -> f64 {
-    out.into_iter()
-        .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-        .sum::<f64>()
-        / DVector::<ObserVec<N>>::zeros(out.len())
-            .into_iter()
-            .zip(series)
-            .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-            .sum::<f64>()
 }

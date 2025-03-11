@@ -2,7 +2,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
-    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNoiseZero, FEVMNullState},
+    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNoiseNull, FEVMNullState},
     geometry::XCState,
     obser::ObserVec,
     stats::{PDFConstant, PDFUniform, PDFUnivariates},
@@ -76,7 +76,7 @@ fn benchmark_lff(c: &mut Criterion) {
                 )
                 .unwrap();
             model
-                .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseZero, u64)>)
+                .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseNull, u64)>)
                 .unwrap();
         });
     });

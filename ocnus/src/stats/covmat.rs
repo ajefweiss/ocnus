@@ -2,7 +2,7 @@
 
 use derive_more::Deref;
 use itertools::{Itertools, zip_eq};
-use log::error;
+use log::{error, warn};
 use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -42,7 +42,10 @@ impl CovMatrix {
         let (cholesky_ltm, determinant) = match matrix.cholesky() {
             Some(result) => (result.l(), result.determinant()),
             None => {
-                error!("failed to perform the cholesky decomposition: {}", matrix);
+                error!(
+                    "CovMatrix::from_matrix: failed to perform the cholesky decomposition: {}",
+                    matrix
+                );
                 return Err(StatsError::InvalidMatrix {
                     msg: "failed to perform the cholesky decomposition",
                     matrix: matrix.into_owned(),
@@ -55,7 +58,7 @@ impl CovMatrix {
             Ordering::Less
         ) {
             error!(
-                "input matrix determinant is below precision threshold: {} - {}\n {}",
+                "CovMatrix::from_matrix input matrix determinant is below precision threshold: {} - {}\n {}",
                 determinant,
                 f64::EPSILON,
                 matrix
@@ -69,7 +72,10 @@ impl CovMatrix {
         let inverse_matrix = match matrix.try_inverse() {
             Some(result) => result,
             None => {
-                error!("input matrix is singular: {}", matrix);
+                error!(
+                    "CovMatrix::from_matrix input matrix is singular: {}",
+                    matrix
+                );
                 return Err(StatsError::InvalidMatrix {
                     msg: "input matrix is singular",
                     matrix: matrix.into_owned(),
@@ -90,6 +96,14 @@ impl CovMatrix {
         vectors: &MatrixView<f64, Const<D>, Dyn>,
         opt_weights: Option<&[f64]>,
     ) -> Result<Self, StatsError> {
+        if let Some(weights) = opt_weights {
+            let ess = weights.iter().map(|value| value.powi(2)).sum::<f64>();
+
+            if (ess / weights.len() as f64) < 0.5 {
+                warn!("CovMatrix::from_vectors: effective sample size is dangerously small")
+            }
+        }
+
         let mut matrix = DMatrix::from_iterator(
             D,
             D,

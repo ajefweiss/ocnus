@@ -1,13 +1,12 @@
 use chrono::Local;
 use env_logger::Builder;
-use nalgebra::{DMatrix, DVectorView};
+use nalgebra::DVectorView;
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        ABCPFMode, ABCParticleFilter, CCLFFModel, FEVM, FEVMData, FEVMNoiseZero, FEVMNullState,
-        ParticleFilterSettings, ParticleFilterSettingsBuilder,
+        ABCParticleFilter, ABCParticleFilterMode, CCLFFModel, FEVM, FEVMNoiseNull, ParticleFilter,
+        ParticleFilterSettingsBuilder, mean_square_normalized_filter,
     },
-    geometry::XCState,
     obser::ObserVec,
     stats::{PDFConstant, PDFUniform, PDFUnivariates},
 };
@@ -63,62 +62,50 @@ fn main() {
     }));
 
     let mut fevmd = model
-        .fevm_data(&sc, 4096, 2_usize.pow(18), None::<&PDFUnivariates<8>>, 42)
+        .pf_initialize_data(
+            &sc,
+            4096,
+            2_usize.pow(18),
+            None::<&PDFUnivariates<8>>,
+            Some((&mean_square_normalized_filter, 0.45)),
+            42,
+        )
         .unwrap();
 
-    let mut pfsettings = ParticleFilterSettingsBuilder::<3, FEVMNoiseZero>::default()
+    let mut pfsettings = ParticleFilterSettingsBuilder::<3, FEVMNoiseNull>::default()
         .exploration_factor(2.0)
-        .noise(FEVMNoiseZero)
+        .noise(FEVMNoiseNull)
         .build()
         .unwrap();
 
-    let mse_func = |out: &DVectorView<ObserVec<3>>, series: &ScObsSeries<ObserVec<3>>| {
-        out.into_iter()
-            .zip(series.into_iter())
-            .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-            .sum::<f64>()
-            / series.len() as f64
-    };
+    for (idx, eps) in [15.0, 6.0, 4.0, 3.0, 2.5, 2.0, 1.75, 1.5, 1.25, 1.1]
+        .into_iter()
+        .enumerate()
+    {
+        let result = model
+            .abcpf_run_iteration(
+                &sc,
+                fevmd,
+                4096,
+                2_usize.pow(18),
+                ABCParticleFilterMode::AcceptanceRate((&mean_square_normalized_filter, 0.1)),
+                &mut pfsettings,
+            )
+            .unwrap();
 
-    let mut result = model
-        .abcpf_run(
-            &sc,
-            fevmd,
-            4096,
-            2_usize.pow(18),
-            &mut pfsettings,
-            ABCPFMode::Threshold((10.0, mse_func)),
-        )
-        .unwrap();
+        let mut file = std::fs::File::create(format!(
+            "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+            idx
+        ))
+        .expect("could not create file!");
 
-    let mut file = std::fs::File::create(format!(
-        "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-        0
-    ))
-    .expect("could not create file!");
-    let list_as_json = serde_json::to_string(&result.fevmd).unwrap();
-    file.write_all(list_as_json.as_bytes())
-        .expect("Cannot write to the file!");
+        let list_as_json = serde_json::to_string(&result.fevmd).unwrap();
 
-    result = model
-        .abcpf_run(
-            &sc,
-            result.fevmd,
-            4096,
-            2_usize.pow(18),
-            &mut pfsettings,
-            ABCPFMode::Threshold((8.0, mse_func)),
-        )
-        .unwrap();
+        file.write_all(list_as_json.as_bytes())
+            .expect("Cannot write to the file!");
 
-    let mut file = std::fs::File::create(format!(
-        "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-        1
-    ))
-    .expect("could not create file!");
-    let list_as_json = serde_json::to_string(&result.fevmd).unwrap();
-    file.write_all(list_as_json.as_bytes())
-        .expect("Cannot write to the file!");
+        fevmd = result.fevmd;
+    }
 
     // let mut abc_data = CCLFF_Model::pf_builder()
     //     .seed_init(43)

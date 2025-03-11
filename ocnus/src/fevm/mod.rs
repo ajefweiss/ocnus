@@ -9,9 +9,9 @@ pub use filter::*;
 pub use noise::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ScObs;
-use crate::stats::StatsError;
-use crate::{ScObsSeries, geometry::OcnusGeometry, obser::ObserVec, stats::PDF};
+use crate::{
+    ScObs, ScObsSeries, geometry::OcnusGeometry, obser::ObserVec, stats::PDF, stats::StatsError,
+};
 use itertools::zip_eq;
 use log::debug;
 use nalgebra::{Const, DMatrix, Dyn, Matrix};
@@ -35,7 +35,7 @@ pub struct FEVMData<const P: usize, FS, GS> {
     pub geom_states: Vec<GS>,
 
     /// Ensemble member weights.
-    pub weights: Option<Vec<f64>>,
+    pub weights: Vec<f64>,
 }
 
 impl<const P: usize, FS, GS> FEVMData<P, FS, GS>
@@ -43,13 +43,13 @@ where
     FS: Clone + Default,
     GS: Clone + Default,
 {
-    /// Create a new [`FEVMData`].
+    /// Create a new [`FEVMData`] filled with zeros.
     pub fn new(size: usize) -> Self {
         Self {
             params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::zeros(size),
             fevm_states: vec![FS::default(); size],
             geom_states: vec![GS::default(); size],
-            weights: None,
+            weights: vec![1.0 / size as f64; size],
         }
     }
 
@@ -90,67 +90,6 @@ where
     /// The rayon chunk size that is used for any parallel iterators.
     /// Cheap or expensive operations may use fractions or multiples of this value.
     const RCS: usize;
-
-    /// Creates a new [`FEVMDataOutput`] filled with valid simulations.
-    fn fevm_data<T>(
-        &self,
-        series: &ScObsSeries<ObserVec<N>>,
-        ensemble_size: usize,
-        sim_ensemble_size: usize,
-        opt_pdf: Option<&T>,
-        rseed: u64,
-    ) -> Result<FEVMData<P, FS, GS>, FEVMError>
-    where
-        for<'a> &'a T: PDF<P>,
-    {
-        let mut counter = 0;
-        let mut iteration = 0;
-
-        let mut target = FEVMData::new(ensemble_size);
-        let mut temp_data = FEVMData::new(sim_ensemble_size);
-        let mut temp_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
-
-        while counter != target.size() {
-            self.fevm_initialize(series, &mut temp_data, opt_pdf, rseed + 17 * iteration)?;
-
-            let indices = self.fevm_simulate(
-                series,
-                &mut temp_data,
-                &mut temp_output,
-                None::<(&FEVMNoiseZero, u64)>,
-            )?;
-
-            let mut indices_valid = indices
-                .into_iter()
-                .enumerate()
-                .filter_map(|(idx, flag)| if flag { Some(idx) } else { None })
-                .collect::<Vec<usize>>();
-
-            debug!("valid: {}", indices_valid.len());
-
-            // Remove excessive ensemble members.
-            if counter + indices_valid.len() > target.size() {
-                debug!(
-                    "removing excessive ensemble members simulations n={}",
-                    counter + indices_valid.len() - target.size()
-                );
-                indices_valid.drain((target.size() - counter)..indices_valid.len());
-            }
-
-            // Copy over results.
-            indices_valid.iter().enumerate().for_each(|(edx, idx)| {
-                target
-                    .params
-                    .set_column(counter + edx, &temp_data.params.column(*idx));
-            });
-
-            counter += indices_valid.len();
-
-            iteration += 1;
-        }
-
-        Ok(target)
-    }
 
     /// Evolve a model state forward in time.
     fn fevm_forward(
@@ -298,8 +237,8 @@ where
     ) -> Result<ObserVec<N>, FEVMError>;
 
     /// Perform an ensemble forward simulation and generate synthetic vector observables
-    /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t. the
-    /// observation series.
+    /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t.
+    /// to the spacecraft observation series.
     fn fevm_simulate<NG>(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
@@ -308,7 +247,7 @@ where
         opt_noise: Option<(&NG, u64)>,
     ) -> Result<Vec<bool>, FEVMError>
     where
-        NG: FEVMNoiseGen<N>,
+        NG: FEVMNoiseGenerator<N>,
     {
         let start = Instant::now();
         let mut timer = 0.0;

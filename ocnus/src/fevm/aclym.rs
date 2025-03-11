@@ -1,6 +1,6 @@
 use crate::{
     ScObs, ScObsConf, ScObsSeries,
-    fevm::{ABCParticleFilter, FEVM, FEVMError},
+    fevm::{ABCParticleFilter, FEVM, FEVMError, ParticleFilter},
     geometry::OcnusGeometry,
     geometry::{CCModel, XCState},
     math::bessel_jn,
@@ -340,6 +340,14 @@ macro_rules! impl_fevm {
             }
         }
 
+        impl<T> ParticleFilter<{ $parent::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState>
+            for $model<T>
+        where
+            T: Sync,
+            for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>,
+        {
+        }
+
         impl<T>
             ABCParticleFilter<{ $parent::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState>
             for $model<T>
@@ -373,7 +381,7 @@ impl_fevm!(
 mod tests {
     use super::*;
     use crate::{
-        fevm::{FEVMData, noise::FEVMNoiseZero},
+        fevm::{FEVMData, noise::FEVMNoiseNull},
         stats::{PDFConstant, PDFUniform, PDFUnivariates},
     };
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
@@ -407,7 +415,7 @@ mod tests {
             params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
-            weights: None,
+            weights: vec![1.0; 1],
         };
 
         let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
@@ -421,7 +429,7 @@ mod tests {
             .fevm_initialize_states_only(&sc, &mut data)
             .expect("initialization failed");
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseZero, u64)>)
+            .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseNull, u64)>)
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 18.7926).abs() < 1e-4);
@@ -458,7 +466,7 @@ mod tests {
             params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
-            weights: None,
+            weights: vec![1.0; 1],
         };
 
         let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
@@ -472,7 +480,7 @@ mod tests {
             .fevm_initialize_states_only(&sc, &mut data)
             .expect("initialization failed");
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseZero, u64)>)
+            .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseNull, u64)>)
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 16.0615).abs() < 1e-4);

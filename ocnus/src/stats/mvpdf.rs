@@ -1,4 +1,5 @@
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+// STATUS: Mature
+// TODO: Add KL div calculations.
 
 use crate::{
     stats::CovMatrix,
@@ -9,6 +10,7 @@ use nalgebra::{SVector, SVectorView};
 use rand::Rng;
 use rand_distr::Normal;
 use serde::{Deserialize, Serialize};
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 /// A multivariate normal PDF .
 #[derive(Clone, Debug, Deserialize, Serialize)]

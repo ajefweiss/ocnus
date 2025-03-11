@@ -1,14 +1,16 @@
-use core::panic;
-use std::ops::{Mul, MulAssign};
+// STATUS: Mature
+// TODO: Add conversions to PDFMultivariate.
 
 use crate::stats::{CovMatrix, PDF, StatsError};
+use core::panic;
 use log::warn;
 use nalgebra::{Const, Dyn, MatrixView, MatrixViewMut, SVector, SVectorView};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use rayon::prelude::*;
+use std::ops::{Mul, MulAssign};
 
-/// A PDF defined by a view of a matrix of ensemble particles.
+/// A PDF defined by references to an ensemble of particles.
 #[derive(Debug)]
 pub struct PDFParticles<'a, const P: usize> {
     /// A [`CovMatrix`] that describes an estimate of the underlying particle PDF.
@@ -21,7 +23,7 @@ pub struct PDFParticles<'a, const P: usize> {
     range: [(f64, f64); P],
 
     /// Particle ensemble weights
-    weights: Vec<f64>,
+    weights: &'a mut Vec<f64>,
 }
 
 impl<'a, const P: usize> PDFParticles<'a, P> {
@@ -34,18 +36,9 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
     pub fn from_particles(
         particles: MatrixViewMut<'a, f64, Const<P>, Dyn>,
         range: [(f64, f64); P],
-        opt_weights: Option<Vec<f64>>,
+        weights: &'a mut Vec<f64>,
     ) -> Result<Self, StatsError> {
-        let (covmat, weights) = match opt_weights {
-            Some(weights) => (
-                CovMatrix::from_vectors(&particles.as_view(), Some(weights.as_slice()))?,
-                weights,
-            ),
-            None => (
-                CovMatrix::from_vectors(&particles.as_view(), None)?,
-                vec![1.0 / particles.nrows() as f64; particles.nrows()],
-            ),
-        };
+        let covmat = CovMatrix::from_vectors(&particles.as_view(), Some(weights.as_slice()))?;
 
         Ok(Self {
             covmat,
@@ -77,7 +70,7 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
 
     /// Returns a reference to the particle weights.
     pub fn weights(&self) -> &Vec<f64> {
-        &self.weights
+        self.weights
     }
 }
 
@@ -163,7 +156,7 @@ pub fn ptpdf_importance_weighting<T: PDF<P>, const P: usize>(
             let value = &ptpdf_from
                 .particles
                 .par_column_iter()
-                .zip(&ptpdf_from.weights)
+                .zip(ptpdf_from.weights.par_iter())
                 .map(|(params_old, weight_old)| {
                     let delta = params_new - params_old;
 
@@ -182,11 +175,11 @@ pub fn ptpdf_importance_weighting<T: PDF<P>, const P: usize>(
 
     let weights_total = weights.iter().sum::<f64>();
 
-    weights
+    ptpdf
+        .weights
         .par_iter_mut()
-        .for_each(|weight| *weight /= weights_total);
-
-    ptpdf.weights = weights
+        .zip(weights.par_iter())
+        .for_each(|(target_weight, weight)| *target_weight = *weight / weights_total);
 }
 
 impl<'a, const P: usize> Mul<f64> for PDFParticles<'a, P> {

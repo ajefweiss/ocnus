@@ -38,7 +38,8 @@ where
     Self: Sync,
 {
     /// Estimates the relative density  at a specific position `x`.
-    /// The result is not necessarily normalized,
+    ///
+    /// This result is not necessarily normalized,
     /// for an exact calculation or estimate of the density see the [`PDFExactDensity`] trait.
     fn relative_density(&self, x: &SVectorView<f64, P>) -> f64;
 

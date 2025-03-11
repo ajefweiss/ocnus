@@ -17,7 +17,8 @@ pub trait OcnusGeometry<const P: usize, GS> {
     /// Const array of parameter ranges.
     const PARAM_RANGES: [(f64, f64); P];
 
-    /// Compute the basis vectors (given in external coordinates).
+    /// Compute the basis vectors in cartensian coordinates `xyz`
+    /// as a function of intrinsic coordinates.
     ///
     /// These basis vectors are NOT necessarily normalized.
     fn coords_basis<CStride: Dim>(
@@ -40,7 +41,7 @@ pub trait OcnusGeometry<const P: usize, GS> {
         state: &GS,
     ) -> Vector3<f64>;
 
-    /// Transform a vector at intrinsic coordinates `ics` into external coordinates.
+    /// Transform a vector at/in intrinsic coordinates `ics` into external coordinates.
     fn coords_xyz_vector<CStride: Dim>(
         ics: &VectorView3<f64>,
         vec: &VectorView3<f64>,
@@ -48,7 +49,7 @@ pub trait OcnusGeometry<const P: usize, GS> {
         state: &GS,
     ) -> Vector3<f64>;
 
-    /// Get a model parameter index by name.
+    /// Retrieve a model parameter index by name.
     fn param_index(name: &str) -> usize {
         Self::PARAMS
             .into_iter()
@@ -69,7 +70,7 @@ pub trait OcnusGeometry<const P: usize, GS> {
             .unwrap()
     }
 
-    /// Get a model parameter value by name.
+    /// Retrieve a model parameter value by name.
     fn param_value<CStride: Dim>(
         name: &str,
         params: &VectorView<f64, Const<P>, U1, CStride>,
