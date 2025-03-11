@@ -1,6 +1,6 @@
 use crate::{
     ScObs, ScObsConf, ScObsSeries,
-    fevm::{FEVM, FEVMError},
+    fevm::{ABCParticleFilter, FEVM, FEVMError},
     geometry::OcnusGeometry,
     geometry::{CCModel, XCState},
     math::bessel_jn,
@@ -8,25 +8,26 @@ use crate::{
     stats::PDF,
 };
 use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
 /// An empty FEVM state.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FEVMNullState {}
 
 /// Linear force-free magnetic field observable.
 pub fn cc_lff_obs<const P: usize, M, GS>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
+    (r, _phi, _psi): (f64, f64, f64),
+    params: &SVectorView<f64, P>,
     _state: &XCState,
-) -> Option<Vector3<f32>>
+) -> Option<Vector3<f64>>
 where
     M: OcnusGeometry<P, GS>,
 {
     // Extract parameters using their identifiers.
-    let b = M::get_param_value("B", params);
-    let y_offset = M::get_param_value("y", params);
-    let alpha_signed = M::get_param_value("alpha", params);
+    let b = M::param_value("B", params);
+    let y_offset = M::param_value("y", params);
+    let alpha_signed = M::param_value("alpha", params);
 
     let (alpha, sign) = match alpha_signed.partial_cmp(&0.0) {
         Some(ord) => match ord {
@@ -57,17 +58,17 @@ where
 
 /// Uniform twist magnetic field observable.
 pub fn cc_ut_obs<const P: usize, M, GS>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
+    (r, _phi, _psi): (f64, f64, f64),
+    params: &SVectorView<f64, P>,
     _state: &XCState,
-) -> Option<Vector3<f32>>
+) -> Option<Vector3<f64>>
 where
     M: OcnusGeometry<P, GS>,
 {
     // Extract parameters using their identifiers.
-    let b = M::get_param_value("B", params);
-    let y_offset = M::get_param_value("y", params);
-    let tau = M::get_param_value("tau", params);
+    let b = M::param_value("B", params);
+    let y_offset = M::param_value("y", params);
+    let tau = M::param_value("tau", params);
 
     match r.partial_cmp(&1.0) {
         Some(ord) => match ord {
@@ -87,18 +88,18 @@ where
 
 /// Magnetic field configuration as is used in Nieves-Chinchilla et al. (2018).
 pub fn ec_c10_obs<const P: usize, M, GS>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
+    (r, _phi, _psi): (f64, f64, f64),
+    params: &SVectorView<f64, P>,
     _state: &XCState,
-) -> Option<Vector3<f32>>
+) -> Option<Vector3<f64>>
 where
     M: OcnusGeometry<P, GS>,
 {
     // Extract parameters using their identifiers.
-    let b = M::get_param_value("B", params);
-    let c_10 = M::get_param_value("c10", params);
-    let delta = M::get_param_value("delta", params);
-    let tau = M::get_param_value("tau", params);
+    let b = M::param_value("B", params);
+    let c_10 = M::param_value("c10", params);
+    let delta = M::param_value("delta", params);
+    let tau = M::param_value("tau", params);
 
     match r.partial_cmp(&1.0) {
         Some(ord) => match ord {
@@ -150,20 +151,20 @@ macro_rules! impl_fevm {
         {
             const PARAMS: [&'static str; { $parent::PARAMS.len() + $params.len() }] =
                 concat_arrays!($parent::PARAMS, $params);
-            const PARAM_RANGES: [(f32, f32); { $parent::PARAMS.len() + $params.len() }] =
+            const PARAM_RANGES: [(f64, f64); { $parent::PARAMS.len() + $params.len() }] =
                 concat_arrays!($parent::PARAM_RANGES, $param_ranges);
 
             fn coords_xyz_vector<CStride: Dim>(
-                ics: &VectorView3<f32>,
-                vec: &VectorView3<f32>,
+                ics: &VectorView3<f64>,
+                vec: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 $parent::coords_xyz_vector(
                     ics,
                     vec,
@@ -173,15 +174,15 @@ macro_rules! impl_fevm {
             }
 
             fn coords_basis<CStride: Dim>(
-                ics: &VectorView3<f32>,
+                ics: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> [Vector3<f32>; 3] {
+            ) -> [Vector3<f64>; 3] {
                 $parent::coords_basis(
                     ics,
                     &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
@@ -190,15 +191,15 @@ macro_rules! impl_fevm {
             }
 
             fn coords_xyz<CStride: Dim>(
-                ics: &VectorView3<f32>,
+                ics: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 $parent::coords_xyz(
                     ics,
                     &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
@@ -207,15 +208,15 @@ macro_rules! impl_fevm {
             }
 
             fn coords_ics<CStride: Dim>(
-                xyz: &VectorView3<f32>,
+                xyz: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 $parent::coords_ics(
                     xyz,
                     &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
@@ -235,9 +236,9 @@ macro_rules! impl_fevm {
 
             fn fevm_forward(
                 &self,
-                time_step: f32,
+                time_step: f64,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
@@ -246,9 +247,9 @@ macro_rules! impl_fevm {
                 geom_state: &mut XCState,
             ) -> Result<(), FEVMError> {
                 // Extract parameters using their identifiers.
-                let vel = Self::get_param_value("v", params) / 1.496e8;
+                let vel = Self::param_value("v", params) / 1.496e8;
                 geom_state.t += time_step;
-                geom_state.x += vel * time_step as f32;
+                geom_state.x += vel * time_step as f64;
 
                 Ok(())
             }
@@ -257,7 +258,7 @@ macro_rules! impl_fevm {
                 &self,
                 scobs: &ScObs<ObserVec<3>>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
@@ -299,7 +300,7 @@ macro_rules! impl_fevm {
                 &self,
                 _series: &ScObsSeries<ObserVec<3>>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
@@ -308,16 +309,16 @@ macro_rules! impl_fevm {
                 geom_state: &mut XCState,
             ) -> Result<(), FEVMError> {
                 // Extract parameters using their identifiers.
-                let phi = Self::get_param_value("phi", params);
-                let theta = Self::get_param_value("theta", params);
-                let y = Self::get_param_value("y", params);
-                let radius = Self::get_param_value("radius", params);
-                let x_init = Self::get_param_value("x_0", params);
+                let phi = Self::param_value("phi", params);
+                let theta = Self::param_value("theta", params);
+                let y = Self::param_value("y", params);
+                let radius = Self::param_value("radius", params);
+                let x_init = Self::param_value("x_0", params);
 
                 geom_state.t = 0.0;
                 geom_state.x = x_init;
                 geom_state.z =
-                    radius * y * ((1.0 - (phi.sin() * theta.cos()).powi(2)) as f32).sqrt()
+                    radius * y * ((1.0 - (phi.sin() * theta.cos()).powi(2)) as f64).sqrt()
                         / phi.cos()
                         / theta.cos();
 
@@ -337,6 +338,15 @@ macro_rules! impl_fevm {
                         acc & ((pr.0 >= mr.0) & (pr.1 <= mr.1))
                     })
             }
+        }
+
+        impl<T>
+            ABCParticleFilter<{ $parent::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState>
+            for $model<T>
+        where
+            T: Sync,
+            for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>,
+        {
         }
     };
 }
@@ -387,23 +397,24 @@ mod tests {
 
         let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
             ScObs::new(
-                224640.0 + i as f32 * 3600.0 * 2.0,
+                224640.0 + i as f64 * 3600.0 * 2.0,
                 ScObsConf::Distance(1.0),
                 None,
             )
         }));
 
         let mut data = FEVMData {
-            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
+            weights: None,
         };
 
         let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
 
         data.params.set_column(
             0,
-            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+            &SVector::<f64, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
         );
 
         model
@@ -437,23 +448,24 @@ mod tests {
 
         let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
             ScObs::new(
-                224640.0 + i as f32 * 3600.0 * 2.0,
+                224640.0 + i as f64 * 3600.0 * 2.0,
                 ScObsConf::Distance(1.0),
                 None,
             )
         }));
 
         let mut data = FEVMData {
-            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
+            weights: None,
         };
 
         let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
 
         data.params.set_column(
             0,
-            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+            &SVector::<f64, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
         );
 
         model

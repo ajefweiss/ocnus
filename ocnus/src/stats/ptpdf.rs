@@ -1,3 +1,6 @@
+use core::panic;
+use std::ops::{Mul, MulAssign};
+
 use crate::stats::{CovMatrix, PDF, StatsError};
 use log::warn;
 use nalgebra::{Const, Dyn, MatrixView, MatrixViewMut, SVector, SVectorView};
@@ -12,13 +15,13 @@ pub struct PDFParticles<'a, const P: usize> {
     covmat: CovMatrix,
 
     /// The particle ensemble that describes the overarching PDF.
-    particles: MatrixViewMut<'a, f32, Const<P>, Dyn>,
+    particles: MatrixViewMut<'a, f64, Const<P>, Dyn>,
 
     /// Valid parameter range.
-    range: [(f32, f32); P],
+    range: [(f64, f64); P],
 
     /// Particle ensemble weights
-    weights: Vec<f32>,
+    weights: Vec<f64>,
 }
 
 impl<'a, const P: usize> PDFParticles<'a, P> {
@@ -29,9 +32,9 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
 
     /// Create a new [`PDFParticles`] from a particle matrix view.
     pub fn from_particles(
-        particles: MatrixViewMut<'a, f32, Const<P>, Dyn>,
-        range: [(f32, f32); P],
-        opt_weights: Option<Vec<f32>>,
+        particles: MatrixViewMut<'a, f64, Const<P>, Dyn>,
+        range: [(f64, f64); P],
+        opt_weights: Option<Vec<f64>>,
     ) -> Result<Self, StatsError> {
         let (covmat, weights) = match opt_weights {
             Some(weights) => (
@@ -40,7 +43,7 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
             ),
             None => (
                 CovMatrix::from_vectors(&particles.as_view(), None)?,
-                vec![1.0 / particles.nrows() as f32; particles.nrows()],
+                vec![1.0 / particles.nrows() as f64; particles.nrows()],
             ),
         };
 
@@ -63,22 +66,27 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
     }
 
     /// Access the ensemble particle matrix.
-    pub fn particles_ref(&self) -> MatrixView<f32, Const<P>, Dyn> {
+    pub fn particles_ref(&self) -> MatrixView<f64, Const<P>, Dyn> {
         self.particles.as_view()
     }
 
     /// Mutably access the ensemble particle matrix.
-    pub fn particles_mut(&mut self) -> &mut MatrixViewMut<'a, f32, Const<P>, Dyn> {
+    pub fn particles_mut(&mut self) -> &mut MatrixViewMut<'a, f64, Const<P>, Dyn> {
         &mut self.particles
+    }
+
+    /// Returns a reference to the particle weights.
+    pub fn weights(&self) -> &Vec<f64> {
+        &self.weights
     }
 }
 
-impl<const P: usize> PDF<P> for PDFParticles<'_, P> {
-    fn relative_density(&self, _x: &SVectorView<f32, P>) -> f32 {
+impl<const P: usize> PDF<P> for &PDFParticles<'_, P> {
+    fn relative_density(&self, _x: &SVectorView<f64, P>) -> f64 {
         unimplemented!()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, StatsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f64, P>, StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let uniform = Uniform::new(0.0, 1.0).unwrap();
 
@@ -110,7 +118,7 @@ impl<const P: usize> PDF<P> for PDFParticles<'_, P> {
 
         let mut proposal = offset
             + self.covmat.cholesky_ltm()
-                * SVector::<f32, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+                * SVector::<f64, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
@@ -118,22 +126,24 @@ impl<const P: usize> PDF<P> for PDFParticles<'_, P> {
         while !self.validate_sample(&proposal.as_view()) {
             proposal = offset
                 + self.covmat.cholesky_ltm()
-                    * SVector::<f32, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+                    * SVector::<f64, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
             if (attempts > 250) && (attempts % 250 == 0) {
                 warn!(
                     "PDFParticles::draw_sample has failed to draw a valid sample after {} tries",
-                    attempts
+                    attempts,
                 );
+
+                panic!()
             }
         }
 
         Ok(proposal)
     }
 
-    fn valid_range(&self) -> [(f32, f32); P] {
+    fn valid_range(&self) -> [(f64, f64); P] {
         self.range
     }
 }
@@ -159,22 +169,54 @@ pub fn ptpdf_importance_weighting<T: PDF<P>, const P: usize>(
 
                     (weight_old.ln() - (delta.transpose() * covmat_inv * delta)[(0, 0)]).exp()
                 })
-                .sum::<f32>();
+                .sum::<f64>();
 
             1.0 / value
         })
-        .collect::<Vec<f32>>();
+        .collect::<Vec<f64>>();
 
     weights
         .par_iter_mut()
         .zip(ptpdf.particles.par_column_iter())
         .for_each(|(weight, params)| *weight *= prior.relative_density(&params));
 
-    let weights_total = weights.iter().sum::<f32>();
+    let weights_total = weights.iter().sum::<f64>();
 
     weights
         .par_iter_mut()
         .for_each(|weight| *weight /= weights_total);
 
     ptpdf.weights = weights
+}
+
+impl<'a, const P: usize> Mul<f64> for PDFParticles<'a, P> {
+    type Output = PDFParticles<'a, P>;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self {
+            covmat: self.covmat * rhs,
+            particles: self.particles,
+            range: self.range,
+            weights: self.weights,
+        }
+    }
+}
+
+impl<'a, const P: usize> Mul<PDFParticles<'a, P>> for f64 {
+    type Output = PDFParticles<'a, P>;
+
+    fn mul(self, rhs: PDFParticles<'a, P>) -> Self::Output {
+        Self::Output {
+            covmat: self * rhs.covmat,
+            particles: rhs.particles,
+            range: rhs.range,
+            weights: rhs.weights,
+        }
+    }
+}
+
+impl<const P: usize> MulAssign<f64> for PDFParticles<'_, P> {
+    fn mul_assign(&mut self, rhs: f64) {
+        self.covmat *= rhs;
+    }
 }

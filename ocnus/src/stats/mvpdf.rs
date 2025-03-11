@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
     stats::CovMatrix,
-    stats::{PDFExactDensity, StatsError, PDF},
+    stats::{PDF, PDFExactDensity, StatsError},
 };
 use log::warn;
 use nalgebra::{SVector, SVectorView};
@@ -17,16 +17,16 @@ pub struct PDFMultivariate<const P: usize> {
     covmat: CovMatrix,
 
     /// The mean parameter of the multivariate normal distribution.
-    mean: SVector<f32, P>,
+    mean: SVector<f64, P>,
 
     /// Valid parameter range.
     #[serde(with = "serde_arrays")]
-    range: [(f32, f32); P],
+    range: [(f64, f64); P],
 }
 
 impl<const P: usize> PDFMultivariate<P> {
     /// Create a [`PDFMultivariate`] from a covariance matrix.
-    pub fn from_covmat(covmat: CovMatrix, mean: SVector<f32, P>, range: [(f32, f32); P]) -> Self {
+    pub fn from_covmat(covmat: CovMatrix, mean: SVector<f64, P>, range: [(f64, f64); P]) -> Self {
         Self {
             covmat,
             mean,
@@ -36,19 +36,19 @@ impl<const P: usize> PDFMultivariate<P> {
 }
 
 impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
-    fn relative_density(&self, x: &SVectorView<f32, P>) -> f32 {
+    fn relative_density(&self, x: &SVectorView<f64, P>) -> f64 {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
 
         (-0.5 * value).exp()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f32, P>, StatsError> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f64, P>, StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
 
         let mut proposal = self.mean
             + self.covmat.cholesky_ltm()
-                * SVector::<f32, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+                * SVector::<f64, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
@@ -56,7 +56,7 @@ impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
         while !self.validate_sample(&proposal.as_view()) {
             proposal = self.mean
                 + self.covmat.cholesky_ltm()
-                    * SVector::<f32, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+                    * SVector::<f64, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
@@ -71,25 +71,25 @@ impl<const P: usize> PDF<P> for &PDFMultivariate<P> {
         Ok(proposal)
     }
 
-    fn valid_range(&self) -> [(f32, f32); P] {
+    fn valid_range(&self) -> [(f64, f64); P] {
         self.range
     }
 }
 
 impl<const P: usize> PDFExactDensity<P> for &PDFMultivariate<P> {
-    fn exact_density(&self, x: &SVectorView<f32, P>) -> f32 {
+    fn exact_density(&self, x: &SVectorView<f64, P>) -> f64 {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
 
         (-0.5 * value).exp()
-            / ((2.0 * std::f32::consts::PI).powi(P as i32) * self.covmat.determinant()).sqrt()
+            / ((2.0 * std::f64::consts::PI).powi(P as i32) * self.covmat.determinant()).sqrt()
     }
 }
 
-impl<const P: usize> Add<&SVector<f32, P>> for PDFMultivariate<P> {
+impl<const P: usize> Add<&SVector<f64, P>> for PDFMultivariate<P> {
     type Output = PDFMultivariate<P>;
 
-    fn add(self, rhs: &SVector<f32, P>) -> Self::Output {
+    fn add(self, rhs: &SVector<f64, P>) -> Self::Output {
         Self {
             covmat: self.covmat,
             mean: self.mean + rhs,
@@ -98,16 +98,16 @@ impl<const P: usize> Add<&SVector<f32, P>> for PDFMultivariate<P> {
     }
 }
 
-impl<const P: usize> AddAssign<&SVector<f32, P>> for PDFMultivariate<P> {
-    fn add_assign(&mut self, rhs: &SVector<f32, P>) {
+impl<const P: usize> AddAssign<&SVector<f64, P>> for PDFMultivariate<P> {
+    fn add_assign(&mut self, rhs: &SVector<f64, P>) {
         self.mean += rhs
     }
 }
 
-impl<const P: usize> Mul<f32> for PDFMultivariate<P> {
+impl<const P: usize> Mul<f64> for PDFMultivariate<P> {
     type Output = PDFMultivariate<P>;
 
-    fn mul(self, rhs: f32) -> Self::Output {
+    fn mul(self, rhs: f64) -> Self::Output {
         Self {
             covmat: self.covmat * rhs,
             mean: self.mean,
@@ -116,7 +116,7 @@ impl<const P: usize> Mul<f32> for PDFMultivariate<P> {
     }
 }
 
-impl<const P: usize> Mul<PDFMultivariate<P>> for f32 {
+impl<const P: usize> Mul<PDFMultivariate<P>> for f64 {
     type Output = PDFMultivariate<P>;
 
     fn mul(self, rhs: PDFMultivariate<P>) -> Self::Output {
@@ -128,16 +128,16 @@ impl<const P: usize> Mul<PDFMultivariate<P>> for f32 {
     }
 }
 
-impl<const P: usize> MulAssign<f32> for PDFMultivariate<P> {
-    fn mul_assign(&mut self, rhs: f32) {
+impl<const P: usize> MulAssign<f64> for PDFMultivariate<P> {
+    fn mul_assign(&mut self, rhs: f64) {
         self.covmat *= rhs;
     }
 }
 
-impl<const P: usize> Sub<&SVector<f32, P>> for PDFMultivariate<P> {
+impl<const P: usize> Sub<&SVector<f64, P>> for PDFMultivariate<P> {
     type Output = PDFMultivariate<P>;
 
-    fn sub(self, rhs: &SVector<f32, P>) -> Self::Output {
+    fn sub(self, rhs: &SVector<f64, P>) -> Self::Output {
         Self {
             covmat: self.covmat,
             mean: self.mean - rhs,
@@ -146,8 +146,8 @@ impl<const P: usize> Sub<&SVector<f32, P>> for PDFMultivariate<P> {
     }
 }
 
-impl<const P: usize> SubAssign<&SVector<f32, P>> for PDFMultivariate<P> {
-    fn sub_assign(&mut self, rhs: &SVector<f32, P>) {
+impl<const P: usize> SubAssign<&SVector<f64, P>> for PDFMultivariate<P> {
+    fn sub_assign(&mut self, rhs: &SVector<f64, P>) {
         self.mean -= rhs
     }
 }

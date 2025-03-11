@@ -4,12 +4,13 @@ use rand::Rng;
 use rand_distr::Normal;
 
 /// A trait that must be implemented for any type that acts as a FEVM noise generator.
-pub trait FEVMNoiseGen<const N: usize>: Sync {
+pub trait FEVMNoiseGen<const N: usize>: Clone + Sync {
     /// Generate a random noise time-series.
     fn generate_noise(&self, size: usize, rng: &mut impl Rng) -> DVector<ObserVec<N>>;
 }
 
-/// A zero noise generator. Meant be used as None::<FEVMNoiseZero>.
+/// A zero noise generator.
+#[derive(Clone)]
 pub struct FEVMNoiseZero;
 
 impl<const N: usize> FEVMNoiseGen<N> for FEVMNoiseZero {
@@ -19,7 +20,8 @@ impl<const N: usize> FEVMNoiseGen<N> for FEVMNoiseZero {
 }
 
 /// A univariate random normal FEVM noise generator.
-pub struct FEVMNoiseGaussian(f32);
+#[derive(Clone)]
+pub struct FEVMNoiseGaussian(f64);
 
 impl<const N: usize> FEVMNoiseGen<N> for FEVMNoiseGaussian {
     fn generate_noise(&self, size: usize, rng: &mut impl Rng) -> DVector<ObserVec<N>> {

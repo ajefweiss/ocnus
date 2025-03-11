@@ -1,3 +1,6 @@
+// STATUS: Mature
+// TODO: Add more ScObsConf enum variants for more complicated configurations (remote sensing etc).
+
 use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
@@ -9,23 +12,24 @@ use std::{
 
 /// The configuration of a single spacecraft observation, as used in [`ScObs`].
 ///
-/// The following variants are currently available and implemented:
-/// - [`ScObsConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate system.
-/// - [`ScObsConf::Position`] : (x, y, z) - position of the spacecraft in a heliocentric coordinate system.
+/// The following variants are currently implemented:
+/// - [`ScObsConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate
+///   system.
+/// - [`ScObsConf::Position`] : (x, y, z) - position of the spacecraft in a heliocentric coordinate
+///   system.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "type", content = "content")]
 pub enum ScObsConf {
-    /// Timestamp & Distance from the Sun.
-    Distance(f32),
-    /// Timestamp & Position in space in an arbitrary Solar-centric coordiante system.
-    Position([f32; 3]),
+    /// Distance from the Sun.
+    Distance(f64),
+    /// Position in space, in an arbitrary Solar centric coordiante system.
+    Position([f64; 3]),
 }
 
-/// Represents a single spacecraft observation in time with an optional observation.
+/// Represents a single spacecraft observation in time, with an optional observation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScObs<O> {
-    timestamp: f32,
     configuration: ScObsConf,
+    timestamp: f64,
     observation: Option<O>,
 }
 
@@ -36,46 +40,50 @@ impl<O> ScObs<O> {
     }
 
     /// Create a new [`ScObs`].
-    pub fn new(timestamp: f32, configuration: ScObsConf, opt_observation: Option<O>) -> Self {
+    pub fn new(timestamp: f64, configuration: ScObsConf, opt_observation: Option<O>) -> Self {
         Self {
-            timestamp,
             configuration,
+            timestamp,
             observation: opt_observation,
         }
+    }
+
+    /// Acces the timestamp field.
+    pub fn timestamp(&self) -> f64 {
+        self.timestamp
     }
 
     /// Acces the observation field.
     pub fn observation(&self) -> Option<&O> {
         self.observation.as_ref()
     }
-
-    /// Acces the timestamp field.
-    pub fn timestamp(&self) -> f32 {
-        self.timestamp
-    }
 }
 
-/// Represents a time series of spacecraft observations with optional observations.
+/// Represents a time series of spacecraft observations, with optional observations.
 ///
 /// [`ScObsSeries`] has, among others, three important implementations:
 /// - [`ScObsSeries::add`] : Allows composition of two [`ScObsSeries`] objects.
-/// - [`ScObsSeries::sort_by_timestamp`] : Sorts the underlying vector of [`ScObs`] objets by their timestamps.
+/// - [`ScObsSeries::sort_by_timestamp`] : Sorts the underlying vector of [`ScObs`]
+///   objets by their timestamps.
 /// - [`ScObsSeries::split`] : The reciprocal of one or multiple [`ScObsSeries::add`] calls.
-///   Calling this function consumes a composite [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
+///   Calling this function consumes a composite [`ScObsSeries`] and returns the original
+///   [`ScObsSeries`] objects in a vector.
 #[derive(Clone, Debug, Deserialize, IntoIterator, Serialize)]
 pub struct ScObsSeries<O> {
     /// Vector of spacecraft observations.
     #[into_iterator(ref)]
     scobs: Vec<ScObs<O>>,
 
-    /// The sorting indices used to recover the original [`ScObsSeries`] objects from a composite.
+    /// The sorting indices that are used to recover the original [`ScObsSeries`]
+    /// objects from a composite.
     sorti: Vec<usize>,
 }
 
 impl<O> ScObsSeries<O> {
     /// Returns the number of individual [`ScObsSeries`] contained within.
     ///
-    /// This value corresponds to the length of the vector returned by [`ScObsSeries::sort_by_timestamp`].
+    /// This value corresponds to the length of the vector returned by
+    /// [`ScObsSeries::sort_by_timestamp`].
     pub fn count_series(&self) -> usize {
         self.sorti.iter().fold(0, |acc, next| max(acc, *next)) + 1
     }
@@ -103,7 +111,8 @@ impl<O> ScObsSeries<O> {
 
     /// Sorts the underlying `Vec<ScObs>` object by the time stamp field.
     pub fn sort_by_timestamp(&mut self) {
-        // Implements the bubble sort algorithm for re-ordering all vectors according to the time stamp values.
+        // Implements the bubble sort algorithm for re-ordering all vectors according to the
+        // time stamp values.
         let bubble_sort_closure = |scobs: &mut Vec<ScObs<O>>, sorti: &mut Vec<usize>| {
             let mut counter = 0;
 
@@ -127,7 +136,8 @@ impl<O> ScObsSeries<O> {
     }
 
     /// The reciprocal of [`ScObsSeries::sort_by_timestamp`].
-    /// Calling this function consumes the [`ScObsSeries`] object and returns the original [`ScObsSeries`] objects in a vector.
+    /// Calling this function consumes the [`ScObsSeries`] object and returns the original
+    /// [`ScObsSeries`] objects in a vector.
     pub fn split(self) -> Vec<ScObsSeries<O>>
     where
         O: Clone,
@@ -215,19 +225,19 @@ mod tests {
         let sctc1 = ScObs {
             timestamp: 0.0,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f32>,
+            observation: None::<f64>,
         };
 
         let sctc2 = ScObs {
             timestamp: 1.0,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f32>,
+            observation: None::<f64>,
         };
 
         let sctc3 = ScObs {
             timestamp: 0.5,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f32>,
+            observation: None::<f64>,
         };
 
         let mut ts3 = ScObsSeries::from_iterator([sctc1, sctc2]);
