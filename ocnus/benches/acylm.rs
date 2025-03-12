@@ -2,7 +2,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
-    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNoiseNull, FEVMNullState},
+    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNullState, noise::FEVMNoiseNull},
     geometry::XCState,
     obser::ObserVec,
     stats::{PDFConstant, PDFUniform, PDFUnivariates},
@@ -41,7 +41,7 @@ fn benchmark_lff(c: &mut Criterion) {
 
     let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
-            224640.0 + i as f64 * 3600.0 * 2.0,
+            224640.0 + i as f32 * 3600.0 * 2.0,
             ScObsConf::Distance(1.0),
             Some(refobs[i].clone()),
         )
@@ -51,10 +51,10 @@ fn benchmark_lff(c: &mut Criterion) {
 
     // Create temporary simulation data and out arrays, if necessary.
     let mut data = FEVMData {
-        params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(ENSEMBLE_SIZE),
+        params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(ENSEMBLE_SIZE),
         fevm_states: vec![FEVMNullState::default(); ENSEMBLE_SIZE],
         geom_states: vec![XCState::default(); ENSEMBLE_SIZE],
-        weights: None,
+        weights: vec![1.0 / ENSEMBLE_SIZE as f32; ENSEMBLE_SIZE],
     };
 
     let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), ENSEMBLE_SIZE);
