@@ -6,21 +6,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct XCState {
     /// Offset along the time axis.
-    pub t: f32,
+    pub t: f64,
 
     /// Offset along the x-axis.
-    pub x: f32,
+    pub x: f64,
 
     /// Offset along the z-axis.
-    pub z: f32,
+    pub z: f64,
 }
 
 /// The circular-cylindric coordinate basis vectors.
 pub fn cc_basis<const P: usize, M, GS, CStride: Dim>(
-    (_r, phi, _z): (f32, f32, f32),
-    _params: &VectorView<f32, Const<P>, U1, CStride>,
+    (_r, phi, _z): (f64, f64, f64),
+    _params: &VectorView<f64, Const<P>, U1, CStride>,
     _state: &XCState,
-) -> [Vector3<f32>; 3]
+) -> [Vector3<f64>; 3]
 where
     M: OcnusGeometry<P, GS>,
 {
@@ -32,10 +32,10 @@ where
 
 /// The circular-cylindric coordinate transformation (xyz -> ics)
 pub fn cc_ics<const P: usize, M, GS, CStride: Dim>(
-    (x, y, z): (f32, f32, f32),
-    params: &VectorView<f32, Const<P>, U1, CStride>,
+    (x, y, z): (f64, f64, f64),
+    params: &VectorView<f64, Const<P>, U1, CStride>,
     _state: &XCState,
-) -> Vector3<f32>
+) -> Vector3<f64>
 where
     M: OcnusGeometry<P, GS>,
 {
@@ -53,10 +53,10 @@ where
 
 /// The circular-cylindric coordinate transformation (ics -> xyz)
 pub fn cc_xyz<const P: usize, M, GS, CStride: Dim>(
-    (r, phi, z): (f32, f32, f32),
-    params: &VectorView<f32, Const<P>, U1, CStride>,
+    (r, phi, z): (f64, f64, f64),
+    params: &VectorView<f64, Const<P>, U1, CStride>,
     _state: &XCState,
-) -> Vector3<f32>
+) -> Vector3<f64>
 where
     M: OcnusGeometry<P, GS>,
 {
@@ -80,13 +80,13 @@ macro_rules! impl_acylm {
 
         impl OcnusGeometry<{ $params.len() }, XCState> for $model {
             const PARAMS: [&'static str; { $params.len() }] = $params;
-            const PARAM_RANGES: [(f32, f32); { $params.len() }] = $param_ranges;
+            const PARAM_RANGES: [(f64, f64); { $params.len() }] = $param_ranges;
 
             fn coords_basis<CStride: Dim>(
-                ics: &VectorView3<f32>,
-                params: &VectorView<f32, Const<{ $params.len() }>, U1, CStride>,
+                ics: &VectorView3<f64>,
+                params: &VectorView<f64, Const<{ $params.len() }>, U1, CStride>,
                 state: &XCState,
-            ) -> [Vector3<f32>; 3] {
+            ) -> [Vector3<f64>; 3] {
                 $fn_basis::<{ $params.len() }, Self, XCState, CStride>(
                     (ics[0], ics[1], ics[2]),
                     params,
@@ -95,10 +95,10 @@ macro_rules! impl_acylm {
             }
 
             fn coords_ics<CStride: Dim>(
-                xyz: &VectorView3<f32>,
-                params: &VectorView<f32, Const<{ $params.len() }>, U1, CStride>,
+                xyz: &VectorView3<f64>,
+                params: &VectorView<f64, Const<{ $params.len() }>, U1, CStride>,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 let phi = Self::param_value("phi", params);
                 let theta = Self::param_value("theta", params);
 
@@ -115,10 +115,10 @@ macro_rules! impl_acylm {
             }
 
             fn coords_xyz<CStride: Dim>(
-                ics: &VectorView3<f32>,
-                params: &VectorView<f32, Const<{ $params.len() }>, U1, CStride>,
+                ics: &VectorView3<f64>,
+                params: &VectorView<f64, Const<{ $params.len() }>, U1, CStride>,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 let phi = Self::param_value("phi", params);
                 let theta = Self::param_value("theta", params);
 
@@ -134,11 +134,11 @@ macro_rules! impl_acylm {
             }
 
             fn coords_xyz_vector<CStride: Dim>(
-                ics: &VectorView3<f32>,
-                vec: &VectorView3<f32>,
-                params: &VectorView<f32, Const<{ $params.len() }>, U1, CStride>,
+                ics: &VectorView3<f64>,
+                vec: &VectorView3<f64>,
+                params: &VectorView<f64, Const<{ $params.len() }>, U1, CStride>,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 let phi = Self::param_value("phi", params);
                 let theta = Self::param_value("theta", params);
 
@@ -159,8 +159,8 @@ impl_acylm!(
     CCModel,
     ["phi", "theta", "y", "radius"],
     [
-        (-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0),
-        (0.0, 2.0 * std::f32::consts::PI),
+        (-std::f64::consts::PI / 2.0, std::f64::consts::PI / 2.0),
+        (0.0, 2.0 * std::f64::consts::PI),
         (-1.0, 1.0),
         (0.01, 0.5),
     ],

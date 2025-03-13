@@ -18,13 +18,13 @@ use std::time::Instant;
 #[derive(Clone, Debug)]
 pub enum ABCParticleFilterMode<'a, F, const N: usize>
 where
-    F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f32 + Send + Sync,
+    F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
 {
     /// ABC-SMC runs are filtered by a threshold value.
-    Threshold((&'a F, f32)),
+    Threshold((&'a F, f64)),
 
     /// ABC-SMC runs are filtered by a fixed acceptance rate.
-    AcceptanceRate((&'a F, f32)),
+    AcceptanceRate((&'a F, f64)),
 }
 
 /// A trait that enables the use of approximate Bayesian computation (ABC) particle filter methods
@@ -39,14 +39,14 @@ where
     fn abcpf_run<F, NG>(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
-        mut fevmd: FEVMData<P, FS, GS>,
+        fevmd: &FEVMData<P, FS, GS>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
         mode: ABCParticleFilterMode<F, N>,
         settings: &mut ParticleFilterSettings<N, NG>,
     ) -> Result<ParticleFilterResults<P, N, FS, GS>, FEVMError>
     where
-        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f32 + Send + Sync,
+        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
         NG: FEVMNoiseGenerator<N>,
     {
         let start = Instant::now();
@@ -55,17 +55,17 @@ where
         let mut iteration = 0;
 
         let mut target_data = FEVMData::<P, FS, GS>::new(ensemble_size);
-        let mut target_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
-        let mut target_filter_values = Vec::<f32>::with_capacity(ensemble_size);
+        let mut target_output = DMatrix::<ObserVec<N>>::zeros(series.len(), ensemble_size);
+        let mut target_filter_values = Vec::<f64>::with_capacity(ensemble_size);
 
         let mut temp_data = FEVMData::<P, FS, GS>::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle PDF from input and multiply by the exploration factor.
         let mut density_old = PDFParticles::from_particles(
-            fevmd.params.as_view_mut(),
+            fevmd.params.as_view(),
             self.model_prior().valid_range(),
-            &mut fevmd.weights,
+            &fevmd.weights,
         )? * settings.exploration_factor;
 
         while counter != ensemble_size {
@@ -85,7 +85,7 @@ where
 
             let filter_values = match mode {
                 ABCParticleFilterMode::AcceptanceRate((filter, accrate)) => {
-                    if !(0.01..0.99).contains(&accrate) {
+                    if !(0.001..0.5).contains(&accrate) {
                         return Err(FEVMError::InvalidParameter {
                             name: "acceptance rate",
                             value: accrate,
@@ -103,24 +103,24 @@ where
                                     if **flag {
                                         filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series)
                                     } else {
-                                        f32::INFINITY
+                                        f64::INFINITY
                                     }
                                 })
-                                .collect::<Vec<f32>>()
+                                .collect::<Vec<f64>>()
                         })
                         .flatten()
-                        .collect::<Vec<f32>>();
+                        .collect::<Vec<f64>>();
 
                     let values_sorted = values
                         .iter()
                         .sorted_by(|a, b| a.partial_cmp(b).unwrap())
                         .copied()
-                        .collect::<Vec<f32>>();
+                        .collect::<Vec<f64>>();
 
-                    let mut epsilon = values_sorted[(sim_ensemble_size as f32 * accrate) as usize];
+                    let mut epsilon = values_sorted[(sim_ensemble_size as f64 * accrate) as usize];
 
                     if !epsilon.is_finite() {
-                        epsilon = f32::MAX;
+                        epsilon = f64::MAX;
                     }
 
                     flags
@@ -151,13 +151,13 @@ where
 
                                     value
                                 } else {
-                                    f32::NAN
+                                    f64::NAN
                                 }
                             })
-                            .collect::<Vec<f32>>()
+                            .collect::<Vec<f64>>()
                     })
                     .flatten()
-                    .collect::<Vec<f32>>(),
+                    .collect::<Vec<f64>>(),
             };
 
             let mut indices_valid = flags
@@ -194,27 +194,29 @@ where
         }
 
         // Create a Particle PDF from our result.
-        let mut density_new = PDFParticles::from_particles(
-            target_data.params.as_view_mut(),
+        let density_new = PDFParticles::from_particles(
+            target_data.params.as_view(),
             self.model_prior().valid_range(),
-            &mut target_data.weights,
+            &target_data.weights,
         )?;
 
-        ptpdf_importance_weighting(&mut density_new, &density_old, &self.model_prior());
+        // Update weights here.
+        target_data.weights =
+            ptpdf_importance_weighting(&density_new, &density_old, &self.model_prior());
 
         // Reset the covariance matrix in the old density.
         density_old *= 1.0 / settings.exploration_factor;
 
         // Compute the effective sample size.
         let effective_sample_size = 1.0
-            / density_new
-                .weights()
+            / target_data
+                .weights
                 .iter()
                 .map(|value| value.powi(2))
-                .sum::<f32>();
+                .sum::<f64>();
 
         if effective_sample_size
-            < ensemble_size as f32 * settings.effective_sample_size_threshold_factor
+            < ensemble_size as f64 * settings.effective_sample_size_threshold_factor
         {
             return Err(FEVMError::ParticleFilter(
                 ParticleFilterError::SmallSampleSize {
@@ -228,7 +230,7 @@ where
             .iter()
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
             .copied()
-            .collect::<Vec<f32>>();
+            .collect::<Vec<f64>>();
 
         // Compute quantiles for logging purposes.
         let eps_25 = filter_values_sorted[ensemble_size / 4];
@@ -236,14 +238,14 @@ where
         let eps_75 = filter_values_sorted[3 * ensemble_size / 4];
 
         info!(
-            "abcpf_run\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
+            "abcpf_run\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.1} / {}",
             0.0,
             2.0,
             eps_25,
             eps_50,
             eps_75,
-            (iteration as usize * sim_ensemble_size) as f32 / 1e6,
-            start.elapsed().as_millis() as f32 / 1e3,
+            (iteration as usize * sim_ensemble_size) as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3,
             effective_sample_size,
             ensemble_size,
         );

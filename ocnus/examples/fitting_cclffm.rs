@@ -1,14 +1,14 @@
 use chrono::Local;
-use core::f32;
+use core::f64;
 use env_logger::Builder;
 use nalgebra::DMatrix;
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        CCLFFModel, FEVMError,
+        CCLFFModel,
         filters::{
             ABCParticleFilter, ABCParticleFilterMode, MVLLParticleFilter, ParticleFilter,
-            ParticleFilterError, ParticleFilterSettingsBuilder, mean_square_normalized_filter,
+            ParticleFilterSettingsBuilder, mean_square_normalized_filter,
         },
         noise::{FEVMNoiseGaussian, FEVMNoiseMultivariate},
     },
@@ -58,7 +58,7 @@ fn main() {
 
     let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
-            10800.0 + i as f32 * 3600.0,
+            10800.0 + i as f64 * 3600.0,
             ScObsConf::Distance(1.0),
             Some(refobs[i].clone()),
         )
@@ -86,68 +86,53 @@ fn main() {
         .expect("Cannot write to the file!");
 
     let mut pfsettings = ParticleFilterSettingsBuilder::<3, _>::default()
-        .exploration_factor(2.0)
+        .exploration_factor(1.5)
         .noise(FEVMNoiseGaussian(2.0))
         .build()
         .unwrap();
 
-    for idx in 1..10 {
-        let mut result = model.abcpf_run(
+    for idx in 1..5 {
+        let result = model.abcpf_run(
             &sc,
-            fevmd,
+            &fevmd,
             4096,
             2_usize.pow(18),
-            ABCParticleFilterMode::AcceptanceRate((&mean_square_normalized_filter, 0.015)),
+            ABCParticleFilterMode::AcceptanceRate((&mean_square_normalized_filter, 0.0025)),
             &mut pfsettings,
         );
 
-        while matches!(
-            result,
-            Err(FEVMError::ParticleFilter(
-                ParticleFilterError::SmallSampleSize {
-                    effective_sample_size: _,
-                    ensemble_size: _
-                }
-            ))
-        ) {
-            pfsettings.rseed += 1;
-
-            let mut result = model.abcpf_run(
-                &sc,
-                fevmd,
-                4096,
-                2_usize.pow(18),
-                ABCParticleFilterMode::AcceptanceRate((&mean_square_normalized_filter, 0.015)),
-                &mut pfsettings,
-            );
-        }
-
-        let mut file = std::fs::File::create(format!(
-            "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-            idx
-        ))
-        .expect("could not create file!");
-
-        let list_as_json = serde_json::to_string(&result.unwrap().fevmd).unwrap();
-
-        file.write_all(list_as_json.as_bytes())
-            .expect("Cannot write to the file!");
-
         fevmd = result.unwrap().fevmd;
+
+        fevmd
+            .write(format!(
+                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+                idx
+            ))
+            .unwrap();
     }
 
-    let mut mvllsettings = ParticleFilterSettingsBuilder::<3, _>::default()
-        .exploration_factor(2.0)
-        .noise(FEVMNoiseMultivariate(
-            CovMatrix::from_matrix(
-                &DMatrix::from_diagonal_element(sc.len(), sc.len(), 1.0).as_view(),
-            )
-            .unwrap(),
-        ))
-        .build()
-        .unwrap();
+    for idx in 0..5 {
+        let mut mvllsettings = ParticleFilterSettingsBuilder::<3, _>::default()
+            .exploration_factor(2.0)
+            .noise(FEVMNoiseMultivariate(
+                CovMatrix::from_matrix(
+                    &DMatrix::from_diagonal_element(sc.len(), sc.len(), 10.0 / (idx as f64 + 1.0))
+                        .as_view(),
+                )
+                .unwrap(),
+            ))
+            .build()
+            .unwrap();
 
-    model
-        .mvllpf_run(&sc, fevmd, 4096, 2_usize.pow(18), &mut mvllsettings)
-        .unwrap();
+        let result = model.mvllpf_run(&sc, &fevmd, 4096, 2_usize.pow(20), &mut mvllsettings);
+
+        fevmd = result.unwrap().fevmd;
+
+        fevmd
+            .write(format!(
+                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+                5 + idx
+            ))
+            .unwrap();
+    }
 }

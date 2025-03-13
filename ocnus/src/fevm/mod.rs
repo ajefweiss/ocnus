@@ -27,7 +27,7 @@ use thiserror::Error;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FEVMData<const P: usize, FS, GS> {
     /// FEVM ensemble parameters.
-    pub params: Matrix<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>,
+    pub params: Matrix<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>,
 
     /// FEVM ensemble states.
     pub fevm_states: Vec<FS>,
@@ -36,7 +36,7 @@ pub struct FEVMData<const P: usize, FS, GS> {
     pub geom_states: Vec<GS>,
 
     /// Ensemble member weights.
-    pub weights: Vec<f32>,
+    pub weights: Vec<f64>,
 }
 
 impl<const P: usize, FS, GS> FEVMData<P, FS, GS>
@@ -48,10 +48,10 @@ where
     /// Create a new [`FEVMData`] filled with zeros.
     pub fn new(size: usize) -> Self {
         Self {
-            params: Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::zeros(size),
+            params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::zeros(size),
             fevm_states: vec![FS::default(); size],
             geom_states: vec![GS::default(); size],
-            weights: vec![1.0 / size as f32; size],
+            weights: vec![1.0 / size as f64; size],
         }
     }
 
@@ -75,7 +75,7 @@ where
 #[derive(Debug, Error)]
 pub enum FEVMError {
     #[error("invalid model parameter {name}={value}")]
-    InvalidParameter { name: &'static str, value: f32 },
+    InvalidParameter { name: &'static str, value: f64 },
     #[error(
         "invalid range {output_rows} x {output_cols} but expected {expected_rows} x {expected_cols}"
     )]
@@ -86,7 +86,7 @@ pub enum FEVMError {
         output_rows: usize,
     },
     #[error("attempted to simulate backwards in time (dt=-{0:.2}sec)")]
-    NegativeTimeStep(f32),
+    NegativeTimeStep(f64),
     #[error("particle filter error")]
     ParticleFilter(#[from] ParticleFilterError),
     #[error("stats error")]
@@ -107,8 +107,8 @@ where
     /// Evolve a model state forward in time.
     fn fevm_forward(
         &self,
-        time_step: f32,
-        params: &SVectorView<f32, P>,
+        time_step: f64,
+        params: &SVectorView<f64, P>,
         fevm_state: &mut FS,
         geom_state: &mut GS,
     ) -> Result<(), FEVMError>;
@@ -157,8 +157,8 @@ where
 
         debug!(
             "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols() as f32 / 1e6,
-            start.elapsed().as_millis() as f32 / 1e3
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -198,8 +198,8 @@ where
 
         debug!(
             "fevm_initialize_params_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols() as f32 / 1e6,
-            start.elapsed().as_millis() as f32 / 1e3
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -233,8 +233,8 @@ where
 
         debug!(
             "fevm_initialize_states_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols() as f32 / 1e6,
-            start.elapsed().as_millis() as f32 / 1e3
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -244,7 +244,7 @@ where
     fn fevm_observe(
         &self,
         scobs: &ScObs<ObserVec<N>>,
-        params: &SVectorView<f32, P>,
+        params: &SVectorView<f64, P>,
         fevm_state: &FS,
         geom_state: &GS,
     ) -> Result<ObserVec<N>, FEVMError>;
@@ -328,8 +328,8 @@ where
 
         debug!(
             "fevm_simulate: {:2.2}M evaluations in {:.2} sec",
-            (series.len() * fevmd.params.ncols()) as f32 / 1e6,
-            start.elapsed().as_millis() as f32 / 1e3
+            (series.len() * fevmd.params.ncols()) as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         let mut valid_indices_flags = vec![false; fevmd.params.ncols()];
@@ -359,7 +359,7 @@ where
     fn fevm_state(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
-        params: &SVectorView<f32, P>,
+        params: &SVectorView<f64, P>,
         fevm_state: &mut FS,
         geom_state: &mut GS,
     ) -> Result<(), FEVMError>;

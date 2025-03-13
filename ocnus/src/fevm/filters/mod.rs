@@ -30,7 +30,7 @@ pub enum ParticleFilterError {
     InefficientSampling,
     #[error("insufficiently large sample size {effective_sample_size} / {ensemble_size}")]
     SmallSampleSize {
-        effective_sample_size: f32,
+        effective_sample_size: f64,
         ensemble_size: usize,
     },
 }
@@ -43,14 +43,14 @@ where
 {
     /// Percentange of effective samples required for each iteration.
     #[builder(default = 0.2)]
-    pub effective_sample_size_threshold_factor: f32,
+    pub effective_sample_size_threshold_factor: f64,
 
     /// Multiplier for the transition kernel (covariance matrix),
     /// a higher value leads to a better exploration of the parameter
     /// space but slower convergence. The "optimal" value is 2.0
     /// (see Filippi et al. 2013).
     #[builder(default = 2.0)]
-    pub exploration_factor: f32,
+    pub exploration_factor: f64,
 
     /// Iteration counter,
     #[builder(default = 0, setter(skip))]
@@ -78,10 +78,10 @@ pub struct ParticleFilterResults<const P: usize, const N: usize, FS, GS> {
     pub output: DMatrix<ObserVec<N>>,
 
     /// Error values.
-    pub errors: Vec<f32>,
+    pub errors: Vec<f64>,
 
     /// Error quantiles values (25%, 50% = mean, 75%).
-    pub error_quantiles: [f32; 3],
+    pub error_quantiles: [f64; 3],
 }
 
 /// A trait that enables the use of generic particle filter methods for a [`FEVM`].
@@ -99,11 +99,11 @@ where
         ensemble_size: usize,
         sim_ensemble_size: usize,
 
-        opt_filter: Option<(&F, f32)>,
+        opt_filter: Option<(&F, f64)>,
         rseed: u64,
     ) -> Result<FEVMData<P, FS, GS>, FEVMError>
     where
-        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f32 + Send + Sync,
+        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
     {
         let mut counter = 0;
         let mut iteration = 0;
@@ -142,13 +142,13 @@ where
 
                                     value
                                 } else {
-                                    f32::NAN
+                                    f64::NAN
                                 }
                             })
-                            .collect::<Vec<f32>>()
+                            .collect::<Vec<f64>>()
                     })
                     .flatten()
-                    .collect::<Vec<f32>>();
+                    .collect::<Vec<f64>>();
             }
 
             let mut indices_valid = indices
@@ -188,26 +188,26 @@ where
 pub fn mean_square_filter<const N: usize>(
     out: &DVectorView<ObserVec<N>>,
     series: &ScObsSeries<ObserVec<N>>,
-) -> f32 {
+) -> f64 {
     out.into_iter()
         .zip(series)
         .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-        .sum::<f32>()
-        / series.len() as f32
+        .sum::<f64>()
+        / series.len() as f64
 }
 
 /// Normalized mean square error filter for particle filtering methods.
 pub fn mean_square_normalized_filter<const N: usize>(
     out: &DVectorView<ObserVec<N>>,
     series: &ScObsSeries<ObserVec<N>>,
-) -> f32 {
+) -> f64 {
     out.into_iter()
         .zip(series)
         .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-        .sum::<f32>()
+        .sum::<f64>()
         / DVector::<ObserVec<N>>::zeros(out.len())
             .into_iter()
             .zip(series)
             .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-            .sum::<f32>()
+            .sum::<f64>()
 }
