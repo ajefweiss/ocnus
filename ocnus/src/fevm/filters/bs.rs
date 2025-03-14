@@ -8,26 +8,26 @@ use crate::{
     obser::ObserVec,
     stats::{PDF, PDFParticles},
 };
-use core::f64;
+use core::f32;
 use itertools::Itertools;
 use log::{error, info};
 use nalgebra::DMatrix;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, time::Instant};
+use std::time::Instant;
 
 use super::ParticleFilterError;
 
-/// A trait that enables the use of a sequential Monte Carlo (SMC) particle filter methods
+/// A trait that enables the use of a bootstrap particle filter method
 /// for a [`FEVM`].
-pub trait MVLHParticleFilter<const P: usize, const N: usize, FS, GS>:
+pub trait BSParticleFilter<const P: usize, const N: usize, FS, GS>:
     ParticleFilter<P, N, FS, GS>
 where
     FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
     GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
 {
     /// Basic bootstrap filter (single iteration) with multivariate likelihood.
-    fn mvlhpf_run(
+    fn bspf_run(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
         fevmd: &FEVMData<P, FS, GS>,
@@ -86,26 +86,29 @@ where
                         if **flag {
                             settings.noise.mvlh(out.as_slice(), series)
                         } else {
-                            f64::NEG_INFINITY
+                            f32::NEG_INFINITY
                         }
                     })
-                    .collect::<Vec<f64>>()
+                    .collect::<Vec<f32>>()
             })
             .flatten()
-            .collect::<Vec<f64>>();
+            .collect::<Vec<f32>>();
 
         let lh_max = *likelihoods.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
 
         let mut weights = likelihoods
             .iter()
             .map(|lh| (lh - lh_max).exp())
-            .collect::<Vec<f64>>();
+            .collect::<Vec<f32>>();
 
-        let weights_total = weights.iter().sum::<f64>();
+        weights
+            .par_iter_mut()
+            .zip(temp_data.params.par_column_iter())
+            .for_each(|(weight, params)| *weight *= self.model_prior().relative_density(&params));
+
+        let weights_total = weights.iter().sum::<f32>();
 
         weights.iter_mut().for_each(|w| *w /= weights_total);
-
-        let effective_sample_size = 1.0 / weights.iter().map(|value| value.powi(2)).sum::<f64>();
 
         // Create a Particle PDF from the temporary simulations.
         let density_new: PDFParticles<'_, P> = PDFParticles::from_particles(
@@ -116,6 +119,16 @@ where
 
         self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
 
+        let uniques = target_data
+            .params
+            .row(0)
+            .iter()
+            .sorted_by(|a, b| a.partial_cmp(b).unwrap())
+            .dedup()
+            .copied()
+            .collect::<Vec<f32>>()
+            .len();
+
         self.fevm_simulate(
             series,
             &mut target_data,
@@ -123,15 +136,15 @@ where
             None::<(&FEVMNoiseNull, u64)>,
         )?;
 
-        target_data.weights = vec![1.0 / ensemble_size as f64; ensemble_size];
+        target_data.weights = vec![1.0 / ensemble_size as f32; ensemble_size];
 
         info!(
-            "mvlhpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
+            "bspf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\t unique samples = {} / {}",
             0.0,
             2.0,
-            sim_ensemble_size as f64 / 1e6,
-            start.elapsed().as_millis() as f64 / 1e3,
-            effective_sample_size,
+            (series.len() * sim_ensemble_size) as f32 / 1e6,
+            start.elapsed().as_millis() as f32 / 1e3,
+            uniques,
             ensemble_size,
         );
 
@@ -140,8 +153,8 @@ where
         Ok(ParticleFilterResults {
             fevmd: target_data,
             output: target_output,
-            errors: likelihoods,
-            error_quantiles: [0.0, 0.0, 0.0],
+            errors: Some(likelihoods),
+            error_quantiles: None,
         })
     }
 }

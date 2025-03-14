@@ -17,16 +17,16 @@ use std::{
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ScObsConf {
     /// Distance from the Sun.
-    Distance(f64),
+    Distance(f32),
     /// Position in space, in an arbitrary Solar centric coordiante system.
-    Position([f64; 3]),
+    Position([f32; 3]),
 }
 
 /// Represents a single spacecraft observation in time, with an optional observation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScObs<O> {
     configuration: ScObsConf,
-    timestamp: f64,
+    timestamp: f32,
     observation: Option<O>,
 }
 
@@ -37,7 +37,7 @@ impl<O> ScObs<O> {
     }
 
     /// Create a new [`ScObs`].
-    pub fn new(timestamp: f64, configuration: ScObsConf, opt_observation: Option<O>) -> Self {
+    pub fn new(timestamp: f32, configuration: ScObsConf, opt_observation: Option<O>) -> Self {
         Self {
             configuration,
             timestamp,
@@ -46,7 +46,7 @@ impl<O> ScObs<O> {
     }
 
     /// Acces the timestamp field.
-    pub fn timestamp(&self) -> f64 {
+    pub fn timestamp(&self) -> f32 {
         self.timestamp
     }
 
@@ -222,19 +222,19 @@ mod tests {
         let sctc1 = ScObs {
             timestamp: 0.0,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f64>,
+            observation: None::<f32>,
         };
 
         let sctc2 = ScObs {
             timestamp: 1.0,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f64>,
+            observation: None::<f32>,
         };
 
         let sctc3 = ScObs {
             timestamp: 0.5,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f64>,
+            observation: None::<f32>,
         };
 
         let mut ts3 = ScObsSeries::from_iterator([sctc1, sctc2]);

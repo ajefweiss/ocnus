@@ -16,7 +16,7 @@ use std::{
 pub struct ObserVec<const N: usize>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
-    pub [f64; N],
+    pub [f32; N],
 );
 
 impl<const N: usize> ObserVec<N> {
@@ -31,13 +31,13 @@ impl<const N: usize> ObserVec<N> {
     }
 
     /// Calculate the mean square error betweeon two observation vectors.
-    pub fn mse(&self, other: &Self) -> f64 {
-        (self - other).ss() / N as f64
+    pub fn mse(&self, other: &Self) -> f32 {
+        (self - other).ss() / N as f32
     }
 
     /// Calculate the sum of squares over the entries within the observation vector.
-    pub fn ss(&self) -> f64 {
-        self.iter().map(|value| value.powi(2)).sum::<f64>()
+    pub fn ss(&self) -> f32 {
+        self.iter().map(|value| value.powi(2)).sum::<f32>()
     }
 
     /// Return a new observation vector filled with zeros.
@@ -53,7 +53,7 @@ impl<const N: usize> Add for ObserVec<N> {
         ObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(a, b)| a + b)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
@@ -67,7 +67,7 @@ impl<'a, const N: usize> Add<&'a ObserVec<N>> for &'a ObserVec<N> {
         ObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(v1, v2)| v1 + v2)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
@@ -82,7 +82,7 @@ impl<const N: usize> AddAssign for ObserVec<N> {
 
 impl<const N: usize> Default for ObserVec<N> {
     fn default() -> Self {
-        ObserVec([f64::nan(); N])
+        ObserVec([f32::nan(); N])
     }
 }
 
@@ -102,62 +102,62 @@ impl Display for ObserVec<4> {
     }
 }
 
-impl<const N: usize> From<SVector<f64, N>> for ObserVec<N> {
-    fn from(value: SVector<f64, N>) -> Self {
+impl<const N: usize> From<SVector<f32, N>> for ObserVec<N> {
+    fn from(value: SVector<f32, N>) -> Self {
         ObserVec::from(value.data.0[0])
     }
 }
 
-impl<const N: usize> Mul<f64> for ObserVec<N> {
+impl<const N: usize> Mul<f32> for ObserVec<N> {
     type Output = ObserVec<N>;
 
-    fn mul(self, rhs: f64) -> Self::Output {
+    fn mul(self, rhs: f32) -> Self::Output {
         ObserVec::<N>(
             self.iter()
                 .map(|v| *v * rhs)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<const N: usize> Mul<f64> for &ObserVec<N> {
+impl<const N: usize> Mul<f32> for &ObserVec<N> {
     type Output = ObserVec<N>;
 
-    fn mul(self, rhs: f64) -> Self::Output {
+    fn mul(self, rhs: f32) -> Self::Output {
         ObserVec::<N>(
             self.iter()
                 .map(|v| *v * rhs)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<const N: usize> Mul<ObserVec<N>> for f64 {
+impl<const N: usize> Mul<ObserVec<N>> for f32 {
     type Output = ObserVec<N>;
 
     fn mul(self, rhs: ObserVec<N>) -> Self::Output {
         ObserVec::<N>(
             rhs.iter()
                 .map(|v| *v * self)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
     }
 }
 
-impl<'a, const N: usize> Mul<&'a ObserVec<N>> for f64 {
+impl<'a, const N: usize> Mul<&'a ObserVec<N>> for f32 {
     type Output = ObserVec<N>;
 
     fn mul(self, rhs: &'a ObserVec<N>) -> Self::Output {
         ObserVec::<N>(
             rhs.iter()
                 .map(|v| *v * self)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
@@ -182,7 +182,7 @@ impl<const N: usize> Sub for ObserVec<N> {
         ObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(v1, v2)| v1 - v2)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
@@ -202,7 +202,7 @@ impl<'a, const N: usize> Sub<&'a ObserVec<N>> for &'a ObserVec<N> {
         ObserVec::<N>(
             zip_eq(self, rhs)
                 .map(|(v1, v2)| *v1 - *v2)
-                .collect::<Vec<f64>>()
+                .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
         )
@@ -257,13 +257,13 @@ mod tests {
         assert!(ObserVec::<3>::default().any_nan());
         assert!(ObserVec::<3>::default().is_nan());
 
-        assert!(ObserVec([f64::NAN, 0.0, 0.0]).any_nan());
-        assert!(!ObserVec([f64::NAN, 0.0, 0.0]).is_nan());
+        assert!(ObserVec([f32::NAN, 0.0, 0.0]).any_nan());
+        assert!(!ObserVec([f32::NAN, 0.0, 0.0]).is_nan());
 
-        assert!(ObserVec([0.0, f64::NAN, 0.0, 0.0]).any_nan());
-        assert!(!ObserVec([0.0, f64::NAN, 0.0, 0.0]).is_nan());
+        assert!(ObserVec([0.0, f32::NAN, 0.0, 0.0]).any_nan());
+        assert!(!ObserVec([0.0, f32::NAN, 0.0, 0.0]).is_nan());
 
-        assert!(ObserVec([0.0, f64::NAN, 0.0, 0.0]) != ObserVec([0.0, f64::NAN, 0.0, 0.0]));
+        assert!(ObserVec([0.0, f32::NAN, 0.0, 0.0]) != ObserVec([0.0, f32::NAN, 0.0, 0.0]));
         assert!(ObserVec::<4>::zeros() == ObserVec::<4>::zeros());
 
         assert!(ObserVec::<4>::default().is_nan());

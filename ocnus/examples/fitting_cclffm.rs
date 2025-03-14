@@ -1,14 +1,14 @@
 use chrono::Local;
-use core::f64;
+use core::f32;
 use env_logger::Builder;
 use nalgebra::DMatrix;
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        CCLFFModel,
+        CCLFFModel, FEVMError,
         filters::{
-            ABCParticleFilter, ABCParticleFilterMode, MVLHParticleFilter, ParticleFilter,
-            ParticleFilterResults, ParticleFilterSettingsBuilder, mean_square_normalized_filter,
+            ABCParticleFilter, ABCParticleFilterMode, BSParticleFilter, ParticleFilter,
+            ParticleFilterError, ParticleFilterSettingsBuilder, root_mean_square_filter,
         },
         noise::{FEVMNoiseGaussian, FEVMNoiseMultivariate},
     },
@@ -23,7 +23,7 @@ fn main() {
             writeln!(
                 buf,
                 "{} [{}] - {}",
-                Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                Local::now().format("%Y-%m-%dT%H:%M:%S.%f"),
                 record.level(),
                 record.args()
             )
@@ -32,14 +32,14 @@ fn main() {
         .init();
 
     let model = CCLFFModel(PDFUnivariates::new([
-        PDFUniform::new_uvpdf((-2.0, 1.0)).unwrap(),
-        PDFUniform::new_uvpdf((2.0, 4.2)).unwrap(),
+        PDFUniform::new_uvpdf((-(90.0_f32.to_radians()), (90.0_f32.to_radians()))).unwrap(),
+        PDFUniform::new_uvpdf((0.0, f32::consts::TAU)).unwrap(),
         PDFUniform::new_uvpdf((-0.75, 0.75)).unwrap(),
         PDFReciprocal::new_uvpdf((0.05, 0.35)).unwrap(),
         PDFConstant::new_uvpdf(750.0),
         PDFUniform::new_uvpdf((5.0, 25.0)).unwrap(),
-        PDFUniform::new_uvpdf((0.0, 2.4)).unwrap(),
-        PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
+        PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
+        PDFUniform::new_uvpdf((0.7, 1.0)).unwrap(),
     ]));
 
     #[allow(clippy::excessive_precision)]
@@ -56,98 +56,116 @@ fn main() {
         // ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
     ];
 
+    const ENSEMBLE_SIZE: usize = 4096;
+
     let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
-            10800.0 + i as f64 * 3600.0 * 2.0,
+            10800.0 + i as f32 * 3600.0 * 2.0,
             ScObsConf::Distance(1.0),
             Some(refobs[i].clone()),
         )
     }));
 
-    let mut fevmd = model
-        .pf_initialize_data(
-            &sc,
-            8192,
-            2_usize.pow(18),
-            Some((&mean_square_normalized_filter, 0.9)),
-            43,
-        )
-        .unwrap();
-
-    let mut file = std::fs::File::create(format!(
-        "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-        0
-    ))
-    .expect("could not create file!");
-
-    let list_as_json = serde_json::to_string(&ParticleFilterResults {
-        fevmd: fevmd.clone(),
-        output: DMatrix::<ObserVec<3>>::zeros(1, 1),
-        error_quantiles: [0.0; 3],
-        errors: Vec::new(),
-    })
-    .unwrap();
-
-    file.write_all(list_as_json.as_bytes())
-        .expect("Cannot write to the file!");
-
     let mut pfsettings = ParticleFilterSettingsBuilder::<3, _>::default()
         .exploration_factor(1.5)
-        .noise(FEVMNoiseGaussian(2.0))
+        .noise(FEVMNoiseGaussian(1.0))
+        .quantiles([0.2, 0.5, 1.0])
+        .rseed(70)
+        .time_limit(1.5)
         .build()
         .unwrap();
 
-    for idx in 1..5 {
-        let result = model.abcpf_run(
+    let init_result = model
+        .pf_initialize_data(
+            &sc,
+            ENSEMBLE_SIZE,
+            2_usize.pow(18),
+            Some((&root_mean_square_filter, 9.5)),
+            &mut pfsettings,
+        )
+        .unwrap();
+
+    init_result
+        .write(format!(
+            "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+            0
+        ))
+        .unwrap();
+
+    let mut total_counter = 1;
+    let mut fevmd = init_result.fevmd;
+    let mut epsilon = init_result.error_quantiles.unwrap()[0];
+
+    for _ in 1..20 {
+        let run = model.abcpf_run(
             &sc,
             &fevmd,
-            8192,
-            2_usize.pow(18),
-            ABCParticleFilterMode::AcceptanceRate((&mean_square_normalized_filter, 0.0025)),
+            ENSEMBLE_SIZE,
+            2_usize.pow(16),
+            ABCParticleFilterMode::Threshold((&root_mean_square_filter, epsilon)),
             &mut pfsettings,
         );
 
-        let pfres = result.unwrap();
+        let run_pfresult = match run {
+            Ok(result) => result,
+            Err(err) => match err {
+                FEVMError::ParticleFilter(pferr) => match pferr {
+                    ParticleFilterError::TimeLimitExceeded { .. } => break,
+                    _ => {
+                        pfsettings.rseed += 1;
+                        continue;
+                    }
+                },
+                _ => panic!(),
+            },
+        };
 
-        pfres
+        run_pfresult
             .write(format!(
                 "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                idx
+                total_counter
             ))
             .unwrap();
 
-        fevmd = pfres.fevmd;
+        fevmd = run_pfresult.fevmd;
+        total_counter += 1;
+        epsilon = run_pfresult.error_quantiles.unwrap()[0];
     }
 
     for idx in 0..10 {
-        let mut mvlhsettings = ParticleFilterSettingsBuilder::<3, _>::default()
+        let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
             .exploration_factor(1.0)
             .noise(FEVMNoiseMultivariate(
                 CovMatrix::from_matrix(
-                    &DMatrix::from_diagonal_element(sc.len(), sc.len(), 10.0 / (idx as f64 + 1.0))
-                        .as_view(),
+                    &DMatrix::from_diagonal_element(
+                        sc.len(),
+                        sc.len(),
+                        1.0 + (10.0 / (1 + idx) as f32),
+                    )
+                    .as_view(),
                 )
                 .unwrap(),
             ))
             .build()
             .unwrap();
 
-        let result = model.mvlhpf_run(&sc, &fevmd, 8192, 2_usize.pow(16), &mut mvlhsettings);
+        let result = model.bspf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
 
         let pfres = result.unwrap();
 
         pfres
             .write(format!(
                 "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                5 + idx
+                total_counter
             ))
             .unwrap();
 
         fevmd = pfres.fevmd;
+        total_counter += 1;
     }
 
-    for idx in 0..10 {
-        let mut mvlhsettings = ParticleFilterSettingsBuilder::<3, _>::default()
+    for _ in 0..10 {
+        let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
             .exploration_factor(1.0)
             .noise(FEVMNoiseMultivariate(
                 CovMatrix::from_matrix(
@@ -158,17 +176,18 @@ fn main() {
             .build()
             .unwrap();
 
-        let result = model.mvlhpf_run(&sc, &fevmd, 8192, 2_usize.pow(16), &mut mvlhsettings);
+        let result = model.bspf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
 
         let pfres = result.unwrap();
 
         pfres
             .write(format!(
                 "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                15 + idx
+                total_counter
             ))
             .unwrap();
 
         fevmd = pfres.fevmd;
+        total_counter += 1;
     }
 }
