@@ -163,7 +163,7 @@ impl CovMatrix {
         }
 
         let mut lh =
-            (self.pseudo_determinant.ln() + ndim as f64 * std::f64::consts::PI * 2.0) / 2.0;
+            -(self.pseudo_determinant.ln() + ndim as f64 * std::f64::consts::PI * 2.0) / 2.0;
 
         for idx in 0..ndim {
             let view = delta.rows_with_step(idx, self.ndim(), ndim - 1);

@@ -8,6 +8,8 @@ use crate::{
     obser::ObserVec,
     stats::{PDF, PDFParticles},
 };
+use core::f64;
+use itertools::Itertools;
 use log::{error, info};
 use nalgebra::DMatrix;
 use rayon::prelude::*;
@@ -18,14 +20,14 @@ use super::ParticleFilterError;
 
 /// A trait that enables the use of a sequential Monte Carlo (SMC) particle filter methods
 /// for a [`FEVM`].
-pub trait MVLLParticleFilter<const P: usize, const N: usize, FS, GS>:
+pub trait MVLHParticleFilter<const P: usize, const N: usize, FS, GS>:
     ParticleFilter<P, N, FS, GS>
 where
     FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
     GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
 {
-    /// Basic SMC algorithm (single iteration) with multivariate likelihood.
-    fn mvllpf_run(
+    /// Basic bootstrap filter (single iteration) with multivariate likelihood.
+    fn mvlhpf_run(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
         fevmd: &FEVMData<P, FS, GS>,
@@ -46,7 +48,7 @@ where
             fevmd.params.as_view(),
             self.model_prior().valid_range(),
             &fevmd.weights,
-        )?;
+        )? * settings.exploration_factor;
 
         self.fevm_initialize(
             series,
@@ -72,7 +74,8 @@ where
             ));
         }
 
-        let mut weights = temp_output
+        // Compute likelihoods.
+        let likelihoods = temp_output
             .par_column_iter()
             .zip(flags.par_iter())
             .chunks(Self::RCS)
@@ -81,7 +84,7 @@ where
                     .iter_mut()
                     .map(|(out, flag)| {
                         if **flag {
-                            settings.noise.mvll(out.as_slice(), series)
+                            settings.noise.mvlh(out.as_slice(), series)
                         } else {
                             f64::NEG_INFINITY
                         }
@@ -91,16 +94,12 @@ where
             .flatten()
             .collect::<Vec<f64>>();
 
-        let weights_max = weights.iter().fold(f64::NEG_INFINITY, |acc, next| {
-            match acc.partial_cmp(next).unwrap() {
-                Ordering::Less => *next,
-                _ => acc,
-            }
-        });
+        let lh_max = *likelihoods.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
 
-        weights
-            .iter_mut()
-            .for_each(|w| *w = (*w + weights_max).exp());
+        let mut weights = likelihoods
+            .iter()
+            .map(|lh| (lh - lh_max).exp())
+            .collect::<Vec<f64>>();
 
         let weights_total = weights.iter().sum::<f64>();
 
@@ -108,21 +107,15 @@ where
 
         let effective_sample_size = 1.0 / weights.iter().map(|value| value.powi(2)).sum::<f64>();
 
-        temp_data.weights = weights;
-
         // Create a Particle PDF from the temporary simulations.
         let density_new: PDFParticles<'_, P> = PDFParticles::from_particles(
             temp_data.params.as_view(),
             self.model_prior().valid_range(),
-            &temp_data.weights,
-        )? * settings.exploration_factor;
-
-        self.fevm_initialize(
-            series,
-            &mut target_data,
-            Some(&density_new),
-            settings.rseed + 13,
+            &weights,
         )?;
+
+        self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
+
         self.fevm_simulate(
             series,
             &mut target_data,
@@ -133,7 +126,7 @@ where
         target_data.weights = vec![1.0 / ensemble_size as f64; ensemble_size];
 
         info!(
-            "mvllpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
+            "mvlhpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M simulations in {:.2} sec\n\teffective sample size = {:.0} / {}",
             0.0,
             2.0,
             sim_ensemble_size as f64 / 1e6,
@@ -147,7 +140,7 @@ where
         Ok(ParticleFilterResults {
             fevmd: target_data,
             output: target_output,
-            errors: Vec::new(),
+            errors: likelihoods,
             error_quantiles: [0.0, 0.0, 0.0],
         })
     }

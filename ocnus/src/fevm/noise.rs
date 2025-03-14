@@ -39,7 +39,7 @@ pub struct FEVMNoiseMultivariate(pub CovMatrix);
 
 impl FEVMNoiseMultivariate {
     /// Wrapper function for [`CovMatrix::multivariate_likelihood`]
-    pub fn mvll<const N: usize>(
+    pub fn mvlh<const N: usize>(
         &self,
         x: &[ObserVec<N>],
         series: &ScObsSeries<ObserVec<N>>,

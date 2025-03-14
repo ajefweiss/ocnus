@@ -32,6 +32,14 @@ impl<const P: usize> PDFMultivariate<P> {
             range,
         }
     }
+
+    /// Compute the Kullback-Leibler divergence between two [`PDFMultivariate`].
+    pub fn kullback_leibler_divergence(&self, other: &PDFMultivariate<P>) -> f64 {
+        let l_0 = self.covmat.cholesky_ltm();
+        let l_1 = other.covmat.cholesky_ltm();
+
+        0.0
+    }
 }
 
 impl<const P: usize> PDF<P> for &PDFMultivariate<P> {

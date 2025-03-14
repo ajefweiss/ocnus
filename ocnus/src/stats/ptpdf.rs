@@ -60,6 +60,39 @@ impl<'a, const P: usize> PDFParticles<'a, P> {
         self.particles.as_view()
     }
 
+    /// Resample from existing particles.
+    pub fn resample(&self, rng: &mut impl Rng) -> Result<SVector<f64, P>, StatsError> {
+        let uniform = Uniform::new(0.0, 1.0).unwrap();
+
+        let offset = {
+            let pdx = {
+                // Select particle index by weight.
+                let wdx = rng.sample(uniform);
+
+                // Here we abuse try_fold to return particle index early wrapped within Err().
+                match self
+                    .weights
+                    .iter()
+                    .enumerate()
+                    .try_fold(0.0, |acc, (idx, weight)| {
+                        let next_weight = acc + weight;
+                        if wdx < next_weight {
+                            Err(idx)
+                        } else {
+                            Ok(next_weight)
+                        }
+                    }) {
+                    Ok(_) => self.weights.len() - 1,
+                    Err(idx) => idx,
+                }
+            };
+
+            self.particles.column(pdx)
+        };
+
+        Ok(offset.into())
+    }
+
     /// Returns a reference to the particle weights.
     pub fn weights(&self) -> &Vec<f64> {
         self.weights

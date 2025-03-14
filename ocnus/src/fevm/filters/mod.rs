@@ -1,10 +1,10 @@
 //! Implementations of various particle filters.
 
 mod abc;
-mod mvll;
+mod mvlh;
 
 pub use abc::*;
-pub use mvll::*;
+pub use mvlh::*;
 
 use crate::{
     ScObsSeries,
@@ -20,6 +20,7 @@ use log::debug;
 use nalgebra::{DMatrix, DVector, DVectorView, Dyn, U1};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use thiserror::Error;
 
 /// Errors associated with particle filters.
@@ -82,6 +83,20 @@ pub struct ParticleFilterResults<const P: usize, const N: usize, FS, GS> {
 
     /// Error quantiles values (25%, 50% = mean, 75%).
     pub error_quantiles: [f64; 3],
+}
+
+impl<const P: usize, const N: usize, FS, GS> ParticleFilterResults<P, N, FS, GS>
+where
+    Self: Serialize,
+{
+    /// Write data to a file.
+    pub fn write(&self, path: String) -> std::io::Result<()> {
+        let mut file = std::fs::File::create(path)?;
+
+        file.write_all(serde_json::to_string(&self).unwrap().as_bytes())?;
+
+        Ok(())
+    }
 }
 
 /// A trait that enables the use of generic particle filter methods for a [`FEVM`].

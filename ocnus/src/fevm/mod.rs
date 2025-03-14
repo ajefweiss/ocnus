@@ -9,6 +9,7 @@ use filters::ParticleFilterError;
 use noise::FEVMNoiseGenerator;
 use serde::{Deserialize, Serialize};
 
+use crate::stats::PDFParticles;
 use crate::{
     ScObs, ScObsSeries, geometry::OcnusGeometry, obser::ObserVec, stats::PDF, stats::StatsError,
 };
@@ -144,6 +145,51 @@ where
                             Some(pdf) => pdf.draw_sample(&mut rng),
                             None => self.model_prior().draw_sample(&mut rng),
                         }?;
+
+                        params.set_column(0, &sample);
+
+                        self.fevm_state(series, &params.as_view(), fevm_state, geom_state)?;
+
+                        Ok::<(), FEVMError>(())
+                    })?;
+
+                Ok::<(), FEVMError>(())
+            })?;
+
+        debug!(
+            "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
+        );
+
+        Ok(())
+    }
+
+    /// Initialize parameters and states for a FEVM ensemble by
+    /// resampling from a [`PDFParticles`].
+    fn fevm_initialize_resample(
+        &self,
+        series: &ScObsSeries<ObserVec<N>>,
+        fevmd: &mut FEVMData<P, FS, GS>,
+        pdf: &PDFParticles<P>,
+        rseed: u64,
+    ) -> Result<(), FEVMError> {
+        let start = Instant::now();
+
+        fevmd
+            .params
+            .par_column_iter_mut()
+            .zip(fevmd.fevm_states.par_iter_mut())
+            .zip(fevmd.geom_states.par_iter_mut())
+            .chunks(Self::RCS)
+            .enumerate()
+            .try_for_each(|(cdx, mut chunks)| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 17) as u64);
+
+                chunks
+                    .iter_mut()
+                    .try_for_each(|((params, fevm_state), geom_state)| {
+                        let sample = pdf.resample(&mut rng)?;
 
                         params.set_column(0, &sample);
 

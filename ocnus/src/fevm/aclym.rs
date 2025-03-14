@@ -2,7 +2,7 @@ use crate::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
         FEVM, FEVMError,
-        filters::{ABCParticleFilter, MVLLParticleFilter, ParticleFilter},
+        filters::{ABCParticleFilter, MVLHParticleFilter, ParticleFilter},
     },
     geometry::OcnusGeometry,
     geometry::{CCModel, XCState},
@@ -361,7 +361,7 @@ macro_rules! impl_fevm {
         }
 
         impl<T>
-            MVLLParticleFilter<{ $parent::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState>
+            MVLHParticleFilter<{ $parent::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState>
             for $model<T>
         where
             T: Sync,
