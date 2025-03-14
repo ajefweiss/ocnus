@@ -3,12 +3,15 @@
 mod aclym;
 pub mod filters;
 pub mod noise;
+mod fisher;
 
 pub use aclym::*;
+pub use fisher::*;
+
+
 use filters::ParticleFilterError;
 use noise::FEVMNoiseGenerator;
 use serde::{Deserialize, Serialize};
-
 use crate::stats::PDFParticles;
 use crate::{
     ScObs, ScObsSeries, geometry::OcnusGeometry, obser::ObserVec, stats::PDF, stats::StatsError,
