@@ -1,7 +1,7 @@
 use crate::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        FEVM, FEVMError,
+        FEVM, FEVMError, FisherInformation,
         filters::{ABCParticleFilter, BSParticleFilter, ParticleFilter},
     },
     geometry::OcnusGeometry,
@@ -368,6 +368,15 @@ macro_rules! impl_fevm {
             for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>,
         {
         }
+
+        impl<T>
+            FisherInformation<{ $parent::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState>
+            for $model<T>
+        where
+            T: Sync,
+            for<'a> &'a T: PDF<{ $parent::PARAMS.len() + $params.len() }>,
+        {
+        }
     };
 }
 
@@ -434,7 +443,16 @@ mod tests {
 
         data.params.set_column(
             0,
-            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+            &SVector::<f32, 8>::from([
+                5.0_f32.to_radians(),
+                -3.0_f32.to_radians(),
+                0.025,
+                0.2,
+                600.0,
+                20.0,
+                1.0,
+                0.0,
+            ]),
         );
 
         model
@@ -444,9 +462,9 @@ mod tests {
             .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseNull, u64)>)
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 18.7926).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.7875).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 0.8228).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 18.958231).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.821177).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 1.874855).abs() < 1e-4);
     }
 
     #[test]
@@ -485,7 +503,16 @@ mod tests {
 
         data.params.set_column(
             0,
-            &SVector::<f32, 8>::from([0.0, 0.0, 0.0, 0.2, 600.0, 20.0, 1.0, 0.0]),
+            &SVector::<f32, 8>::from([
+                5.0_f32.to_radians(),
+                -3.0_f32.to_radians(),
+                0.025,
+                0.2,
+                600.0,
+                20.0,
+                1.0,
+                0.0,
+            ]),
         );
 
         model
@@ -495,8 +522,8 @@ mod tests {
             .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseNull, u64)>)
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 16.0615).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.1827).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.636).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 16.378181).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.32089).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 2.687612).abs() < 1e-4);
     }
 }

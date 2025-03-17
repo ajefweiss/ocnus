@@ -44,11 +44,22 @@ impl FEVMNoiseMultivariate {
         x: &[ObserVec<N>],
         series: &ScObsSeries<ObserVec<N>>,
     ) -> f32 {
-        let x_flat = x.iter().flat_map(|value| value.0).collect::<Vec<f32>>();
-        let mu_flat = series
+        let mut x_flat = x.iter().flat_map(|value| value.0).collect::<Vec<f32>>();
+        let mut mu_flat = series
             .into_iter()
-            .flat_map(|value| value.observation().unwrap().0)
+            .flat_map(|value| value.observation().unwrap_or(&ObserVec::default()).0)
             .collect::<Vec<f32>>();
+
+        // Correct NaNs if, and only if, appropriate.
+        x_flat
+            .iter_mut()
+            .zip(mu_flat.iter_mut())
+            .for_each(|(x, y)| {
+                if x.is_nan() & y.is_nan() {
+                    *x = 0.0;
+                    *y = 0.0;
+                }
+            });
 
         self.0.multivariate_likelihood(x_flat, mu_flat)
     }

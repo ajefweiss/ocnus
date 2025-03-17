@@ -64,7 +64,7 @@ pub trait OcnusGeometry<const P: usize, GS> {
     fn param_step_sizes(&self) -> [f32; P] {
         Self::PARAM_RANGES
             .iter()
-            .map(|(min, max)| 16.0 * (max - min) * f32::EPSILON)
+            .map(|(min, max)| 1024.0 * (max - min) * f32::EPSILON)
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap()

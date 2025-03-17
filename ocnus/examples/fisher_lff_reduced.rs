@@ -1,17 +1,19 @@
 use chrono::Local;
 use core::f32;
 use env_logger::Builder;
-use nalgebra::DMatrix;
+use log::info;
+use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        CCUTModel, FEVMError,
+        CCLFFModel, FEVM, FEVMData, FEVMError, FEVMNullState, FisherInformation,
         filters::{
             ABCParticleFilter, ABCParticleFilterMode, BSParticleFilter, ParticleFilter,
             ParticleFilterError, ParticleFilterSettingsBuilder, root_mean_square_filter,
         },
-        noise::{FEVMNoiseGaussian, FEVMNoiseMultivariate},
+        noise::{FEVMNoiseGaussian, FEVMNoiseMultivariate, FEVMNoiseNull},
     },
+    geometry::XCState,
     obser::ObserVec,
     stats::{CovMatrix, PDFConstant, PDFReciprocal, PDFUniform, PDFUnivariates},
 };
@@ -31,44 +33,103 @@ fn main() {
         .filter(None, log::LevelFilter::Info)
         .init();
 
-    let model = CCUTModel(PDFUnivariates::new([
+    let model = CCLFFModel(PDFUnivariates::new([
         PDFUniform::new_uvpdf((-(90.0_f32.to_radians()), (90.0_f32.to_radians()))).unwrap(),
         PDFUniform::new_uvpdf((0.0, f32::consts::TAU)).unwrap(),
         PDFUniform::new_uvpdf((-0.75, 0.75)).unwrap(),
         PDFReciprocal::new_uvpdf((0.05, 0.35)).unwrap(),
-        PDFConstant::new_uvpdf(750.0),
+        PDFConstant::new_uvpdf(1125.0),
         PDFUniform::new_uvpdf((5.0, 25.0)).unwrap(),
-        PDFUniform::new_uvpdf((-5.0, 5.0)).unwrap(),
-        PDFUniform::new_uvpdf((0.7, 1.0)).unwrap(),
+        PDFConstant::new_uvpdf(1.8),
+        PDFConstant::new_uvpdf(0.8245641),
     ]));
 
-    #[allow(clippy::excessive_precision)]
-    let refobs = [
-        ObserVec::from([-2.67159853, -13.38264243, -7.20006469]),
-        // ObserVec::from([-3.13531505, -13.98423491, -6.64658269]),
-        ObserVec::from([-5.34451816, -14.85328723, -1.73480069]),
-        // ObserVec::from([-3.38360946, -15.34720671, -1.71139834]),
-        ObserVec::from([-4.00239361, -14.94369, 1.2604304]),
-        // ObserVec::from([-4.21540068, -13.93568105, 4.73878965]),
-        ObserVec::from([-2.7273795, -14.29364075, 4.8267508]),
-        // ObserVec::from([-5.41469694, -13.9772912, 4.14112123]),
-        ObserVec::from([-4.28371012, -13.89409455, 5.13879915]),
-        // ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
-    ];
+    let sc = ScObsSeries::<ObserVec<3>>::from_iterator(
+        (0..20).map(|i| ScObs::new(i as f32 * 1.0 * 3600.0, ScObsConf::Distance(1.0), None)),
+    );
 
-    const ENSEMBLE_SIZE: usize = 4096;
+    let mut fevmd_0 = FEVMData {
+        params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::from_iterator(
+            1,
+            [
+                -15.3943205_f32.to_radians(),
+                177.20819_f32.to_radians(),
+                -0.03788574,
+                0.1880269,
+                1125.0,
+                15.92187,
+                1.8,
+                0.8245641,
+            ],
+        ),
+        fevm_states: vec![FEVMNullState::default(); 1],
+        geom_states: vec![XCState::default(); 1],
+        weights: vec![1.0],
+    };
 
-    let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
+    const NOISE_VAR: f32 = 0.1;
+
+    let corrfunc = |d| if d == 0.0 { NOISE_VAR } else { 0.0 };
+
+    let result = model
+        .fischer_information_matrix(&sc, &fevmd_0, &corrfunc)
+        .unwrap();
+
+    let fim = result[0];
+
+    let fim_clean = fim
+        .remove_column(7)
+        .remove_column(6)
+        .remove_column(4)
+        .remove_row(7)
+        .remove_row(6)
+        .remove_row(4);
+
+    println!("{:.5}", fim_clean);
+    println!("{:.5}", fim_clean.try_inverse().unwrap());
+    println!(
+        "{:?}",
+        fim_clean
+            .try_inverse()
+            .unwrap()
+            .diagonal()
+            .iter()
+            .map(|v| v.sqrt())
+            .collect::<Vec<f32>>()
+    );
+
+    // Create synthetic output.
+    let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
+
+    model
+        .fevm_initialize_states_only(&sc, &mut fevmd_0)
+        .unwrap();
+    model
+        .fevm_simulate(
+            &sc,
+            &mut fevmd_0,
+            &mut output,
+            None::<(&FEVMNoiseNull, u64)>,
+        )
+        .unwrap();
+
+    let sc_synth = ScObsSeries::<ObserVec<3>>::from_iterator((0..20).map(|i| {
         ScObs::new(
-            10800.0 + i as f32 * 3600.0 * 2.0,
+            i as f32 * 1.0 * 3600.0,
             ScObsConf::Distance(1.0),
-            Some(refobs[i].clone()),
+            if output.row(i)[0].any_nan() {
+                None
+            } else {
+                Some(output.row(i)[0].clone())
+            },
         )
     }));
 
+    const ENSEMBLE_SIZE: usize = 4096;
+
     let mut pfsettings = ParticleFilterSettingsBuilder::<3, _>::default()
         .exploration_factor(1.5)
-        .noise(FEVMNoiseGaussian(1.0))
+        .noise(FEVMNoiseGaussian(NOISE_VAR.sqrt()))
         .quantiles([0.2, 0.5, 1.0])
         .rseed(70)
         .time_limit(1.5)
@@ -77,7 +138,7 @@ fn main() {
 
     let init_result = model
         .pf_initialize_data(
-            &sc,
+            &sc_synth,
             ENSEMBLE_SIZE,
             2_usize.pow(18),
             Some((&root_mean_square_filter, 9.5)),
@@ -87,7 +148,7 @@ fn main() {
 
     init_result
         .write(format!(
-            "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+            "/Users/ajweiss/Documents/Data/ocnus_fisher_lim/{:03}.particles",
             0
         ))
         .unwrap();
@@ -98,7 +159,7 @@ fn main() {
 
     for _ in 1..20 {
         let run = model.abcpf_run(
-            &sc,
+            &sc_synth,
             &fevmd,
             ENSEMBLE_SIZE,
             2_usize.pow(16),
@@ -122,7 +183,7 @@ fn main() {
 
         run_pfresult
             .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+                "/Users/ajweiss/Documents/Data/ocnus_fisher_lim/{:03}.particles",
                 total_counter
             ))
             .unwrap();
@@ -132,57 +193,28 @@ fn main() {
         epsilon = run_pfresult.error_quantiles.unwrap()[0];
     }
 
-    for idx in 0..10 {
-        let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
-            .exploration_factor(1.0)
-            .noise(FEVMNoiseMultivariate(
-                CovMatrix::from_matrix(
-                    &DMatrix::from_diagonal_element(
-                        sc.len(),
-                        sc.len(),
-                        1.0 + (10.0 / (1 + idx) as f32),
-                    )
-                    .as_view(),
-                )
-                .unwrap(),
-            ))
-            .build()
-            .unwrap();
-
-        let result = model.bspf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
-
-        let pfres = result.unwrap();
-
-        pfres
-            .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                total_counter
-            ))
-            .unwrap();
-
-        fevmd = pfres.fevmd;
-        total_counter += 1;
-    }
+    info!("switching to bootstrap");
 
     for _ in 0..10 {
         let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
             .exploration_factor(1.0)
             .noise(FEVMNoiseMultivariate(
                 CovMatrix::from_matrix(
-                    &DMatrix::from_diagonal_element(sc.len(), sc.len(), 1.0).as_view(),
+                    &DMatrix::from_diagonal_element(sc_synth.len(), sc_synth.len(), NOISE_VAR)
+                        .as_view(),
                 )
                 .unwrap(),
             ))
             .build()
             .unwrap();
 
-        let result = model.bspf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
+        let result = model.bootpf_run(&sc_synth, &fevmd, ENSEMBLE_SIZE, 8 * 4096, &mut bssettings);
 
         let pfres = result.unwrap();
 
         pfres
             .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+                "/Users/ajweiss/Documents/Data/ocnus_fisher_lim/{:03}.particles",
                 total_counter
             ))
             .unwrap();
@@ -190,4 +222,6 @@ fn main() {
         fevmd = pfres.fevmd;
         total_counter += 1;
     }
+
+    dbg!(&fevmd.params[(7, 0)]);
 }

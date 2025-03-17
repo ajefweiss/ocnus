@@ -30,9 +30,21 @@ impl<const N: usize> ObserVec<N> {
         self.iter().fold(true, |acc, next| acc & next.is_nan())
     }
 
-    /// Calculate the mean square error betweeon two observation vectors.
+    /// Calculate the mean square error between two observation vectors.
     pub fn mse(&self, other: &Self) -> f32 {
         (self - other).ss() / N as f32
+    }
+
+    /// Calculate the mean square error between an observation vector
+    /// and an optional reference observation.
+    pub fn mse_ref(&self, other_opt: Option<&Self>) -> f32 {
+        if self.any_nan() & other_opt.unwrap_or(&ObserVec::default()).any_nan() {
+            0.0
+        } else if !self.any_nan() & !other_opt.unwrap_or(&ObserVec::default()).any_nan() {
+            (self - other_opt.unwrap()).ss() / N as f32
+        } else {
+            f32::NAN
+        }
     }
 
     /// Calculate the sum of squares over the entries within the observation vector.

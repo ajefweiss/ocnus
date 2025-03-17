@@ -1,6 +1,7 @@
-use crate::fevm::{FEVMData, noise::FEVMNoiseMultivariate};
+use crate::fevm::FEVMData;
+use crate::stats::CovMatrix;
 use crate::{ScObsSeries, fevm::filters::ParticleFilter, obser::ObserVec};
-use nalgebra::{DMatrix, SMatrix};
+use nalgebra::{Const, DMatrix, Dyn, Matrix, SMatrix, VecStorage};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -16,12 +17,13 @@ where
     GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
 {
     /// Compute the Fisher information matrix (FIM) for an array of model parameters.
-    fn fischer_information_matrix(
+    fn fischer_information_matrix<F>(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
         fevmd: &FEVMData<P, FS, GS>,
-        noise: FEVMNoiseMultivariate,
-    ) -> Result<Vec<SMatrix<f32, P, P>>, FEVMError> {
+        corrfunc: &F,
+    ) -> Result<Vec<SMatrix<f32, P, P>>, FEVMError> 
+      where F:Fn(f32) -> f32 + Sync {
         let step_sizes = self.param_step_sizes();
 
         let mut results = vec![SMatrix::<f32, P, P>::zeros(); fevmd.params.ncols()];
@@ -32,21 +34,33 @@ where
             .zip(results.par_iter_mut())
             .chunks(Self::RCS / 4)
             .try_for_each(|mut chunks| {
+               
                 chunks.iter_mut().try_for_each(|(params_ref, fim)| {
-                    let mut dap = FEVMData::<P, FS, GS>::new(P);
-                    let mut dam = FEVMData::<P, FS, GS>::new(P);
+                    let mut dap = FEVMData {
+                        params: Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
+                        fevm_states: vec![FS::default(); P],
+                        geom_states: vec![GS::default(); P],
+                        weights: vec![1.0 / P as f32; P],
+                    };
+
+                    let mut dam = FEVMData {
+                        params: Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
+                        fevm_states: vec![FS::default(); P],
+                        geom_states: vec![GS::default(); P],
+                        weights: vec![1.0 / P as f32; P],
+                    };
 
                     dap.params
                         .column_iter_mut()
                         .enumerate()
                         .for_each(|(pdx, mut params)| {
-                            params[pdx] = params_ref[pdx] + step_sizes[pdx]
+                            params[pdx] +=  step_sizes[pdx]
                         });
                     dam.params
                         .column_iter_mut()
                         .enumerate()
                         .for_each(|(pdx, mut params)| {
-                            params[pdx] = params_ref[pdx] - step_sizes[pdx]
+                            params[pdx] -=  step_sizes[pdx]
                         });
 
                     let mut dap_output = DMatrix::<ObserVec<N>>::zeros(series.len(), P);
@@ -69,64 +83,56 @@ where
                         None::<(&FEVMNoiseNull, u64)>,
                     )?;
 
+
                     fim.row_iter_mut().enumerate().for_each(|(rdx, mut row)| {
                         row.iter_mut().enumerate().for_each(|(cdx, value)| {
                             if rdx <= cdx {
-                                let dmu_a = dap_output.column_iter().zip(dam_output.column_iter()).map(|(dap, dam)| {
-                                  (dap[rdx] - dam[rdx]) * (0.5 / step_sizes[rdx]) 
+                                
+                                let dmu_a = dap_output.row_iter().zip(dam_output.row_iter()).map(|(dap_col, dam_col)| {
+                                  (&dap_col[rdx] - &dam_col[rdx]) * (0.5 / step_sizes[rdx]) 
+                                  
                                 }).collect::<Vec<ObserVec<N>>>();
 
-                                let dmu_b = dap_output.column_iter().zip(dam_output.column_iter()).map(|(dap, dam)| {
-                                    (dap[cdx] - dam[cdx]) * (0.5 / step_sizes[cdx]) 
+                                
+
+                                let dmu_b = dap_output.row_iter().zip(dam_output.row_iter()).map(|(dap_col, dam_col)| {
+                                    (&dap_col[cdx] - &dam_col[cdx]) * (0.5 / step_sizes[cdx]) 
                                 }).collect::<Vec<ObserVec<N>>>();
-
-                                // let dmu_a = dap_output
-                                //     .axis_iter(Axis(0))
-                                //     .zip(dam_output.axis_iter(Axis(0)))
-                                //     .map(|(dap, dam)| {
-                                //         dap[rdx]
-                                //             .as_ref()
-                                //             .zip(dam[rdx].as_ref())
-                                //             .map(|(v_p, v_m)| Some((v_p - v_m) * (0.5 / step_sizes[rdx])))
-                                //             .unwrap_or(None)
-                                //     })
-                                //     .collect::<Vec<Option<ModelObserVec<N>>>>();
-                                // let dmu_b = dap_output
-                                //     .axis_iter(Axis(0))
-                                //     .zip(dam_output.axis_iter(Axis(0)))
-                                //     .map(|(dap, dam)| {
-                                //         dap[cdx]
-                                //             .as_ref()
-                                //             .zip(dam[cdx].as_ref())
-                                //             .map(|(v_p, v_m)| Some((v_p - v_m) * (0.5 / step_sizes[cdx])))
-                                //             .unwrap_or(None)
-                                //     })
-                                //     .collect::<Vec<Option<ModelObserVec<N>>>>();
-
+                  
                                 // Normalization procedure.
                                 // TODO: This is not required once proper cov-matrices exist.
-                                let obs_norm_a = dmu_a.iter().fold(0, |acc, x| acc + x.any_nan() as usize);
-                                let obs_norm_b = dmu_b.iter().fold(0, |acc, x| acc + x.any_nan() as usize);
+                                let obs_norm_a = dmu_a.iter().fold(0, |acc, x| acc + !x.any_nan() as usize);
+                                let obs_norm_b  = dmu_b.iter().fold(0, |acc, x| acc + !x.any_nan() as usize);
 
                                 assert!(
                                     obs_norm_a == obs_norm_b,
                                     "fim evaluated at an invalid location due to differing lengths of observations"
                                 );
 
+                                assert!(obs_norm_a > 0, "no valid evaluation points");
+
+                                let valid_indices = dmu_a.iter().map(|x| !x.any_nan()).collect::<Vec<bool>>();
+
                                 let dmu_a_mat = DMatrix::from_iterator(
                                     N,
                                     obs_norm_a,
                                     dmu_a.iter().filter_map(|obsvec| if !obsvec.any_nan() {Some(obsvec.0.iter().copied())} else {None}).flatten(),
                                 );
-
+                     
                                 let dmu_b_mat = DMatrix::from_iterator(
                                     N,
                                     obs_norm_b,
                                     dmu_b.iter().filter_map(|obsvec| if !obsvec.any_nan() {Some(obsvec.0.iter().copied())} else {None}).flatten(),
                                 );
 
+                                let coviter = (0..valid_indices.len()).zip(series).filter_map(| (i,scobs_i)| if valid_indices[i] {Some(
+                                (0..valid_indices.len()).zip(series).filter_map(|(j, scobs_j)| if valid_indices[j] {Some(corrfunc((scobs_i.timestamp() - scobs_j.timestamp()).abs()))} else {None} ))} else {None}).flatten();
+                              
+                         
+                                let covariance = CovMatrix::from_matrix(&DMatrix::<f32>::from_iterator(obs_norm_a, obs_norm_b,coviter).as_view()).unwrap();
+                             
                                 *value = (0..N)
-                                    .map(|idx| (dmu_a_mat.row(idx) * noise.0.inverse_matrix() * dmu_b_mat.row(idx).transpose())[(0, 0)])
+                                    .map(|idx| (dmu_a_mat.row(idx) * covariance.inverse_matrix() * dmu_b_mat.row(idx).transpose())[(0, 0)])
                                     .sum::<f32>();
                             }
                         });

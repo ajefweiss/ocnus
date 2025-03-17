@@ -77,6 +77,16 @@ pub struct ScObsSeries<O> {
 }
 
 impl<O> ScObsSeries<O> {
+    /// Returns the number of valid observations within the series.
+    pub fn count_observations(&self) -> usize {
+        self.scobs
+            .iter()
+            .fold(0, |acc, next| match next.observation {
+                Some(_) => acc + 1,
+                None => acc,
+            })
+    }
+
     /// Returns the number of individual [`ScObsSeries`] contained within.
     ///
     /// This value corresponds to the length of the vector returned by

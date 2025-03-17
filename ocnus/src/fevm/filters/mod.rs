@@ -1,10 +1,10 @@
 //! Implementations of various particle filters.
 
 mod abc;
-mod bootstrap;
+mod boot;
 
 pub use abc::*;
-pub use bootstrap::*;
+pub use boot::*;
 
 use crate::{
     ScObsSeries,
@@ -18,7 +18,7 @@ use crate::{
 use derive_builder::Builder;
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{DMatrix, DVector, DVectorView, Dyn, U1};
+use nalgebra::{DMatrix, DVectorView, Dyn, U1};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{io::Write, time::Instant};
@@ -291,6 +291,16 @@ where
     }
 }
 
+/// Returns the number of valid (non-NaN) vector observations within a [`ScObsSeries`].
+fn count_vector_observations<const N: usize>(series: &ScObsSeries<ObserVec<N>>) -> usize {
+    series.into_iter().fold(0, |acc, next| {
+        match !next.observation().unwrap_or(&ObserVec::default()).any_nan() {
+            true => acc + 1,
+            false => acc,
+        }
+    })
+}
+
 /// Mean square error filter for particle filtering methods.
 pub fn mean_square_filter<const N: usize>(
     out: &DVectorView<ObserVec<N>>,
@@ -298,25 +308,9 @@ pub fn mean_square_filter<const N: usize>(
 ) -> f32 {
     out.into_iter()
         .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
+        .map(|(out_vec, scobs)| out_vec.mse_ref(scobs.observation()))
         .sum::<f32>()
-        / series.len() as f32
-}
-
-/// Normalized mean square error filter for particle filtering methods.
-pub fn mean_square_normalized_filter<const N: usize>(
-    out: &DVectorView<ObserVec<N>>,
-    series: &ScObsSeries<ObserVec<N>>,
-) -> f32 {
-    out.into_iter()
-        .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-        .sum::<f32>()
-        / DVector::<ObserVec<N>>::zeros(out.len())
-            .into_iter()
-            .zip(series)
-            .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-            .sum::<f32>()
+        / count_vector_observations(series) as f32
 }
 
 /// Root mean square error filter for particle filtering methods.
@@ -326,25 +320,8 @@ pub fn root_mean_square_filter<const N: usize>(
 ) -> f32 {
     (out.into_iter()
         .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
+        .map(|(out_vec, scobs)| out_vec.mse_ref(scobs.observation()))
         .sum::<f32>()
-        / series.len() as f32)
+        / count_vector_observations(series) as f32)
         .sqrt()
-}
-
-/// Normalized root mean square error filter for particle filtering methods.
-pub fn root_mean_square_normalized_filter<const N: usize>(
-    out: &DVectorView<ObserVec<N>>,
-    series: &ScObsSeries<ObserVec<N>>,
-) -> f32 {
-    (out.into_iter()
-        .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-        .sum::<f32>()
-        / DVector::<ObserVec<N>>::zeros(out.len())
-            .into_iter()
-            .zip(series)
-            .map(|(out_vec, scobs)| out_vec.mse(scobs.observation().unwrap()))
-            .sum::<f32>())
-    .sqrt()
 }

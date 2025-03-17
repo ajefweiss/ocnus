@@ -2,27 +2,26 @@
 
 mod aclym;
 pub mod filters;
-pub mod noise;
 mod fisher;
+pub mod noise;
 
 pub use aclym::*;
 pub use fisher::*;
 
-
-use filters::ParticleFilterError;
-use noise::FEVMNoiseGenerator;
-use serde::{Deserialize, Serialize};
 use crate::stats::PDFParticles;
 use crate::{
     ScObs, ScObsSeries, geometry::OcnusGeometry, obser::ObserVec, stats::PDF, stats::StatsError,
 };
+use filters::ParticleFilterError;
 use itertools::zip_eq;
 use log::debug;
 use nalgebra::{Const, DMatrix, Dyn, Matrix};
 use nalgebra::{SVectorView, VecStorage};
+use noise::FEVMNoiseGenerator;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::time::Instant;
 use thiserror::Error;
@@ -91,6 +90,8 @@ pub enum FEVMError {
     },
     #[error("attempted to simulate backwards in time (dt=-{0:.2}sec)")]
     NegativeTimeStep(f32),
+    #[error("observation cannot be a vector with any NaN valus")]
+    ObservationNaN,
     #[error("particle filter error")]
     ParticleFilter(#[from] ParticleFilterError),
     #[error("stats error")]
@@ -314,6 +315,19 @@ where
         let start = Instant::now();
         let mut timer = 0.0;
 
+        series
+            .into_iter()
+            .try_for_each(|scobs| match scobs.observation() {
+                Some(obsvec) => {
+                    if obsvec.is_nan() {
+                        Err(FEVMError::ObservationNaN)
+                    } else {
+                        Ok(())
+                    }
+                }
+                None => Ok(()),
+            })?;
+
         if (series.len() != output.nrows()) || (fevmd.params.ncols() != output.ncols()) {
             return Err(FEVMError::InvalidOutputShape {
                 expected_cols: fevmd.params.ncols(),
@@ -390,13 +404,10 @@ where
             .for_each(|mut chunks| {
                 chunks.iter_mut().for_each(|(out, flag)| {
                     **flag = zip_eq(out.iter(), series).fold(true, |acc, (out, obs)| {
-                        let scenario_1 = !out.any_nan()
-                            && !obs.observation().unwrap_or(&ObserVec::default()).any_nan();
+                        let ss = !out.any_nan() && obs.observation().is_some();
+                        let nn = out.is_nan() && obs.observation().is_none();
 
-                        let scenario_2 = out.is_nan()
-                            && obs.observation().unwrap_or(&ObserVec::default()).is_nan();
-
-                        acc & (scenario_1 || scenario_2)
+                        acc & (ss || nn)
                     });
                 });
             });

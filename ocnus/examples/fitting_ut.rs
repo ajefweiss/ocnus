@@ -5,7 +5,7 @@ use nalgebra::DMatrix;
 use ocnus::{
     ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        CCLFFModel, FEVMError,
+        CCUTModel, FEVMError,
         filters::{
             ABCParticleFilter, ABCParticleFilterMode, BSParticleFilter, ParticleFilter,
             ParticleFilterError, ParticleFilterSettingsBuilder, root_mean_square_filter,
@@ -31,14 +31,14 @@ fn main() {
         .filter(None, log::LevelFilter::Info)
         .init();
 
-    let model = CCLFFModel(PDFUnivariates::new([
+    let model = CCUTModel(PDFUnivariates::new([
         PDFUniform::new_uvpdf((-(90.0_f32.to_radians()), (90.0_f32.to_radians()))).unwrap(),
         PDFUniform::new_uvpdf((0.0, f32::consts::TAU)).unwrap(),
         PDFUniform::new_uvpdf((-0.75, 0.75)).unwrap(),
         PDFReciprocal::new_uvpdf((0.05, 0.35)).unwrap(),
         PDFConstant::new_uvpdf(750.0),
         PDFUniform::new_uvpdf((5.0, 25.0)).unwrap(),
-        PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
+        PDFUniform::new_uvpdf((-5.0, 5.0)).unwrap(),
         PDFUniform::new_uvpdf((0.7, 1.0)).unwrap(),
     ]));
 
@@ -149,7 +149,7 @@ fn main() {
             .build()
             .unwrap();
 
-        let result = model.bspf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
+        let result = model.bootpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
 
         let pfres = result.unwrap();
 
@@ -176,7 +176,7 @@ fn main() {
             .build()
             .unwrap();
 
-        let result = model.bspf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
+        let result = model.bootpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
 
         let pfres = result.unwrap();
 

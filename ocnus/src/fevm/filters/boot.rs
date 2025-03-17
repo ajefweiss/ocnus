@@ -27,7 +27,7 @@ where
     GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
 {
     /// Basic bootstrap filter (single iteration) with multivariate likelihood.
-    fn bspf_run(
+    fn bootpf_run(
         &self,
         series: &ScObsSeries<ObserVec<N>>,
         fevmd: &FEVMData<P, FS, GS>,
@@ -61,7 +61,7 @@ where
             series,
             &mut temp_data,
             &mut temp_output,
-            Some((&settings.noise, settings.rseed + 71)),
+            None::<(&FEVMNoiseNull, u64)>,
         )?;
 
         if flags.iter().map(|flag| *flag as usize).sum::<usize>() < ensemble_size {
@@ -117,6 +117,8 @@ where
             &weights,
         )?;
 
+        let effective_sample_size = 1.0 / weights.iter().map(|v| v.powi(2)).sum::<f32>();
+
         self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
 
         let uniques = target_data
@@ -139,12 +141,13 @@ where
         target_data.weights = vec![1.0 / ensemble_size as f32; ensemble_size];
 
         info!(
-            "bspf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\t unique samples = {} / {}",
+            "bootpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",
             0.0,
             2.0,
             (series.len() * sim_ensemble_size) as f32 / 1e6,
             start.elapsed().as_millis() as f32 / 1e3,
             uniques,
+            effective_sample_size,
             ensemble_size,
         );
 
