@@ -1,10 +1,10 @@
 //! Implementations of various particle filters.
 
 mod abc;
-mod bs;
+mod bootstrap;
 
 pub use abc::*;
-pub use bs::*;
+pub use bootstrap::*;
 
 use crate::{
     ScObsSeries,
