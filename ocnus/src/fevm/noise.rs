@@ -23,7 +23,7 @@ impl<const N: usize> FEVMNoiseGenerator<N> for FEVMNoiseNull {
 
 /// A univariate normal FEVM noise generator.
 #[derive(Clone)]
-pub struct FEVMNoiseGaussian(pub f32);
+pub struct FEVMNoiseGaussian(pub f64);
 
 impl<const N: usize> FEVMNoiseGenerator<N> for FEVMNoiseGaussian {
     fn generate_noise(&self, size: usize, rng: &mut impl Rng) -> DVector<ObserVec<N>> {
@@ -43,12 +43,12 @@ impl FEVMNoiseMultivariate {
         &self,
         x: &[ObserVec<N>],
         series: &ScObsSeries<ObserVec<N>>,
-    ) -> f32 {
-        let mut x_flat = x.iter().flat_map(|value| value.0).collect::<Vec<f32>>();
+    ) -> f64 {
+        let mut x_flat = x.iter().flat_map(|value| value.0).collect::<Vec<f64>>();
         let mut mu_flat = series
             .into_iter()
             .flat_map(|value| value.observation().unwrap_or(&ObserVec::default()).0)
-            .collect::<Vec<f32>>();
+            .collect::<Vec<f64>>();
 
         // Correct NaNs if, and only if, appropriate.
         x_flat

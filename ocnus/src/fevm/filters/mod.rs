@@ -32,11 +32,11 @@ pub enum ParticleFilterError {
     InefficientSampling,
     #[error("insufficiently large sample size {effective_sample_size} / {ensemble_size}")]
     SmallSampleSize {
-        effective_sample_size: f32,
+        effective_sample_size: f64,
         ensemble_size: usize,
     },
     #[error("iterations exceeded given time limit {elapsed} sec - {limit} sec")]
-    TimeLimitExceeded { elapsed: f32, limit: f32 },
+    TimeLimitExceeded { elapsed: f64, limit: f64 },
 }
 
 /// A data structure that holds particle filter diagnostics and settings.
@@ -47,14 +47,14 @@ where
 {
     /// Percentange of effective samples required for each iteration.
     #[builder(default = 0.175)]
-    pub effective_sample_size_threshold_factor: f32,
+    pub effective_sample_size_threshold_factor: f64,
 
     /// Multiplier for the transition kernel (covariance matrix),
     /// a higher value leads to a better exploration of the parameter
     /// space but slower convergence. The "optimal" value is 2.0
     /// (see Filippi et al. 2013).
     #[builder(default = 2.0)]
-    pub exploration_factor: f32,
+    pub exploration_factor: f64,
 
     /// Iteration counter,
     #[builder(default = 0, setter(skip))]
@@ -69,7 +69,7 @@ where
 
     /// Time limit (in seconds).
     #[builder(default = 5.0)]
-    pub time_limit: f32,
+    pub time_limit: f64,
 
     /// Total simulation runs counter,
     #[builder(default = 0, setter(skip))]
@@ -77,7 +77,7 @@ where
 
     /// Quantile evaluations.
     #[builder(default = [0.25, 0.5, 0.75])]
-    pub quantiles: [f32; 3],
+    pub quantiles: [f64; 3],
 }
 
 /// A data structure holding the results of any particle filtering method.
@@ -90,10 +90,10 @@ pub struct ParticleFilterResults<const P: usize, const N: usize, FS, GS> {
     pub output: DMatrix<ObserVec<N>>,
 
     /// Error values.
-    pub errors: Option<Vec<f32>>,
+    pub errors: Option<Vec<f64>>,
 
     /// Error quantiles values.
-    pub error_quantiles: Option<[f32; 3]>,
+    pub error_quantiles: Option<[f64; 3]>,
 }
 
 impl<const P: usize, const N: usize, FS, GS> ParticleFilterResults<P, N, FS, GS>
@@ -124,11 +124,11 @@ where
         series: &ScObsSeries<ObserVec<N>>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
-        opt_filter: Option<(&F, f32)>,
+        opt_filter: Option<(&F, f64)>,
         settings: &mut ParticleFilterSettings<N, NG>,
     ) -> Result<ParticleFilterResults<P, N, FS, GS>, FEVMError>
     where
-        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f32 + Send + Sync,
+        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
         NG: FEVMNoiseGenerator<N>,
     {
         let start = Instant::now();
@@ -138,7 +138,7 @@ where
 
         let mut target = FEVMData::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<N>>::zeros(series.len(), ensemble_size);
-        let mut target_filter_values = Vec::<f32>::with_capacity(ensemble_size);
+        let mut target_filter_values = Vec::<f64>::with_capacity(ensemble_size);
 
         let mut temp_data = FEVMData::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
@@ -175,13 +175,13 @@ where
 
                                         value
                                     } else {
-                                        f32::NAN
+                                        f64::NAN
                                     }
                                 })
-                                .collect::<Vec<f32>>()
+                                .collect::<Vec<f64>>()
                         })
                         .flatten()
-                        .collect::<Vec<f32>>(),
+                        .collect::<Vec<f64>>(),
                 )
             } else {
                 None
@@ -219,10 +219,10 @@ where
 
             iteration += 1;
 
-            if start.elapsed().as_millis() as f32 / 1e3 > settings.time_limit {
+            if start.elapsed().as_millis() as f64 / 1e3 > settings.time_limit {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: start.elapsed().as_millis() as f32 / 1e3,
+                        elapsed: start.elapsed().as_millis() as f64 / 1e3,
                         limit: settings.time_limit,
                     },
                 ));
@@ -234,17 +234,17 @@ where
                 .iter()
                 .sorted_by(|a, b| a.partial_cmp(b).unwrap())
                 .copied()
-                .collect::<Vec<f32>>();
+                .collect::<Vec<f64>>();
 
             // Compute quantiles for logging purposes.
             let eps_1 =
-                filter_values_sorted[(ensemble_size as f32 * settings.quantiles[0]) as usize];
+                filter_values_sorted[(ensemble_size as f64 * settings.quantiles[0]) as usize];
             let eps_2 =
-                filter_values_sorted[(ensemble_size as f32 * settings.quantiles[1]) as usize];
+                filter_values_sorted[(ensemble_size as f64 * settings.quantiles[1]) as usize];
             let eps_3 = if settings.quantiles[2] >= 1.0 {
                 filter_values_sorted[ensemble_size - 1]
             } else {
-                filter_values_sorted[(ensemble_size as f32 * settings.quantiles[2]) as usize]
+                filter_values_sorted[(ensemble_size as f64 * settings.quantiles[2]) as usize]
             };
 
             info!(
@@ -254,8 +254,8 @@ where
                 eps_1,
                 eps_2,
                 eps_3,
-                (iteration as usize * sim_ensemble_size * series.len()) as f32 / 1e6,
-                start.elapsed().as_millis() as f32 / 1e3,
+                (iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6,
+                start.elapsed().as_millis() as f64 / 1e3,
             );
 
             settings.rseed += 1;
@@ -266,8 +266,8 @@ where
                 "pf_initialize_data\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec",
                 0.0,
                 2.0,
-                (iteration as usize * sim_ensemble_size * series.len()) as f32 / 1e6,
-                start.elapsed().as_millis() as f32 / 1e3,
+                (iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6,
+                start.elapsed().as_millis() as f64 / 1e3,
             );
 
             settings.rseed += 1;
@@ -305,23 +305,23 @@ fn count_vector_observations<const N: usize>(series: &ScObsSeries<ObserVec<N>>) 
 pub fn mean_square_filter<const N: usize>(
     out: &DVectorView<ObserVec<N>>,
     series: &ScObsSeries<ObserVec<N>>,
-) -> f32 {
+) -> f64 {
     out.into_iter()
         .zip(series)
         .map(|(out_vec, scobs)| out_vec.mse_ref(scobs.observation()))
-        .sum::<f32>()
-        / count_vector_observations(series) as f32
+        .sum::<f64>()
+        / count_vector_observations(series) as f64
 }
 
 /// Root mean square error filter for particle filtering methods.
 pub fn root_mean_square_filter<const N: usize>(
     out: &DVectorView<ObserVec<N>>,
     series: &ScObsSeries<ObserVec<N>>,
-) -> f32 {
+) -> f64 {
     (out.into_iter()
         .zip(series)
         .map(|(out_vec, scobs)| out_vec.mse_ref(scobs.observation()))
-        .sum::<f32>()
-        / count_vector_observations(series) as f32)
+        .sum::<f64>()
+        / count_vector_observations(series) as f64)
         .sqrt()
 }

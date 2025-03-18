@@ -32,7 +32,7 @@ mod tests {
     fn test_quaternions() {
         assert!(quaternion_xyz(0.0, 0.0, 0.0) == UnitQuaternion::identity());
 
-        let rad90 = 90.0_f32.to_radians();
+        let rad90 = 90.0_f64.to_radians();
 
         assert!(
             quaternion_xyz(rad90, 0.0, 0.0)

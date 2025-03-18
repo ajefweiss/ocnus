@@ -8,7 +8,7 @@ use crate::{
     obser::ObserVec,
     stats::{PDF, PDFParticles},
 };
-use core::f32;
+use core::f64;
 use itertools::Itertools;
 use log::{error, info};
 use nalgebra::DMatrix;
@@ -86,27 +86,27 @@ where
                         if **flag {
                             settings.noise.mvlh(out.as_slice(), series)
                         } else {
-                            f32::NEG_INFINITY
+                            f64::NEG_INFINITY
                         }
                     })
-                    .collect::<Vec<f32>>()
+                    .collect::<Vec<f64>>()
             })
             .flatten()
-            .collect::<Vec<f32>>();
+            .collect::<Vec<f64>>();
 
         let lh_max = *likelihoods.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
 
         let mut weights = likelihoods
             .iter()
             .map(|lh| (lh - lh_max).exp())
-            .collect::<Vec<f32>>();
+            .collect::<Vec<f64>>();
 
         weights
             .par_iter_mut()
             .zip(temp_data.params.par_column_iter())
             .for_each(|(weight, params)| *weight *= self.model_prior().relative_density(&params));
 
-        let weights_total = weights.iter().sum::<f32>();
+        let weights_total = weights.iter().sum::<f64>();
 
         weights.iter_mut().for_each(|w| *w /= weights_total);
 
@@ -117,7 +117,7 @@ where
             &weights,
         )?;
 
-        let effective_sample_size = 1.0 / weights.iter().map(|v| v.powi(2)).sum::<f32>();
+        let effective_sample_size = 1.0 / weights.iter().map(|v| v.powi(2)).sum::<f64>();
 
         self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
 
@@ -128,7 +128,7 @@ where
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
             .dedup()
             .copied()
-            .collect::<Vec<f32>>()
+            .collect::<Vec<f64>>()
             .len();
 
         self.fevm_simulate(
@@ -138,14 +138,14 @@ where
             None::<(&FEVMNoiseNull, u64)>,
         )?;
 
-        target_data.weights = vec![1.0 / ensemble_size as f32; ensemble_size];
+        target_data.weights = vec![1.0 / ensemble_size as f64; ensemble_size];
 
         info!(
             "bootpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",
             0.0,
             2.0,
-            (series.len() * sim_ensemble_size) as f32 / 1e6,
-            start.elapsed().as_millis() as f32 / 1e3,
+            (series.len() * sim_ensemble_size) as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3,
             uniques,
             effective_sample_size,
             ensemble_size,

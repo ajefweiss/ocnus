@@ -22,11 +22,11 @@ where
         series: &ScObsSeries<ObserVec<N>>,
         fevmd: &FEVMData<P, FS, GS>,
         corrfunc: &F,
-    ) -> Result<Vec<SMatrix<f32, P, P>>, FEVMError> 
-      where F:Fn(f32) -> f32 + Sync {
+    ) -> Result<Vec<SMatrix<f64, P, P>>, FEVMError> 
+      where F:Fn(f64) -> f64 + Sync {
         let step_sizes = self.param_step_sizes();
 
-        let mut results = vec![SMatrix::<f32, P, P>::zeros(); fevmd.params.ncols()];
+        let mut results = vec![SMatrix::<f64, P, P>::zeros(); fevmd.params.ncols()];
 
         fevmd
             .params
@@ -37,17 +37,17 @@ where
                
                 chunks.iter_mut().try_for_each(|(params_ref, fim)| {
                     let mut dap = FEVMData {
-                        params: Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
+                        params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
                         fevm_states: vec![FS::default(); P],
                         geom_states: vec![GS::default(); P],
-                        weights: vec![1.0 / P as f32; P],
+                        weights: vec![1.0 / P as f64; P],
                     };
 
                     let mut dam = FEVMData {
-                        params: Matrix::<f32, Const<P>, Dyn, VecStorage<f32, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
+                        params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
                         fevm_states: vec![FS::default(); P],
                         geom_states: vec![GS::default(); P],
-                        weights: vec![1.0 / P as f32; P],
+                        weights: vec![1.0 / P as f64; P],
                     };
 
                     dap.params
@@ -129,16 +129,16 @@ where
                                 (0..valid_indices.len()).zip(series).filter_map(|(j, scobs_j)| if valid_indices[j] {Some(corrfunc((scobs_i.timestamp() - scobs_j.timestamp()).abs()))} else {None} ))} else {None}).flatten();
                               
                          
-                                let covariance = CovMatrix::from_matrix(&DMatrix::<f32>::from_iterator(obs_norm_a, obs_norm_b,coviter).as_view()).unwrap();
+                                let covariance = CovMatrix::from_matrix(&DMatrix::<f64>::from_iterator(obs_norm_a, obs_norm_b,coviter).as_view()).unwrap();
                              
                                 *value = (0..N)
                                     .map(|idx| (dmu_a_mat.row(idx) * covariance.inverse_matrix() * dmu_b_mat.row(idx).transpose())[(0, 0)])
-                                    .sum::<f32>();
+                                    .sum::<f64>();
                             }
                         });
                     });
 
-                    **fim += fim.transpose() - SMatrix::<f32, P, P>::from_diagonal(&fim.diagonal());
+                    **fim += fim.transpose() - SMatrix::<f64, P, P>::from_diagonal(&fim.diagonal());
 
                     Ok::<(), FEVMError>(())
                 })?;

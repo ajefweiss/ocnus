@@ -1,5 +1,5 @@
 use chrono::Local;
-use core::f32;
+use core::f64;
 use env_logger::Builder;
 use nalgebra::DMatrix;
 use ocnus::{
@@ -32,8 +32,8 @@ fn main() {
         .init();
 
     let model = CCUTModel(PDFUnivariates::new([
-        PDFUniform::new_uvpdf((-(90.0_f32.to_radians()), (90.0_f32.to_radians()))).unwrap(),
-        PDFUniform::new_uvpdf((0.0, f32::consts::TAU)).unwrap(),
+        PDFUniform::new_uvpdf((-(90.0_f64.to_radians()), (90.0_f64.to_radians()))).unwrap(),
+        PDFUniform::new_uvpdf((0.0, f64::consts::TAU)).unwrap(),
         PDFUniform::new_uvpdf((-0.75, 0.75)).unwrap(),
         PDFReciprocal::new_uvpdf((0.05, 0.35)).unwrap(),
         PDFConstant::new_uvpdf(750.0),
@@ -60,7 +60,7 @@ fn main() {
 
     let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
-            10800.0 + i as f32 * 3600.0 * 2.0,
+            10800.0 + i as f64 * 3600.0 * 2.0,
             ScObsConf::Distance(1.0),
             Some(refobs[i].clone()),
         )
@@ -140,7 +140,7 @@ fn main() {
                     &DMatrix::from_diagonal_element(
                         sc.len(),
                         sc.len(),
-                        1.0 + (10.0 / (1 + idx) as f32),
+                        1.0 + (10.0 / (1 + idx) as f64),
                     )
                     .as_view(),
                 )

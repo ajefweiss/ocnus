@@ -20,10 +20,10 @@ pub struct FEVMNullState {}
 
 /// Linear force-free magnetic field observable.
 pub fn cc_lff_obs<const P: usize, M, GS>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
+    (r, _phi, _psi): (f64, f64, f64),
+    params: &SVectorView<f64, P>,
     _state: &XCState,
-) -> Option<Vector3<f32>>
+) -> Option<Vector3<f64>>
 where
     M: OcnusGeometry<P, GS>,
 {
@@ -31,6 +31,9 @@ where
     let b = M::param_value("B", params);
     let y_offset = M::param_value("y", params);
     let alpha_signed = M::param_value("alpha", params);
+    let radius = M::param_value("radius", params);
+
+    let radius_linearized = radius * (1.0 - y_offset.abs().powi(2)).sqrt();
 
     let (alpha, sign) = match alpha_signed.partial_cmp(&0.0) {
         Some(ord) => match ord {
@@ -50,7 +53,7 @@ where
 
                 // Bessel function evaluation uses 11 terms.
                 let b_s = b_linearized * bessel_jn(alpha * r, 0);
-                let b_phi = b_linearized * sign * bessel_jn(alpha * r, 1);
+                let b_phi = b_linearized * sign * bessel_jn(alpha * r * radius_linearized, 1);
 
                 Some(Vector3::new(0.0, b_phi, b_s))
             }
@@ -61,10 +64,10 @@ where
 
 /// Uniform twist magnetic field observable.
 pub fn cc_ut_obs<const P: usize, M, GS>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
+    (r, _phi, _psi): (f64, f64, f64),
+    params: &SVectorView<f64, P>,
     _state: &XCState,
-) -> Option<Vector3<f32>>
+) -> Option<Vector3<f64>>
 where
     M: OcnusGeometry<P, GS>,
 {
@@ -72,6 +75,9 @@ where
     let b = M::param_value("B", params);
     let y_offset = M::param_value("y", params);
     let tau = M::param_value("tau", params);
+    let radius = M::param_value("radius", params);
+
+    let radius_linearized = radius * (1.0 - y_offset.abs().powi(2)).sqrt();
 
     match r.partial_cmp(&1.0) {
         Some(ord) => match ord {
@@ -79,8 +85,9 @@ where
             _ => {
                 let b_linearized = b / (1.0 - y_offset.powi(2));
 
-                let b_s = b_linearized / (1.0 + tau.powi(2) * (r).powi(2));
-                let b_phi = r * b_linearized * tau / (1.0 + tau.powi(2) * (r).powi(2));
+                let b_s = b_linearized / (1.0 + tau.powi(2) * (r * radius_linearized).powi(2));
+                let b_phi = r * radius_linearized * b_linearized * tau
+                    / (1.0 + tau.powi(2) * (r * radius_linearized).powi(2));
 
                 Some(Vector3::new(0.0, b_phi, b_s))
             }
@@ -91,10 +98,10 @@ where
 
 /// Magnetic field configuration as is used in Nieves-Chinchilla et al. (2018).
 pub fn ec_c10_obs<const P: usize, M, GS>(
-    (r, _phi, _psi): (f32, f32, f32),
-    params: &SVectorView<f32, P>,
+    (r, _phi, _psi): (f64, f64, f64),
+    params: &SVectorView<f64, P>,
     _state: &XCState,
-) -> Option<Vector3<f32>>
+) -> Option<Vector3<f64>>
 where
     M: OcnusGeometry<P, GS>,
 {
@@ -154,20 +161,20 @@ macro_rules! impl_fevm {
         {
             const PARAMS: [&'static str; { $parent::PARAMS.len() + $params.len() }] =
                 concat_arrays!($parent::PARAMS, $params);
-            const PARAM_RANGES: [(f32, f32); { $parent::PARAMS.len() + $params.len() }] =
+            const PARAM_RANGES: [(f64, f64); { $parent::PARAMS.len() + $params.len() }] =
                 concat_arrays!($parent::PARAM_RANGES, $param_ranges);
 
             fn coords_xyz_vector<CStride: Dim>(
-                ics: &VectorView3<f32>,
-                vec: &VectorView3<f32>,
+                ics: &VectorView3<f64>,
+                vec: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 $parent::coords_xyz_vector(
                     ics,
                     vec,
@@ -177,15 +184,15 @@ macro_rules! impl_fevm {
             }
 
             fn coords_basis<CStride: Dim>(
-                ics: &VectorView3<f32>,
+                ics: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> [Vector3<f32>; 3] {
+            ) -> [Vector3<f64>; 3] {
                 $parent::coords_basis(
                     ics,
                     &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
@@ -194,15 +201,15 @@ macro_rules! impl_fevm {
             }
 
             fn coords_xyz<CStride: Dim>(
-                ics: &VectorView3<f32>,
+                ics: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 $parent::coords_xyz(
                     ics,
                     &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
@@ -211,15 +218,15 @@ macro_rules! impl_fevm {
             }
 
             fn coords_ics<CStride: Dim>(
-                xyz: &VectorView3<f32>,
+                xyz: &VectorView3<f64>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState,
-            ) -> Vector3<f32> {
+            ) -> Vector3<f64> {
                 $parent::coords_ics(
                     xyz,
                     &params.fixed_rows::<{ $parent::PARAMS.len() }>(0),
@@ -239,9 +246,9 @@ macro_rules! impl_fevm {
 
             fn fevm_forward(
                 &self,
-                time_step: f32,
+                time_step: f64,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
@@ -252,7 +259,7 @@ macro_rules! impl_fevm {
                 // Extract parameters using their identifiers.
                 let vel = Self::param_value("v", params) / 1.496e8;
                 geom_state.t += time_step;
-                geom_state.x += vel * time_step as f32;
+                geom_state.x += vel * time_step as f64;
 
                 Ok(())
             }
@@ -261,7 +268,7 @@ macro_rules! impl_fevm {
                 &self,
                 scobs: &ScObs<ObserVec<3>>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
@@ -303,7 +310,7 @@ macro_rules! impl_fevm {
                 &self,
                 _series: &ScObsSeries<ObserVec<3>>,
                 params: &VectorView<
-                    f32,
+                    f64,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
                     U1,
                     Const<{ $parent::PARAMS.len() + $params.len() }>,
@@ -321,7 +328,7 @@ macro_rules! impl_fevm {
                 geom_state.t = 0.0;
                 geom_state.x = x_init;
                 geom_state.z =
-                    radius * y * ((1.0 - (phi.sin() * theta.cos()).powi(2)) as f32).sqrt()
+                    radius * y * ((1.0 - (phi.sin() * theta.cos()).powi(2)) as f64).sqrt()
                         / phi.cos()
                         / theta.cos();
 
@@ -426,14 +433,14 @@ mod tests {
 
         let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
             ScObs::new(
-                224640.0 + i as f32 * 3600.0 * 2.0,
+                224640.0 + i as f64 * 3600.0 * 2.0,
                 ScObsConf::Distance(1.0),
                 None,
             )
         }));
 
         let mut data = FEVMData {
-            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
             weights: vec![1.0; 1],
@@ -443,9 +450,9 @@ mod tests {
 
         data.params.set_column(
             0,
-            &SVector::<f32, 8>::from([
-                5.0_f32.to_radians(),
-                -3.0_f32.to_radians(),
+            &SVector::<f64, 8>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
                 0.025,
                 0.2,
                 600.0,
@@ -486,14 +493,14 @@ mod tests {
 
         let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..8).map(|i| {
             ScObs::new(
-                224640.0 + i as f32 * 3600.0 * 2.0,
+                224640.0 + i as f64 * 3600.0 * 2.0,
                 ScObsConf::Distance(1.0),
                 None,
             )
         }));
 
         let mut data = FEVMData {
-            params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(1),
+            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
             weights: vec![1.0; 1],
@@ -503,9 +510,9 @@ mod tests {
 
         data.params.set_column(
             0,
-            &SVector::<f32, 8>::from([
-                5.0_f32.to_radians(),
-                -3.0_f32.to_radians(),
+            &SVector::<f64, 8>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
                 0.025,
                 0.2,
                 600.0,
