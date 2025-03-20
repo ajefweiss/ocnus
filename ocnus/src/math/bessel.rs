@@ -1,21 +1,28 @@
 use crate::math::factorial;
-use std::cmp::Ordering;
+use num_traits::{AsPrimitive, Float, float::TotalOrder};
+use std::{cmp::Ordering, ops::Mul};
 
 /// Bessel function of the first kind.
-pub fn bessel_jn(x: f64, k: usize) -> f64 {
-    match x.total_cmp(&0.0) {
-        Ordering::Equal => (matches!(k, 0) as usize) as f64,
+pub fn bessel_jn<T>(x: T, k: usize) -> T
+where
+    T: 'static + Copy + Float + Mul<f64, Output = T> + TotalOrder,
+    i32: AsPrimitive<T>,
+    usize: AsPrimitive<T>,
+{
+    match x.total_cmp(&T::zero()) {
+        Ordering::Equal => (matches!(k, 0) as usize).as_(),
         _ => {
-            let sum = (1..11).try_fold((x / 2.0).powi(k as i32), |acc, idx| {
-                let next = i32::pow(-1, idx as u32) as f64 * (x / 2.0).powi((2 * idx + k) as i32)
-                    / (factorial(idx).unwrap() * factorial(idx + k).unwrap()) as f64;
+            let sum = (1..11).try_fold((x / (T::one() * 2.0_f64)).powi(k as i32), |acc, idx| {
+                let next = i32::pow(-1, idx as u32).as_()
+                    * (x / (T::one() * 2.0_f64)).powi((2 * idx + k) as i32)
+                    / (factorial(idx).unwrap() * factorial(idx + k).unwrap()).as_();
 
-                match next.partial_cmp(&0.0).unwrap() {
-                    std::cmp::Ordering::Greater => match next.partial_cmp(&f64::EPSILON).unwrap() {
+                match next.partial_cmp(&T::zero()).unwrap() {
+                    std::cmp::Ordering::Greater => match next.partial_cmp(&T::epsilon()).unwrap() {
                         Ordering::Less => Err(acc + next),
                         _ => Ok(acc + next),
                     },
-                    std::cmp::Ordering::Less => match next.partial_cmp(&(-f64::EPSILON)).unwrap() {
+                    std::cmp::Ordering::Less => match next.partial_cmp(&(-T::epsilon())).unwrap() {
                         Ordering::Greater => Err(acc + next),
                         _ => Ok(acc + next),
                     },

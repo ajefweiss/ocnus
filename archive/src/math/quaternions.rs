@@ -1,11 +1,9 @@
-use nalgebra::{Scalar, SimdRealField, Unit, UnitQuaternion, Vector3};
-use num_traits::Float;
+use nalgebra::{RealField, Unit, UnitQuaternion, Vector3};
 
 /// Generate unit quaternion from three successive rotations around the z, y and x-axis.
 pub fn quaternion_xyz<T>(z_angle: T, y_angle: T, x_angle: T) -> UnitQuaternion<T>
 where
-    T: 'static + Float + Scalar + SimdRealField,
-    <T as nalgebra::SimdValue>::Element: nalgebra::RealField,
+    T: Copy + RealField,
 {
     let uz = Vector3::<T>::z_axis();
     let uy = Vector3::<T>::y_axis();

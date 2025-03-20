@@ -1,11 +1,7 @@
-use crate::{
-    OFloat,
-    stats::{CovMatrix, PDF, StatsError},
-};
+use crate::stats::{CovMatrix, PDF, StatsError};
 use core::panic;
 use log::warn;
 use nalgebra::{Const, Dyn, MatrixView, SVector, SVectorView};
-use num_traits::{AsPrimitive, Float};
 use rand::Rng;
 use rand_distr::{Normal, Uniform};
 use rayon::prelude::*;
@@ -13,42 +9,32 @@ use std::ops::{Mul, MulAssign};
 
 /// A PDF defined by references to an ensemble of particles.
 #[derive(Debug)]
-pub struct PDFParticles<'a, T, const P: usize>
-where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
+pub struct PDFParticles<'a, const P: usize> {
     /// A [`CovMatrix`] that describes an estimate of the underlying particle PDF.
-    covmat: CovMatrix<T>,
+    covmat: CovMatrix,
 
     /// The particle ensemble that describes the overarching PDF.
-    particles: MatrixView<'a, T, Const<P>, Dyn>,
+    particles: MatrixView<'a, f64, Const<P>, Dyn>,
 
     /// Valid parameter range.
-    range: [(T, T); P],
+    range: [(f64, f64); P],
 
     /// Particle ensemble weights
-    weights: &'a Vec<T>,
+    weights: &'a Vec<f64>,
 }
 
-impl<'a, T, const P: usize> PDFParticles<'a, T, P>
-where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
+impl<'a, const P: usize> PDFParticles<'a, P> {
     /// Access the covariance matrix.
-    pub fn covmat(&self) -> &CovMatrix<T> {
+    pub fn covmat(&self) -> &CovMatrix {
         &self.covmat
     }
 
     /// Create a new [`PDFParticles`] from a particle matrix view.
     pub fn from_particles(
-        particles: MatrixView<'a, T, Const<P>, Dyn>,
-        range: [(T, T); P],
-        weights: &'a Vec<T>,
-    ) -> Result<Self, StatsError<T>> {
+        particles: MatrixView<'a, f64, Const<P>, Dyn>,
+        range: [(f64, f64); P],
+        weights: &'a Vec<f64>,
+    ) -> Result<Self, StatsError> {
         let covmat = CovMatrix::from_vectors(&particles.as_view(), Some(weights.as_slice()))?;
 
         Ok(Self {
@@ -70,26 +56,26 @@ where
     }
 
     /// Access the ensemble particle matrix.
-    pub fn particles_ref(&self) -> MatrixView<T, Const<P>, Dyn> {
+    pub fn particles_ref(&self) -> MatrixView<f64, Const<P>, Dyn> {
         self.particles.as_view()
     }
 
     /// Resample from existing particles.
-    pub fn resample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
+    pub fn resample(&self, rng: &mut impl Rng) -> Result<SVector<f64, P>, StatsError> {
         let uniform = Uniform::new(0.0, 1.0).unwrap();
 
         let offset = {
             let pdx = {
                 // Select particle index by weight.
-                let wdx: T = rng.sample(uniform).as_();
+                let wdx: f64 = rng.sample(uniform);
 
                 // Here we abuse try_fold to return particle index early wrapped within Err().
                 match self
                     .weights
                     .iter()
                     .enumerate()
-                    .try_fold(T::zero(), |acc, (idx, weight)| {
-                        let next_weight = acc + *weight;
+                    .try_fold(0.0, |acc, (idx, weight)| {
+                        let next_weight = acc + weight;
                         if wdx < next_weight {
                             Err(idx)
                         } else {
@@ -108,37 +94,32 @@ where
     }
 
     /// Returns a reference to the particle weights.
-    pub fn weights(&self) -> &Vec<T> {
+    pub fn weights(&self) -> &Vec<f64> {
         self.weights
     }
 }
 
-impl<T, const P: usize> PDF<T, P> for &PDFParticles<'_, T, P>
-where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
-    fn relative_density(&self, _x: &SVectorView<T, P>) -> T {
+impl<const P: usize> PDF<P> for &PDFParticles<'_, P> {
+    fn relative_density(&self, _x: &SVectorView<f64, P>) -> f64 {
         unimplemented!()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<f64, P>, StatsError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let uniform = Uniform::new(0.0, 1.0).unwrap();
 
         let offset = {
             let pdx = {
                 // Select particle index by weight.
-                let wdx = rng.sample(uniform).as_();
+                let wdx = rng.sample(uniform);
 
                 // Here we abuse try_fold to return particle index early wrapped within Err().
                 match self
                     .weights
                     .iter()
                     .enumerate()
-                    .try_fold(T::zero(), |acc, (idx, weight)| {
-                        let next_weight = acc + *weight;
+                    .try_fold(0.0, |acc, (idx, weight)| {
+                        let next_weight = acc + weight;
                         if wdx < next_weight {
                             Err(idx)
                         } else {
@@ -155,7 +136,7 @@ where
 
         let mut proposal = offset
             + self.covmat.cholesky_ltm()
-                * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal).as_()));
+                * SVector::<f64, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
@@ -163,7 +144,7 @@ where
         while !self.validate_sample(&proposal.as_view()) {
             proposal = offset
                 + self.covmat.cholesky_ltm()
-                    * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal).as_()));
+                    * SVector::<f64, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
@@ -180,20 +161,15 @@ where
         Ok(proposal)
     }
 
-    fn valid_range(&self) -> [(T, T); P] {
+    fn valid_range(&self) -> [(f64, f64); P] {
         self.range
     }
 }
 
-impl<'a, T, const P: usize> Mul<T> for PDFParticles<'a, T, P>
-where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
-    type Output = PDFParticles<'a, T, P>;
+impl<'a, const P: usize> Mul<f64> for PDFParticles<'a, P> {
+    type Output = PDFParticles<'a, P>;
 
-    fn mul(self, rhs: T) -> Self::Output {
+    fn mul(self, rhs: f64) -> Self::Output {
         Self {
             covmat: self.covmat * rhs,
             particles: self.particles,
@@ -203,10 +179,10 @@ where
     }
 }
 
-impl<'a, const P: usize> Mul<PDFParticles<'a, f32, P>> for f32 {
-    type Output = PDFParticles<'a, f32, P>;
+impl<'a, const P: usize> Mul<PDFParticles<'a, P>> for f64 {
+    type Output = PDFParticles<'a, P>;
 
-    fn mul(self, rhs: PDFParticles<'a, f32, P>) -> Self::Output {
+    fn mul(self, rhs: PDFParticles<'a, P>) -> Self::Output {
         Self::Output {
             covmat: self * rhs.covmat,
             particles: rhs.particles,
@@ -216,42 +192,18 @@ impl<'a, const P: usize> Mul<PDFParticles<'a, f32, P>> for f32 {
     }
 }
 
-impl<'a, const P: usize> Mul<PDFParticles<'a, f64, P>> for f64 {
-    type Output = PDFParticles<'a, f64, P>;
-
-    fn mul(self, rhs: PDFParticles<'a, f64, P>) -> Self::Output {
-        Self::Output {
-            covmat: self * rhs.covmat,
-            particles: rhs.particles,
-            range: rhs.range,
-            weights: rhs.weights,
-        }
-    }
-}
-
-impl<T, const P: usize> MulAssign<T> for PDFParticles<'_, T, P>
-where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
-    fn mul_assign(&mut self, rhs: T) {
+impl<const P: usize> MulAssign<f64> for PDFParticles<'_, P> {
+    fn mul_assign(&mut self, rhs: f64) {
         self.covmat *= rhs;
     }
 }
 
 /// Compute new importance weights for `ptpdf` assuming a transition from `ptpdf_from`.
-pub fn ptpdf_importance_weighting<T, D, const P: usize>(
-    ptpdf_to: &PDFParticles<T, P>,
-    ptpdf_from: &PDFParticles<T, P>,
-    prior: &D,
-) -> Vec<T>
-where
-    D: PDF<T, P>,
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
+pub fn ptpdf_importance_weighting<T: PDF<P>, const P: usize>(
+    ptpdf_to: &PDFParticles<P>,
+    ptpdf_from: &PDFParticles<P>,
+    prior: &T,
+) -> Vec<f64> {
     let covmat_inv = ptpdf_from.covmat().inverse_matrix();
 
     let mut weights = ptpdf_to
@@ -265,17 +217,15 @@ where
                 .map(|(params_old, weight_old)| {
                     let delta = params_new - params_old;
 
-                    Float::exp(
-                        Float::ln(*weight_old) - (delta.transpose() * covmat_inv * delta)[(0, 0)],
-                    )
+                    (weight_old.ln() - (delta.transpose() * covmat_inv * delta)[(0, 0)]).exp()
                 })
-                .sum::<T>();
+                .sum::<f64>();
 
-            (T::one() / value) * prior.relative_density(&params_new)
+            (1.0 / value) * prior.relative_density(&params_new)
         })
-        .collect::<Vec<T>>();
+        .collect::<Vec<f64>>();
 
-    let weights_total = weights.iter().sum::<T>();
+    let weights_total = weights.iter().sum::<f64>();
 
     weights
         .iter_mut()

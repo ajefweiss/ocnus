@@ -1,16 +1,16 @@
 use crate::{
-    ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        FEVM, FEVMError, FisherInformation,
         filters::{ABCParticleFilter, BSParticleFilter, ParticleFilter},
+        FEVMError, FisherInformation, FEVM,
     },
     geometry::OcnusGeometry,
     geometry::{CCModel, XCState},
     math::bessel_jn,
     obser::ObserVec,
     stats::PDF,
+    ScObs, ScObsConf, ScObsSeries,
 };
-use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
+use nalgebra::{Const, Dim, SVectorView, Vector3, VectorView, VectorView3, U1};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
@@ -409,7 +409,7 @@ impl_fevm!(
 mod tests {
     use super::*;
     use crate::{
-        fevm::{FEVMData, noise::FEVMNoiseNull},
+        fevm::{noise::FEVMNoiseNull, FEVMData},
         stats::{PDFConstant, PDFUniform, PDFUnivariates},
     };
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};

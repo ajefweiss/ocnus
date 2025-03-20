@@ -1,28 +1,24 @@
 //! Implementations of forward ensemble vector models (FEVMs).
 
-// mod cylm;
-// pub mod filters;
-// mod fisher;
+mod cylm;
+pub mod filters;
+mod fisher;
 pub mod noise;
 
-// pub use cylm::*;
-// pub use fisher::*;
+pub use cylm::*;
+pub use fisher::*;
 
-use crate::OFloat;
 use crate::stats::PDFParticles;
 use crate::{
-    fevm::noise::{FEVMNoise, FEVMNoiseGenerator},
-    geom::OcnusGeometry,
-    obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
-    stats::PDF,
-    stats::StatsError,
+    ScObs, ScObsSeries, geometry::OcnusGeometry, obser::ObserVec, stats::PDF, stats::StatsError,
 };
+use filters::ParticleFilterError;
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{Const, DMatrix, Dyn, Matrix, Scalar};
+use nalgebra::{Const, DMatrix, Dyn, Matrix};
 use nalgebra::{SVectorView, VecStorage};
-use num_traits::AsPrimitive;
-use rand::{Rng, SeedableRng};
+use noise::FEVMNoiseGenerator;
+use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -32,12 +28,9 @@ use thiserror::Error;
 
 /// A data structure that stores the parameters, states and random seed for a FEVM.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FEVMData<T, const P: usize, FS, GS>
-where
-    T: Clone + Scalar,
-{
+pub struct FEVMData<const P: usize, FS, GS> {
     /// FEVM ensemble parameters.
-    pub params: Matrix<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>,
+    pub params: Matrix<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>,
 
     /// FEVM ensemble states.
     pub fevm_states: Vec<FS>,
@@ -46,24 +39,22 @@ where
     pub geom_states: Vec<GS>,
 
     /// Ensemble member weights.
-    pub weights: Vec<T>,
+    pub weights: Vec<f64>,
 }
 
-impl<T, const P: usize, FS, GS> FEVMData<T, P, FS, GS>
+impl<const P: usize, FS, GS> FEVMData<P, FS, GS>
 where
-    T: OFloat,
     FS: Clone + Default,
     GS: Clone + Default,
     Self: Serialize,
-    usize: AsPrimitive<T>,
 {
     /// Create a new [`FEVMData`] filled with zeros.
     pub fn new(size: usize) -> Self {
         Self {
-            params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::zeros(size),
+            params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::zeros(size),
             fevm_states: vec![FS::default(); size],
             geom_states: vec![GS::default(); size],
-            weights: vec![T::one() / size.as_(); size],
+            weights: vec![1.0 / size as f64; size],
         }
     }
 
@@ -85,9 +76,9 @@ where
 /// Errors associated with types that implement the [`FEVM`] trait.
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
-pub enum FEVMError<T> {
+pub enum FEVMError {
     #[error("invalid model parameter {name}={value}")]
-    InvalidParameter { name: &'static str, value: T },
+    InvalidParameter { name: &'static str, value: f64 },
     #[error(
         "invalid range {output_rows} x {output_cols} but expected {expected_rows} x {expected_cols}"
     )]
@@ -98,24 +89,21 @@ pub enum FEVMError<T> {
         output_rows: usize,
     },
     #[error("attempted to simulate backwards in time (dt=-{0:.2}sec)")]
-    NegativeTimeStep(T),
+    NegativeTimeStep(f64),
     #[error("observation cannot be a vector with any NaN valus")]
     ObservationNaN,
-    // #[error("particle filter error")]
-    // ParticleFilter(#[from] ParticleFilterError),
+    #[error("particle filter error")]
+    ParticleFilter(#[from] ParticleFilterError),
     #[error("stats error")]
-    Stats(#[from] StatsError<T>),
+    Stats(#[from] StatsError),
 }
 
 /// The trait that must be implemented for any FEVM (forward ensemble vector model) with an N-dimensional vector observable.
-pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusGeometry<T, P, GS>
+pub trait FEVM<const P: usize, const N: usize, FS, GS>: OcnusGeometry<P, GS>
 where
-    T: OFloat,
     FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
     GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
     Self: Sync,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
 {
     /// The rayon chunk size that is used for any parallel iterators.
     /// Cheap or expensive operations may use fractions or multiples of this value.
@@ -124,23 +112,23 @@ where
     /// Evolve a model state forward in time.
     fn fevm_forward(
         &self,
-        time_step: T,
-        params: &SVectorView<T, P>,
+        time_step: f64,
+        params: &SVectorView<f64, P>,
         fevm_state: &mut FS,
         geom_state: &mut GS,
-    ) -> Result<(), FEVMError<T>>;
+    ) -> Result<(), FEVMError>;
 
     /// Initialize parameters and states for a FEVM ensemble.
     /// If no `opt_pdf` is given, the underlying model prior is used instead.
-    fn fevm_initialize<D>(
+    fn fevm_initialize<T>(
         &self,
-        series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
-        opt_pdf: Option<&D>,
+        series: &ScObsSeries<ObserVec<N>>,
+        fevmd: &mut FEVMData<P, FS, GS>,
+        opt_pdf: Option<&T>,
         rseed: u64,
-    ) -> Result<(), FEVMError<T>>
+    ) -> Result<(), FEVMError>
     where
-        for<'a> &'a D: PDF<T, P>,
+        for<'a> &'a T: PDF<P>,
     {
         let start = Instant::now();
 
@@ -166,16 +154,16 @@ where
 
                         self.fevm_state(series, &params.as_view(), fevm_state, geom_state)?;
 
-                        Ok::<(), FEVMError<T>>(())
+                        Ok::<(), FEVMError>(())
                     })?;
 
-                Ok::<(), FEVMError<T>>(())
+                Ok::<(), FEVMError>(())
             })?;
 
         debug!(
             "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -185,11 +173,11 @@ where
     /// resampling from a [`PDFParticles`].
     fn fevm_initialize_resample(
         &self,
-        series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
-        pdf: &PDFParticles<T, P>,
+        series: &ScObsSeries<ObserVec<N>>,
+        fevmd: &mut FEVMData<P, FS, GS>,
+        pdf: &PDFParticles<P>,
         rseed: u64,
-    ) -> Result<(), FEVMError<T>> {
+    ) -> Result<(), FEVMError> {
         let start = Instant::now();
 
         fevmd
@@ -211,16 +199,16 @@ where
 
                         self.fevm_state(series, &params.as_view(), fevm_state, geom_state)?;
 
-                        Ok::<(), FEVMError<T>>(())
+                        Ok::<(), FEVMError>(())
                     })?;
 
-                Ok::<(), FEVMError<T>>(())
+                Ok::<(), FEVMError>(())
             })?;
 
         debug!(
             "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -230,10 +218,10 @@ where
     /// If no pdf is given, the underlying model prior is used instead.
     fn fevm_initialize_params_only(
         &self,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
-        opt_pdf: Option<impl PDF<T, P>>,
+        fevmd: &mut FEVMData<P, FS, GS>,
+        opt_pdf: Option<impl PDF<P>>,
         rseed: u64,
-    ) -> Result<(), FEVMError<T>> {
+    ) -> Result<(), FEVMError> {
         let start = Instant::now();
 
         fevmd
@@ -252,16 +240,16 @@ where
 
                     params.set_column(0, &sample);
 
-                    Ok::<(), FEVMError<T>>(())
+                    Ok::<(), FEVMError>(())
                 })?;
 
-                Ok::<(), FEVMError<T>>(())
+                Ok::<(), FEVMError>(())
             })?;
 
         debug!(
             "fevm_initialize_params_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -270,9 +258,9 @@ where
     /// Initialize the model states within a [`FEVMData`] object.
     fn fevm_initialize_states_only(
         &self,
-        series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
-    ) -> Result<(), FEVMError<T>> {
+        series: &ScObsSeries<ObserVec<N>>,
+        fevmd: &mut FEVMData<P, FS, GS>,
+    ) -> Result<(), FEVMError> {
         let start = Instant::now();
 
         fevmd
@@ -287,16 +275,16 @@ where
                     .try_for_each(|((params, fevm_state), geom_state)| {
                         self.fevm_state(series, &params.as_view(), fevm_state, geom_state)?;
 
-                        Ok::<(), FEVMError<T>>(())
+                        Ok::<(), FEVMError>(())
                     })?;
 
-                Ok::<(), FEVMError<T>>(())
+                Ok::<(), FEVMError>(())
             })?;
 
         debug!(
             "fevm_initialize_states_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -305,28 +293,40 @@ where
     /// Generate a vector observable.
     fn fevm_observe(
         &self,
-        scobs: &ScObs<T, ObserVec<T, N>>,
-        params: &SVectorView<T, P>,
+        scobs: &ScObs<ObserVec<N>>,
+        params: &SVectorView<f64, P>,
         fevm_state: &FS,
         geom_state: &GS,
-    ) -> Result<ObserVec<T, N>, FEVMError<T>>;
+    ) -> Result<ObserVec<N>, FEVMError>;
 
     /// Perform an ensemble forward simulation and generate synthetic vector observables
     /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t.
     /// to the spacecraft observation series.
-    fn fevm_simulate<F, R>(
+    fn fevm_simulate<NG>(
         &self,
-        series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
-        output: &mut DMatrix<ObserVec<T, N>>,
-        opt_noise: Option<&FEVMNoise<T, N, F>>,
-    ) -> Result<Vec<bool>, FEVMError<T>>
+        series: &ScObsSeries<ObserVec<N>>,
+        fevmd: &mut FEVMData<P, FS, GS>,
+        output: &mut DMatrix<ObserVec<N>>,
+        opt_noise: Option<(&NG, u64)>,
+    ) -> Result<Vec<bool>, FEVMError>
     where
-        F: FEVMNoiseGenerator<T, N> + Send,
-        R: Rng,
+        NG: FEVMNoiseGenerator<N>,
     {
         let start = Instant::now();
-        let mut timer = T::zero();
+        let mut timer = 0.0;
+
+        series
+            .into_iter()
+            .try_for_each(|scobs| match scobs.observation() {
+                Some(obsvec) => {
+                    if obsvec.is_nan() {
+                        Err(FEVMError::ObservationNaN)
+                    } else {
+                        Ok(())
+                    }
+                }
+                None => Ok(()),
+            })?;
 
         if (series.len() != output.nrows()) || (fevmd.params.ncols() != output.ncols()) {
             return Err(FEVMError::InvalidOutputShape {
@@ -339,10 +339,10 @@ where
 
         zip_eq(series, output.row_iter_mut()).try_for_each(|(scobs, mut output_col)| {
             // Compute time step to next observation.
-            let time_step = *scobs.timestamp() - timer;
-            timer = *scobs.timestamp();
+            let time_step = scobs.timestamp() - timer;
+            timer = scobs.timestamp();
 
-            if time_step < T::zero() {
+            if time_step < 0.0 {
                 return Err(FEVMError::NegativeTimeStep(time_step));
             } else {
                 fevmd
@@ -359,31 +359,31 @@ where
                                 out[(0, 0)] =
                                     self.fevm_observe(scobs, data, fevm_state, geom_state)?;
 
-                                Ok::<(), FEVMError<T>>(())
+                                Ok::<(), FEVMError>(())
                             },
                         )?;
 
-                        Ok::<(), FEVMError<T>>(())
+                        Ok::<(), FEVMError>(())
                     })?;
             }
 
-            Ok::<(), FEVMError<T>>(())
+            Ok::<(), FEVMError>(())
         })?;
 
-        if let Some(noise) = opt_noise {
+        if let Some((noise, noise_seed)) = opt_noise {
             output
                 .par_column_iter_mut()
                 .chunks(Self::RCS)
                 .enumerate()
                 .for_each(|(cdx, mut chunks)| {
                     let mut rng: Xoshiro256PlusPlus =
-                        Xoshiro256PlusPlus::seed_from_u64(noise.seed() + (cdx * 73) as u64);
+                        Xoshiro256PlusPlus::seed_from_u64(noise_seed + (cdx * 73) as u64);
 
                     chunks.iter_mut().for_each(|col| {
                         let size = col.nrows();
 
                         col.iter_mut()
-                            .zip(noise.generate_noise(series, &mut rng).iter())
+                            .zip(&noise.generate_noise(size, &mut rng))
                             .for_each(|(value, noisevec)| *value += noisevec.clone());
                     });
                 });
@@ -391,8 +391,8 @@ where
 
         debug!(
             "fevm_simulate: {:2.2}M evaluations in {:.2} sec",
-            (series.len() * fevmd.params.ncols()).as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            (series.len() * fevmd.params.ncols()) as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         let mut valid_indices_flags = vec![false; fevmd.params.ncols()];
@@ -404,8 +404,8 @@ where
             .for_each(|mut chunks| {
                 chunks.iter_mut().for_each(|(out, flag)| {
                     **flag = zip_eq(out.iter(), series).fold(true, |acc, (out, obs)| {
-                        let ss = !out.any_nan() && obs.observation().is_valid();
-                        let nn = out.is_nan() && !obs.observation().is_valid();
+                        let ss = !out.any_nan() && obs.observation().is_some();
+                        let nn = out.is_nan() && obs.observation().is_none();
 
                         acc & (ss || nn)
                     });
@@ -418,14 +418,14 @@ where
     /// Initialize a model state.
     fn fevm_state(
         &self,
-        series: &ScObsSeries<T, ObserVec<T, N>>,
-        params: &SVectorView<T, P>,
+        series: &ScObsSeries<ObserVec<N>>,
+        params: &SVectorView<f64, P>,
         fevm_state: &mut FS,
         geom_state: &mut GS,
-    ) -> Result<(), FEVMError<T>>;
+    ) -> Result<(), FEVMError>;
 
     /// Returns a reference to the underlying model prior.
-    fn model_prior(&self) -> impl PDF<T, P>;
+    fn model_prior(&self) -> impl PDF<P>;
 
     /// Returns true if the ranges given by the model prior are within the parameter ranges
     /// of the model.
