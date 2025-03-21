@@ -1,25 +1,23 @@
 //! Implementations of forward ensemble vector models (FEVMs).
 
 // mod cylm;
-// pub mod filters;
-// mod fisher;
-pub mod noise;
+pub mod filters;
+mod fisher;
 
 // pub use cylm::*;
-// pub use fisher::*;
+pub use fisher::*;
+use rand_distr::{Distribution, Normal, StandardNormal};
 
-use crate::OFloat;
-use crate::stats::PDFParticles;
 use crate::{
-    fevm::noise::{FEVMNoise, FEVMNoiseGenerator},
+    OFloat, OState,
     geom::OcnusGeometry,
     obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
-    stats::PDF,
-    stats::StatsError,
+    stats::{CovMatrix, PDF, PDFParticles, StatsError},
 };
+use filters::ParticleFilterError;
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{Const, DMatrix, Dyn, Matrix, Scalar};
+use nalgebra::{Const, DMatrix, DVector, Dyn, Matrix, Scalar};
 use nalgebra::{SVectorView, VecStorage};
 use num_traits::AsPrimitive;
 use rand::{Rng, SeedableRng};
@@ -101,8 +99,8 @@ pub enum FEVMError<T> {
     NegativeTimeStep(T),
     #[error("observation cannot be a vector with any NaN valus")]
     ObservationNaN,
-    // #[error("particle filter error")]
-    // ParticleFilter(#[from] ParticleFilterError),
+    #[error("particle filter error")]
+    ParticleFilter(#[from] ParticleFilterError<T>),
     #[error("stats error")]
     Stats(#[from] StatsError<T>),
 }
@@ -111,11 +109,12 @@ pub enum FEVMError<T> {
 pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusGeometry<T, P, GS>
 where
     T: OFloat,
-    FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
-    GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
+    FS: OState,
+    GS: OState,
     Self: Sync,
     f64: AsPrimitive<T>,
     usize: AsPrimitive<T>,
+    StandardNormal: Distribution<T>,
 {
     /// The rayon chunk size that is used for any parallel iterators.
     /// Cheap or expensive operations may use fractions or multiples of this value.
@@ -314,17 +313,13 @@ where
     /// Perform an ensemble forward simulation and generate synthetic vector observables
     /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t.
     /// to the spacecraft observation series.
-    fn fevm_simulate<F, R>(
+    fn fevm_simulate(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
         fevmd: &mut FEVMData<T, P, FS, GS>,
         output: &mut DMatrix<ObserVec<T, N>>,
-        opt_noise: Option<&FEVMNoise<T, N, F>>,
-    ) -> Result<Vec<bool>, FEVMError<T>>
-    where
-        F: FEVMNoiseGenerator<T, N> + Send,
-        R: Rng,
-    {
+        opt_noise: Option<&mut FEVMNoise<T>>,
+    ) -> Result<Vec<bool>, FEVMError<T>> {
         let start = Instant::now();
         let mut timer = T::zero();
 
@@ -376,17 +371,16 @@ where
                 .chunks(Self::RCS)
                 .enumerate()
                 .for_each(|(cdx, mut chunks)| {
-                    let mut rng: Xoshiro256PlusPlus =
-                        Xoshiro256PlusPlus::seed_from_u64(noise.seed() + (cdx * 73) as u64);
+                    let mut rng = noise.initialize_rng(29 * cdx as u64, 17);
 
                     chunks.iter_mut().for_each(|col| {
-                        let size = col.nrows();
-
                         col.iter_mut()
                             .zip(noise.generate_noise(series, &mut rng).iter())
                             .for_each(|(value, noisevec)| *value += noisevec.clone());
                     });
                 });
+
+            noise.increment_seed()
         }
 
         debug!(
@@ -424,10 +418,99 @@ where
         geom_state: &mut GS,
     ) -> Result<(), FEVMError<T>>;
 
+    /// Step sizes for finite differences.
+    fn fevm_step_sizes(&self) -> [T; P];
+
     /// Returns a reference to the underlying model prior.
     fn model_prior(&self) -> impl PDF<T, P>;
 
     /// Returns true if the ranges given by the model prior are within the parameter ranges
     /// of the model.
     fn validate_model_prior(&self) -> bool;
+}
+
+/// A generic noise generator for [`FEVM`].
+#[allow(missing_docs)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum FEVMNoise<T>
+where
+    T: Clone + Scalar,
+{
+    Gaussian(T, u64),
+    Multivariate(CovMatrix<T>, u64),
+}
+
+impl<T> FEVMNoise<T>
+where
+    T: OFloat,
+    StandardNormal: Distribution<T>,
+    f64: AsPrimitive<T>,
+    usize: AsPrimitive<T>,
+{
+    /// Generate a random noise time-series.
+    pub fn generate_noise<const N: usize>(
+        &self,
+        series: &ScObsSeries<T, ObserVec<T, N>>,
+        rng: &mut impl Rng,
+    ) -> DVector<ObserVec<T, N>> {
+        match self {
+            FEVMNoise::Gaussian(std_dev, ..) => {
+                let normal = Normal::new(T::zero(), *std_dev).unwrap();
+                let size = series.len();
+
+                DVector::from_iterator(size, (0..size).map(|_| ObserVec([rng.sample(normal); N])))
+            }
+            FEVMNoise::Multivariate(covmat, ..) => {
+                let normal = Normal::new(T::zero(), T::one()).unwrap();
+                let size = series.len();
+
+                let mut result = DVector::from_iterator(
+                    size,
+                    (0..size).map(|_| ObserVec([rng.sample(normal); N])),
+                );
+
+                for i in 0..N {
+                    let values = covmat.cholesky_ltm()
+                        * DVector::from_iterator(size, (0..size).map(|_| rng.sample(normal)));
+
+                    result
+                        .iter_mut()
+                        .zip(values.row_iter())
+                        .for_each(|(res, val)| res[i] = val[(0, 0)]);
+                }
+
+                result
+            }
+        }
+    }
+
+    /// Increment randon number seed.
+    pub fn increment_seed(&mut self) {
+        match self {
+            FEVMNoise::Gaussian(.., seed) => {
+                *seed += 1;
+            }
+            FEVMNoise::Multivariate(.., seed) => {
+                *seed += 1;
+            }
+        }
+    }
+
+    /// Initialize a new random number generator using the base seed
+    pub fn initialize_rng(&self, multiplier: u64, offset: u64) -> Xoshiro256PlusPlus {
+        match self {
+            FEVMNoise::Gaussian(.., seed) | FEVMNoise::Multivariate(.., seed) => {
+                Xoshiro256PlusPlus::seed_from_u64(*seed * multiplier + offset)
+            }
+        }
+    }
+}
+
+impl<T> Default for FEVMNoise<T>
+where
+    T: OFloat,
+{
+    fn default() -> Self {
+        FEVMNoise::Gaussian(T::one(), 0)
+    }
 }

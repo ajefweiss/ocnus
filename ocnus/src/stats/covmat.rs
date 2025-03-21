@@ -80,17 +80,17 @@ where
         })
     }
 
-    /// Create a [`CovMatrix`] from a matrix of D-dimensional vectors.
-    pub fn from_vectors<const D: usize>(
-        vectors: &MatrixView<T, Const<D>, Dyn>,
+    /// Create a [`CovMatrix`] from a matrix of N-dimensional vectors.
+    pub fn from_vectors<const N: usize>(
+        vectors: &MatrixView<T, Const<N>, Dyn>,
         opt_weights: Option<&[T]>,
     ) -> Result<Self, StatsError<T>> {
         let mut matrix = DMatrix::from_iterator(
-            D,
-            D,
-            (0..(D.pow(2))).map(|idx| {
-                let jdx = idx / D;
-                let kdx = idx % D;
+            N,
+            N,
+            (0..(N.pow(2))).map(|idx| {
+                let jdx = idx / N;
+                let kdx = idx % N;
 
                 if jdx <= kdx {
                     let x = vectors.row(jdx);

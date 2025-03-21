@@ -1,32 +1,34 @@
-use crate::fevm::FEVMData;
-use crate::stats::CovMatrix;
-use crate::{ScObsSeries, fevm::filters::ParticleFilter, obser::ObserVec};
-use nalgebra::{Const, DMatrix, Dyn, Matrix, SMatrix, VecStorage};
-use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 
-use super::FEVMError;
-use super::noise::FEVMNoiseNull;
+use crate::{OFloat, OState,fevm::{FEVMData,filters::ParticleFilter, FEVMError}, obser::{ScObsSeries,ObserVec},stats::CovMatrix};
+use nalgebra::{Const, DMatrix, Dyn, Matrix, SMatrix, VecStorage};
+use num_traits::{AsPrimitive, Float};
+use rand_distr::{Distribution, StandardNormal};
+use rayon::prelude::*;
+
+
 
 /// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`ForwardEnsembleVectorModel`].
-pub trait FisherInformation<const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<P, N, FS, GS>
+pub trait FisherInformation<T,const P: usize, const N: usize, FS, GS>:
+    ParticleFilter<T,P, N, FS, GS>
 where
-    Self: Sync,
-    FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
-    GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
+T: OFloat,
+   
+    FS: OState,
+    GS: OState, f64: AsPrimitive<T>, usize: AsPrimitive<T>,  Self: Sync,
+    StandardNormal: Distribution<T>,
 {
-    /// Compute the Fisher information matrix (FIM) for an array of model parameters.
-    fn fischer_information_matrix<F>(
+    /// Compute the Fisher information matrix (FIM) for an array of model parameters using an auto-correlation function `acf`.
+    fn fischer_information_matrix<C>(
         &self,
-        series: &ScObsSeries<ObserVec<N>>,
-        fevmd: &FEVMData<P, FS, GS>,
-        corrfunc: &F,
-    ) -> Result<Vec<SMatrix<f64, P, P>>, FEVMError> 
-      where F:Fn(f64) -> f64 + Sync {
-        let step_sizes = self.param_step_sizes();
+        series: &ScObsSeries<T,ObserVec<T,N>>,
+        fevmd: &FEVMData<T,P, FS, GS>,
+        acf: &C,
+    ) -> Result<Vec<SMatrix<T, P, P>>, FEVMError<T>> 
+      where 
+      C:Fn(T) -> T + Sync {
+        let step_sizes = self.fevm_step_sizes();
 
-        let mut results = vec![SMatrix::<f64, P, P>::zeros(); fevmd.params.ncols()];
+        let mut results = vec![SMatrix::<T, P, P>::zeros(); fevmd.params.ncols()];
 
         fevmd
             .params
@@ -37,17 +39,17 @@ where
                
                 chunks.iter_mut().try_for_each(|(params_ref, fim)| {
                     let mut dap = FEVMData {
-                        params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
+                        params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
                         fevm_states: vec![FS::default(); P],
                         geom_states: vec![GS::default(); P],
-                        weights: vec![1.0 / P as f64; P],
+                        weights: vec![T::one() / P.as_(); P],
                     };
 
                     let mut dam = FEVMData {
-                        params: Matrix::<f64, Const<P>, Dyn, VecStorage<f64, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
+                        params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
                         fevm_states: vec![FS::default(); P],
                         geom_states: vec![GS::default(); P],
-                        weights: vec![1.0 / P as f64; P],
+                        weights: vec![T::one() / P.as_(); P],
                     };
 
                     dap.params
@@ -63,8 +65,8 @@ where
                             params[pdx] -=  step_sizes[pdx]
                         });
 
-                    let mut dap_output = DMatrix::<ObserVec<N>>::zeros(series.len(), P);
-                    let mut dam_output = DMatrix::<ObserVec<N>>::zeros(series.len(), P);
+                    let mut dap_output = DMatrix::<ObserVec<T,N>>::zeros(series.len(), P);
+                    let mut dam_output = DMatrix::<ObserVec<T,N>>::zeros(series.len(), P);
 
                     self.fevm_initialize_states_only(series, &mut dap)?;
                     self.fevm_initialize_states_only(series, &mut dam)?;
@@ -73,14 +75,14 @@ where
                         series,
                         &mut dap,
                         &mut dap_output,
-                        None::<(&FEVMNoiseNull, u64)>,
-                    )?;
+                        None,
+                    )? ;
 
                     self.fevm_simulate(
                         series,
                         &mut dam,
                         &mut dam_output,
-                        None::<(&FEVMNoiseNull, u64)>,
+                        None,
                     )?;
 
 
@@ -89,15 +91,15 @@ where
                             if rdx <= cdx {
                                 
                                 let dmu_a = dap_output.row_iter().zip(dam_output.row_iter()).map(|(dap_col, dam_col)| {
-                                  (&dap_col[rdx] - &dam_col[rdx]) * (0.5 / step_sizes[rdx]) 
+                                  (&dap_col[rdx] - &dam_col[rdx]) * (0.5.as_() / step_sizes[rdx]) 
                                   
-                                }).collect::<Vec<ObserVec<N>>>();
+                                }).collect::<Vec<ObserVec<T,N>>>();
 
                                 
 
                                 let dmu_b = dap_output.row_iter().zip(dam_output.row_iter()).map(|(dap_col, dam_col)| {
-                                    (&dap_col[cdx] - &dam_col[cdx]) * (0.5 / step_sizes[cdx]) 
-                                }).collect::<Vec<ObserVec<N>>>();
+                                    (&dap_col[cdx] - &dam_col[cdx]) * (0.5.as_() / step_sizes[cdx]) 
+                                }).collect::<Vec<ObserVec<T,N>>>();
                   
                                 // Normalization procedure.
                                 // TODO: This is not required once proper cov-matrices exist.
@@ -126,24 +128,24 @@ where
                                 );
 
                                 let coviter = (0..valid_indices.len()).zip(series).filter_map(| (i,scobs_i)| if valid_indices[i] {Some(
-                                (0..valid_indices.len()).zip(series).filter_map(|(j, scobs_j)| if valid_indices[j] {Some(corrfunc((scobs_i.timestamp() - scobs_j.timestamp()).abs()))} else {None} ))} else {None}).flatten();
+                                (0..valid_indices.len()).zip(series).filter_map(|(j, scobs_j)| if valid_indices[j] {Some(acf(Float::abs(*scobs_i.timestamp() - *scobs_j.timestamp())))} else {None} ))} else {None}).flatten();
                               
                          
-                                let covariance = CovMatrix::from_matrix(&DMatrix::<f64>::from_iterator(obs_norm_a, obs_norm_b,coviter).as_view()).unwrap();
+                                let covariance = CovMatrix::from_matrix(&DMatrix::<T>::from_iterator(obs_norm_a, obs_norm_b,coviter).as_view()).unwrap();
                              
                                 *value = (0..N)
                                     .map(|idx| (dmu_a_mat.row(idx) * covariance.inverse_matrix() * dmu_b_mat.row(idx).transpose())[(0, 0)])
-                                    .sum::<f64>();
+                                    .sum::<T>();
                             }
                         });
                     });
 
-                    **fim += fim.transpose() - SMatrix::<f64, P, P>::from_diagonal(&fim.diagonal());
+                    **fim += fim.transpose() - SMatrix::<T, P, P>::from_diagonal(&fim.diagonal());
 
-                    Ok::<(), FEVMError>(())
+                    Ok::<(), FEVMError<T>>(())
                 })?;
 
-                Ok::<(), FEVMError>(())
+                Ok::<(), FEVMError<T>>(())
             })?;
 
         Ok(results)

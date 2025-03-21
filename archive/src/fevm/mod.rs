@@ -101,8 +101,8 @@ pub enum FEVMError {
 /// The trait that must be implemented for any FEVM (forward ensemble vector model) with an N-dimensional vector observable.
 pub trait FEVM<const P: usize, const N: usize, FS, GS>: OcnusGeometry<P, GS>
 where
-    FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
-    GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
+    FS: OState
+    GS: OState
     Self: Sync,
 {
     /// The rayon chunk size that is used for any parallel iterators.

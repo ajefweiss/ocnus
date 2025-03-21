@@ -23,8 +23,8 @@ use super::ParticleFilterError;
 pub trait BSParticleFilter<const P: usize, const N: usize, FS, GS>:
     ParticleFilter<P, N, FS, GS>
 where
-    FS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
-    GS: Clone + std::fmt::Debug + Default + for<'a> Deserialize<'a> + Send + Serialize,
+    FS: OState
+    GS: OState
 {
     /// Basic bootstrap filter (single iteration) with multivariate likelihood.
     fn bootpf_run(

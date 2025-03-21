@@ -1,65 +1,66 @@
 use crate::{
-    ScObsSeries,
+    OFloat, OState,
     fevm::{
-        FEVMData, FEVMError, FEVMNoiseGenerator, ParticleFilterError,
+        FEVMData, FEVMError, FEVMNoise, ParticleFilterError,
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
     },
-    obser::ObserVec,
+    obser::{ObserVec, ScObsSeries},
     stats::{PDF, PDFParticles, ptpdf_importance_weighting},
 };
 use itertools::Itertools;
 use log::{debug, info};
 use nalgebra::{DMatrix, DVectorView, Dyn, U1};
+use num_traits::{AsPrimitive, Float};
+use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 /// ABC-SMC algorithm mode.
 #[derive(Clone, Debug)]
-pub enum ABCParticleFilterMode<'a, F, const N: usize>
-where
-    F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
-{
+pub enum ABCParticleFilterMode<'a, T, E, const N: usize> {
     /// ABC-SMC runs are filtered by a threshold value.
-    Threshold((&'a F, f64)),
+    Threshold((&'a E, T)),
 
     /// ABC-SMC runs are filtered by a fixed acceptance rate.
-    AcceptanceRate((&'a F, f64)),
+    AcceptanceRate((&'a E, T)),
 }
 
 /// A trait that enables the use of approximate Bayesian computation (ABC) particle filter methods
 /// for a [`FEVM`].
-pub trait ABCParticleFilter<const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<P, N, FS, GS>
+pub trait ABCParticleFilter<T, const P: usize, const N: usize, FS, GS>:
+    ParticleFilter<T, P, N, FS, GS>
 where
-    FS: OState
-    GS: OState
+    T: OFloat,
+    FS: OState,
+    GS: OState,
+    f64: AsPrimitive<T>,
+    usize: AsPrimitive<T>,
+    StandardNormal: Distribution<T>,
 {
     /// Basic ABC-SMC algorithm (single iteration) with fixed acceptance ratio.
-    fn abcpf_run<F, NG>(
+    fn abcpf_run<E>(
         &self,
-        series: &ScObsSeries<ObserVec<N>>,
-        fevmd: &FEVMData<P, FS, GS>,
+        series: &ScObsSeries<T, ObserVec<T, N>>,
+        fevmd: &FEVMData<T, P, FS, GS>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
-        mode: ABCParticleFilterMode<F, N>,
-        settings: &mut ParticleFilterSettings<N, NG>,
-    ) -> Result<ParticleFilterResults<P, N, FS, GS>, FEVMError>
+        mode: ABCParticleFilterMode<T, E, N>,
+        settings: &mut ParticleFilterSettings<T, N>,
+    ) -> Result<ParticleFilterResults<T, P, N, FS, GS>, FEVMError<T>>
     where
-        F: Fn(&DVectorView<ObserVec<N>>, &ScObsSeries<ObserVec<N>>) -> f64 + Send + Sync,
-        NG: FEVMNoiseGenerator<N>,
+        E: Fn(&DVectorView<ObserVec<T, N>>, &ScObsSeries<T, ObserVec<T, N>>) -> T + Send + Sync,
     {
         let start = Instant::now();
 
         let mut counter = 0;
         let mut iteration = 0;
 
-        let mut target_data = FEVMData::<P, FS, GS>::new(ensemble_size);
-        let mut target_output = DMatrix::<ObserVec<N>>::zeros(series.len(), ensemble_size);
-        let mut target_filter_values = Vec::<f64>::with_capacity(ensemble_size);
+        let mut target_data = FEVMData::new(ensemble_size);
+        let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
+        let mut target_filter_values = Vec::<T>::with_capacity(ensemble_size);
 
-        let mut temp_data = FEVMData::<P, FS, GS>::new(sim_ensemble_size);
-        let mut temp_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
+        let mut temp_data = FEVMData::new(sim_ensemble_size);
+        let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle PDF from input and multiply by the exploration factor.
         let mut density_old = PDFParticles::from_particles(
@@ -73,19 +74,19 @@ where
                 series,
                 &mut temp_data,
                 Some(&density_old),
-                settings.rseed + 23 * iteration,
+                settings.rseed + 23 * iteration as u64,
             )?;
 
             let mut flags = self.fevm_simulate(
                 series,
                 &mut temp_data,
                 &mut temp_output,
-                Some((&settings.noise, settings.rseed + iteration * 17)),
+                Some(&mut settings.noise),
             )?;
 
             let filter_values = match mode {
                 ABCParticleFilterMode::AcceptanceRate((filter, accrate)) => {
-                    if !(0.001..0.5).contains(&accrate) {
+                    if !(0.001.as_()..0.5.as_()).contains(&accrate) {
                         return Err(FEVMError::InvalidParameter {
                             name: "acceptance rate",
                             value: accrate,
@@ -103,24 +104,24 @@ where
                                     if **flag {
                                         filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series)
                                     } else {
-                                        f64::INFINITY
+                                        T::infinity()
                                     }
                                 })
-                                .collect::<Vec<f64>>()
+                                .collect::<Vec<T>>()
                         })
                         .flatten()
-                        .collect::<Vec<f64>>();
+                        .collect::<Vec<T>>();
 
                     let values_sorted = values
                         .iter()
                         .sorted_by(|a, b| a.partial_cmp(b).unwrap())
                         .copied()
-                        .collect::<Vec<f64>>();
+                        .collect::<Vec<T>>();
 
-                    let mut epsilon = values_sorted[(sim_ensemble_size as f64 * accrate) as usize];
+                    let mut epsilon = values_sorted[(sim_ensemble_size.as_() * accrate).as_()];
 
                     if !epsilon.is_finite() {
-                        epsilon = f64::MAX;
+                        epsilon = Float::max_value();
                     }
 
                     flags
@@ -151,13 +152,13 @@ where
 
                                     value
                                 } else {
-                                    f64::NAN
+                                    T::nan()
                                 }
                             })
-                            .collect::<Vec<f64>>()
+                            .collect::<Vec<T>>()
                     })
                     .flatten()
-                    .collect::<Vec<f64>>(),
+                    .collect::<Vec<T>>(),
             };
 
             let mut indices_valid = flags
@@ -192,10 +193,10 @@ where
 
             iteration += 1;
 
-            if start.elapsed().as_millis() as f64 / 1e3 > settings.time_limit {
+            if (start.elapsed().as_millis() as f64 / 1e3).as_() > settings.time_limit {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: start.elapsed().as_millis() as f64 / 1e3,
+                        elapsed: (start.elapsed().as_millis() as f64 / 1e3).as_(),
                         limit: settings.time_limit,
                     },
                 ));
@@ -216,18 +217,18 @@ where
         debug!("done weights");
 
         // Reset the covariance matrix in the old density.
-        density_old *= 1.0 / settings.exploration_factor;
+        density_old *= T::one() / settings.exploration_factor;
 
         // Compute the effective sample size.
-        let effective_sample_size = 1.0
+        let effective_sample_size = T::one()
             / target_data
                 .weights
                 .iter()
-                .map(|value| value.powi(2))
-                .sum::<f64>();
+                .map(|value| Float::powi(*value, 2))
+                .sum::<T>();
 
         if effective_sample_size
-            < ensemble_size as f64 * settings.effective_sample_size_threshold_factor
+            < ensemble_size.as_() * settings.effective_sample_size_threshold_factor
         {
             return Err(FEVMError::ParticleFilter(
                 ParticleFilterError::SmallSampleSize {
@@ -241,15 +242,15 @@ where
             .iter()
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
             .copied()
-            .collect::<Vec<f64>>();
+            .collect::<Vec<T>>();
 
         // Compute quantiles for logging purposes.
-        let eps_1 = filter_values_sorted[(ensemble_size as f64 * settings.quantiles[0]) as usize];
-        let eps_2 = filter_values_sorted[(ensemble_size as f64 * settings.quantiles[1]) as usize];
-        let eps_3 = if settings.quantiles[2] >= 1.0 {
+        let eps_1 = filter_values_sorted[(ensemble_size.as_() * settings.quantiles[0]).as_()];
+        let eps_2 = filter_values_sorted[(ensemble_size.as_() * settings.quantiles[1]).as_()];
+        let eps_3 = if settings.quantiles[2] >= T::one() {
             filter_values_sorted[ensemble_size - 1]
         } else {
-            filter_values_sorted[(ensemble_size as f64 * settings.quantiles[2]) as usize]
+            filter_values_sorted[(ensemble_size.as_() * settings.quantiles[2]).as_()]
         };
 
         let mode_string = match mode {
@@ -267,7 +268,7 @@ where
             eps_1,
             eps_2,
             eps_3,
-            (iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6,
+            (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3,
             effective_sample_size,
             ensemble_size,

@@ -3,6 +3,8 @@
 
 use std::ops::AddAssign;
 
+use num_traits::AsPrimitive;
+
 pub mod fevm;
 pub mod geom;
 pub mod math;
@@ -13,7 +15,10 @@ pub mod stats;
 pub trait OFloat:
     'static
     + for<'x> AddAssign<&'x Self>
+    + AsPrimitive<usize>
+    + Clone
     + std::fmt::Debug
+    + Default
     + for<'x> serde::Deserialize<'x>
     + std::fmt::Display
     + num_traits::Float
@@ -27,3 +32,9 @@ pub trait OFloat:
 
 impl OFloat for f32 {}
 impl OFloat for f64 {}
+
+/// Internal trait for states.
+pub trait OState:
+    Clone + std::fmt::Debug + Default + for<'x> serde::Deserialize<'x> + Send + serde::Serialize
+{
+}

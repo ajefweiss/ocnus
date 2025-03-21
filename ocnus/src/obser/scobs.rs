@@ -1,3 +1,4 @@
+use crate::{OFloat, obser::OcnusObser};
 use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
@@ -6,8 +7,6 @@ use std::{
     cmp::{Ordering, max},
     ops::{Add, AddAssign},
 };
-
-use crate::OFloat;
 
 /// The configuration of a single spacecraft observation, as used in [`ScObs`].
 ///
@@ -84,7 +83,17 @@ pub struct ScObsSeries<T, O> {
 impl<T, O> ScObsSeries<T, O>
 where
     T: OFloat,
+    O: OcnusObser,
 {
+    /// Returns the number of valid observations.
+    pub fn count_observations(&self) -> usize {
+        self.into_iter()
+            .fold(0, |acc, next| match next.observation().is_valid() {
+                true => acc + 1,
+                false => acc,
+            })
+    }
+
     /// Returns the number of individual [`ScObsSeries`] contained within.
     ///
     /// This value corresponds to the length of the vector returned by
@@ -231,19 +240,19 @@ mod tests {
         let sctc1 = ScObs {
             timestamp: 0.0,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f32>,
+            observation: 0.0,
         };
 
         let sctc2 = ScObs {
             timestamp: 1.0,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f32>,
+            observation: 0.0,
         };
 
         let sctc3 = ScObs {
             timestamp: 0.5,
             configuration: ScObsConf::Distance(1.0),
-            observation: None::<f32>,
+            observation: 0.0,
         };
 
         let mut ts3 = ScObsSeries::from_iterator([sctc1, sctc2]);

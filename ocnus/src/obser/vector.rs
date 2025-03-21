@@ -1,6 +1,6 @@
 //! Implementation of a `N`-dimensional vector observable.
 
-use crate::obser::OcnusObser;
+use crate::{OFloat, obser::OcnusObser};
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
 use nalgebra::SVector;
@@ -20,7 +20,7 @@ pub struct ObserVec<T, const N: usize>(
     pub [T; N],
 )
 where
-    T: for<'x> Deserialize<'x> + Float + Serialize;
+    T: for<'x> Deserialize<'x> + Serialize;
 
 impl<T, const N: usize> ObserVec<T, N>
 where
@@ -244,7 +244,7 @@ impl<'a, const N: usize> Mul<&'a ObserVec<f64, N>> for f64 {
 
 impl<T, const N: usize> OcnusObser for ObserVec<T, N>
 where
-    T: for<'x> Deserialize<'x> + Float + Send + Serialize + Sync,
+    T: OFloat,
 {
     fn is_valid(&self) -> bool {
         !self.any_nan()
