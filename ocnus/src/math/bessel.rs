@@ -1,34 +1,40 @@
 use crate::math::factorial;
-use num_traits::{AsPrimitive, Float, float::TotalOrder};
+use num_traits::{Float, FromPrimitive, float::TotalOrder};
 use std::{cmp::Ordering, ops::Mul};
 
 /// Bessel function of the first kind.
 pub fn bessel_jn<T>(x: T, k: usize) -> T
 where
-    T: 'static + Copy + Float + Mul<f64, Output = T> + TotalOrder,
-    i32: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: 'static + Copy + Float + FromPrimitive + Mul<T> + TotalOrder,
 {
     match x.total_cmp(&T::zero()) {
-        Ordering::Equal => (matches!(k, 0) as usize).as_(),
+        Ordering::Equal => T::from_usize(matches!(k, 0) as usize).unwrap(),
         _ => {
-            let sum = (1..11).try_fold((x / (T::one() * 2.0_f64)).powi(k as i32), |acc, idx| {
-                let next = i32::pow(-1, idx as u32).as_()
-                    * (x / (T::one() * 2.0_f64)).powi((2 * idx + k) as i32)
-                    / (factorial(idx).unwrap() * factorial(idx + k).unwrap()).as_();
+            let sum = (1..11).try_fold(
+                (x / (T::one() * T::from_f64(2.0).unwrap())).powi(k as i32),
+                |acc, idx| {
+                    let next = T::from_i32(i32::pow(-1, idx as u32)).unwrap()
+                        * (x / (T::from_f64(2.0).unwrap())).powi((2 * idx + k) as i32)
+                        / T::from_usize(factorial(idx).unwrap() * factorial(idx + k).unwrap())
+                            .unwrap();
 
-                match next.partial_cmp(&T::zero()).unwrap() {
-                    std::cmp::Ordering::Greater => match next.partial_cmp(&T::epsilon()).unwrap() {
-                        Ordering::Less => Err(acc + next),
-                        _ => Ok(acc + next),
-                    },
-                    std::cmp::Ordering::Less => match next.partial_cmp(&(-T::epsilon())).unwrap() {
-                        Ordering::Greater => Err(acc + next),
-                        _ => Ok(acc + next),
-                    },
-                    std::cmp::Ordering::Equal => Err(acc),
-                }
-            });
+                    match next.partial_cmp(&T::zero()).unwrap() {
+                        std::cmp::Ordering::Greater => {
+                            match next.partial_cmp(&T::epsilon()).unwrap() {
+                                Ordering::Less => Err(acc + next),
+                                _ => Ok(acc + next),
+                            }
+                        }
+                        std::cmp::Ordering::Less => {
+                            match next.partial_cmp(&(-T::epsilon())).unwrap() {
+                                Ordering::Greater => Err(acc + next),
+                                _ => Ok(acc + next),
+                            }
+                        }
+                        std::cmp::Ordering::Equal => Err(acc),
+                    }
+                },
+            );
 
             match sum {
                 Ok(result) => result,

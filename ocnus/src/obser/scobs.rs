@@ -1,4 +1,4 @@
-use crate::{OFloat, obser::OcnusObser};
+use crate::obser::OcnusObser;
 use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
@@ -82,11 +82,13 @@ pub struct ScObsSeries<T, O> {
 
 impl<T, O> ScObsSeries<T, O>
 where
-    T: OFloat,
-    O: OcnusObser,
+    T: PartialOrd,
 {
     /// Returns the number of valid observations.
-    pub fn count_observations(&self) -> usize {
+    pub fn count_observations(&self) -> usize
+    where
+        O: OcnusObser,
+    {
         self.into_iter()
             .fold(0, |acc, next| match next.observation().is_valid() {
                 true => acc + 1,

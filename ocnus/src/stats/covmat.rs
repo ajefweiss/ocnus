@@ -1,19 +1,23 @@
 //! Implementation of [`CovMatrix`] and generic covariance functions.
 
-use crate::{OFloat, stats::StatsError};
+use crate::stats::StatsError;
 use derive_more::Deref;
 use itertools::{Itertools, zip_eq};
 use log::error;
-use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView, Scalar};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView, RealField, Scalar};
+use num_traits::FromPrimitive;
 use serde::{Deserialize, Serialize};
-use std::ops::{Mul, MulAssign};
+use std::{
+    fmt::Display,
+    iter::Sum,
+    ops::{Mul, MulAssign},
+};
 
 /// A dynamically sized covariance matrix.
 #[derive(Clone, Debug, Deref, Deserialize, Serialize)]
 pub struct CovMatrix<T>
 where
-    T: Clone + Scalar,
+    T: Copy + Scalar,
 {
     /// The  lower triangular matrix from the Cholesky decomposition.
     cholesky_ltm: DMatrix<T>,
@@ -31,9 +35,7 @@ where
 
 impl<T> CovMatrix<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition.
     pub fn cholesky_ltm(&self) -> &DMatrix<T> {
@@ -84,7 +86,10 @@ where
     pub fn from_vectors<const N: usize>(
         vectors: &MatrixView<T, Const<N>, Dyn>,
         opt_weights: Option<&[T]>,
-    ) -> Result<Self, StatsError<T>> {
+    ) -> Result<Self, StatsError<T>>
+    where
+        T: Sum<T> + for<'x> Sum<&'x T>,
+    {
         let mut matrix = DMatrix::from_iterator(
             N,
             N,
@@ -171,8 +176,9 @@ where
             panic!("iterator length must be a multiple of the covariance matrix dimension")
         }
 
-        let mut lh = -(Float::ln(self.pseudo_determinant) + ndim.as_() * (2.0.as_() * T::pi()))
-            / 2.0_f64.as_();
+        let mut lh = -(self.pseudo_determinant.ln()
+            + T::from_usize(ndim).unwrap() * (T::from_usize(2).unwrap() * T::pi()))
+            / T::from_f64(2.0).unwrap();
 
         for idx in 0..ndim {
             let view = delta.rows_with_step(idx, self.ndim(), ndim - 1);
@@ -182,7 +188,7 @@ where
                     .inverse_matrix
                     .view((0, 0), (view.nrows(), view.nrows()))
                 * view)[(0, 0)]
-                / 2.0.as_();
+                / T::from_f64(2.0).unwrap();
         }
 
         lh
@@ -201,9 +207,7 @@ where
 
 impl<T> TryFrom<&[T]> for CovMatrix<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Display + RealField + Scalar,
 {
     type Error = StatsError<T>;
 
@@ -217,9 +221,7 @@ where
 
 impl<'a, T> TryFrom<&DMatrixView<'a, T>> for CovMatrix<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Display + RealField + Scalar,
 {
     type Error = StatsError<T>;
 
@@ -230,9 +232,7 @@ where
 
 impl<T> Mul<T> for CovMatrix<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Display + RealField + Scalar,
 {
     type Output = CovMatrix<T>;
 
@@ -240,10 +240,10 @@ where
         let dim = self.matrix.ncols() as i32;
 
         Self::Output {
-            cholesky_ltm: self.cholesky_ltm * Float::sqrt(rhs),
+            cholesky_ltm: self.cholesky_ltm * rhs.sqrt(),
             inverse_matrix: self.inverse_matrix / rhs,
             matrix: self.matrix * rhs,
-            pseudo_determinant: self.pseudo_determinant * Float::powi(rhs, dim),
+            pseudo_determinant: self.pseudo_determinant * rhs.powi(dim),
         }
     }
 }
@@ -278,17 +278,15 @@ impl Mul<CovMatrix<f64>> for f64 {
 
 impl<T> MulAssign<T> for CovMatrix<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Display + RealField + Scalar,
 {
     fn mul_assign(&mut self, rhs: T) {
         let dim = self.matrix.ncols() as i32;
 
-        self.cholesky_ltm *= Float::sqrt(rhs);
+        self.cholesky_ltm *= rhs.sqrt();
         self.inverse_matrix /= rhs;
         self.matrix *= rhs;
-        self.pseudo_determinant *= Float::powi(rhs, dim);
+        self.pseudo_determinant *= rhs.powi(dim);
     }
 }
 
@@ -297,23 +295,22 @@ where
 /// The length of both iterators must be equal (panic).
 pub fn covariance<'a, T, I>(x: I, y: I) -> T
 where
-    T: OFloat,
+    T: Copy + Display + FromPrimitive + RealField + Scalar + Sum<T> + for<'x> Sum<&'x T>,
     I: IntoIterator<Item = &'a T>,
     <I as IntoIterator>::IntoIter: Clone,
-    usize: AsPrimitive<T>,
 {
     let x_iter = x.into_iter();
     let y_iter = y.into_iter();
 
     let length = x_iter.clone().fold(0, |acc, _| acc + 1);
 
-    let mu_x = x_iter.clone().sum::<T>() / length.as_();
-    let mu_y = x_iter.clone().sum::<T>() / length.as_();
+    let mu_x = x_iter.clone().sum::<T>() / T::from_usize(length).unwrap();
+    let mu_y = x_iter.clone().sum::<T>() / T::from_usize(length).unwrap();
 
     zip_eq(x_iter, y_iter)
         .map(|(val_x, val_y)| (mu_x - *val_x) * (mu_y - *val_y))
         .sum::<T>()
-        / (length - 1).as_()
+        / T::from_usize(length - 1).unwrap()
 }
 
 /// Computes the unbiased covariance over two slices with weights.
@@ -321,7 +318,7 @@ where
 /// The length of all three iterators must be equal (panic).
 pub fn covariance_with_weights<'a, T, IV, IW>(x: IV, y: IV, w: IW) -> T
 where
-    T: OFloat,
+    T: Copy + Display + RealField + Scalar + Sum<T> + for<'x> Sum<&'x T>,
     IV: IntoIterator<Item = &'a T>,
     IW: IntoIterator<Item = &'a T>,
     <IV as IntoIterator>::IntoIter: Clone,
@@ -332,10 +329,7 @@ where
     let w_iter = w.into_iter();
 
     let wsum = w_iter.clone().sum::<T>();
-    let wsumsq = w_iter
-        .clone()
-        .map(|val_w| Float::powi(*val_w, 2))
-        .sum::<T>();
+    let wsumsq = w_iter.clone().map(|val_w| val_w.powi(2)).sum::<T>();
 
     let wfac = wsum - wsumsq / wsum;
 
@@ -367,14 +361,14 @@ mod tests {
     fn test_covariance() {
         assert!(
             covariance(
-                &[10.0, 34.0, 23.0, 54.0, 9.0],
+                &[10.0_f32, 34.0, 23.0, 54.0, 9.0],
                 &[4.0, 5.0, 11.0, 15.0, 20.0]
             ) == 5.75
         );
 
         assert!(
             (covariance_with_weights(
-                &[10.0, 34.0, 23.0, 54.0, 9.0],
+                &[10.0_f32, 34.0, 23.0, 54.0, 9.0],
                 &[4.0, 5.0, 11.0, 15.0, 20.0],
                 &[1.0, 0.8, 1.1, 1.3, 0.9]
             ) - 19.523237)

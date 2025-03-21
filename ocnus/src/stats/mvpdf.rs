@@ -1,12 +1,9 @@
-use crate::{
-    OFloat,
-    stats::{CovMatrix, PDF, PDFExactDensity, StatsError},
-};
+use crate::stats::{CovMatrix, PDF, PDFExactDensity, StatsError};
 use log::warn;
-use nalgebra::{SVector, SVectorView, Scalar};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::{RealField, SVector, SVectorView, Scalar};
+use num_traits::Float;
 use rand::Rng;
-use rand_distr::Normal;
+use rand_distr::{Distribution, Normal, StandardNormal};
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
@@ -14,7 +11,7 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PDFMultivariate<T, const P: usize>
 where
-    T: Clone + Scalar,
+    T: Copy + Scalar,
 {
     /// A [`CovMatrix<T>`] that describes the underlying multivariate normal PDF.
     covmat: CovMatrix<T>,
@@ -29,9 +26,7 @@ where
 
 impl<T, const P: usize> PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     /// Create a [`PDFMultivariate`] from a covariance matrix.
     pub fn from_covmat(covmat: CovMatrix<T>, mean: SVector<T, P>, range: [(T, T); P]) -> Self {
@@ -53,23 +48,22 @@ where
 
 impl<T, const P: usize> PDF<T, P> for &PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Float + RealField + Scalar,
+    StandardNormal: Distribution<T>,
 {
     fn relative_density(&self, x: &SVectorView<T, P>) -> T {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
 
-        Float::exp(-0.5.as_() * value)
+        Float::exp(T::from_f64(-0.5).unwrap() * value)
     }
 
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
-        let normal = Normal::new(0.0, 1.0).unwrap();
+        let normal = Normal::new(T::zero(), T::one()).unwrap();
 
         let mut proposal = self.mean
             + self.covmat.cholesky_ltm()
-                * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal).as_()));
+                * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
@@ -77,7 +71,7 @@ where
         while !self.validate_sample(&proposal.as_view()) {
             proposal = self.mean
                 + self.covmat.cholesky_ltm()
-                    * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal).as_()));
+                    * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
@@ -99,23 +93,24 @@ where
 
 impl<T, const P: usize> PDFExactDensity<T, P> for &PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Float + RealField + Scalar,
+    StandardNormal: Distribution<T>,
 {
     fn exact_density(&self, x: &SVectorView<T, P>) -> T {
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
 
-        Float::exp(-0.5.as_() * value)
-            / Float::sqrt(Float::powi(2.0.as_() * T::pi(), P as i32) * self.covmat.determinant())
+        Float::exp(T::from_f64(-0.5).unwrap() * value)
+            / Float::sqrt(
+                Float::powi(T::from_f64(2.0).unwrap() * T::pi(), P as i32)
+                    * self.covmat.determinant(),
+            )
     }
 }
 
 impl<T, const P: usize> Add<&SVector<T, P>> for PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     type Output = PDFMultivariate<T, P>;
 
@@ -130,8 +125,7 @@ where
 
 impl<T, const P: usize> AddAssign<&SVector<T, P>> for PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     fn add_assign(&mut self, rhs: &SVector<T, P>) {
         self.mean += rhs
@@ -140,9 +134,7 @@ where
 
 impl<T, const P: usize> Mul<T> for PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     type Output = PDFMultivariate<T, P>;
 
@@ -181,9 +173,7 @@ impl<const P: usize> Mul<PDFMultivariate<f64, P>> for f64 {
 
 impl<T, const P: usize> MulAssign<T> for PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     fn mul_assign(&mut self, rhs: T) {
         self.covmat *= rhs;
@@ -192,8 +182,7 @@ where
 
 impl<T, const P: usize> Sub<&SVector<T, P>> for PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     type Output = PDFMultivariate<T, P>;
 
@@ -208,8 +197,7 @@ where
 
 impl<T, const P: usize> SubAssign<&SVector<T, P>> for PDFMultivariate<T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     fn sub_assign(&mut self, rhs: &SVector<T, P>) {
         self.mean -= rhs

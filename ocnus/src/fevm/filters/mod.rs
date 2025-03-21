@@ -1,10 +1,10 @@
 //! Particle filters (or sequential Monte-Carlo algorithms).
 
 mod abc;
-// mod boot;
+mod sir;
 
 pub use abc::*;
-// pub use boot::*;
+pub use sir::*;
 
 use crate::{
     OFloat, OState,

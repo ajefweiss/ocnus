@@ -1,47 +1,48 @@
 use crate::{
-    ScObsSeries,
+    OFloat, OState,
     fevm::{
-        FEVMData, FEVMError,
+        FEVMData, FEVMError, ParticleFilterError,
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
-        noise::{FEVMNoiseMultivariate, FEVMNoiseNull},
     },
-    obser::ObserVec,
+    obser::{ObserVec, ScObsSeries},
     stats::{PDF, PDFParticles},
 };
-use core::f64;
 use itertools::Itertools;
 use log::{error, info};
 use nalgebra::DMatrix;
+use num_traits::{AsPrimitive, Float};
+use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::time::Instant;
-
-use super::ParticleFilterError;
 
 /// A trait that enables the use of a bootstrap particle filter method
 /// for a [`FEVM`].
-pub trait BSParticleFilter<const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<P, N, FS, GS>
+pub trait SIRParticleFilter<T, const P: usize, const N: usize, FS, GS>:
+    ParticleFilter<T, P, N, FS, GS>
 where
-    FS: OState
-    GS: OState
+    T: OFloat,
+    FS: OState,
+    GS: OState,
+    f64: AsPrimitive<T>,
+    usize: AsPrimitive<T>,
+    StandardNormal: Distribution<T>,
 {
     /// Basic bootstrap filter (single iteration) with multivariate likelihood.
-    fn bootpf_run(
+    fn sirpf_run(
         &self,
-        series: &ScObsSeries<ObserVec<N>>,
-        fevmd: &FEVMData<P, FS, GS>,
+        series: &ScObsSeries<T, ObserVec<T, N>>,
+        fevmd: &FEVMData<T, P, FS, GS>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
-        settings: &mut ParticleFilterSettings<N, FEVMNoiseMultivariate>,
-    ) -> Result<ParticleFilterResults<P, N, FS, GS>, FEVMError> {
+        settings: &mut ParticleFilterSettings<T, N>,
+    ) -> Result<ParticleFilterResults<T, P, N, FS, GS>, FEVMError<T>> {
         let start = Instant::now();
 
-        let mut target_data = FEVMData::<P, FS, GS>::new(ensemble_size);
-        let mut target_output = DMatrix::<ObserVec<N>>::zeros(series.len(), ensemble_size);
+        let mut target_data = FEVMData::new(ensemble_size);
+        let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
 
-        let mut temp_data = FEVMData::<P, FS, GS>::new(sim_ensemble_size);
-        let mut temp_output = DMatrix::<ObserVec<N>>::zeros(series.len(), sim_ensemble_size);
+        let mut temp_data = FEVMData::new(sim_ensemble_size);
+        let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle PDF from input and multiply by the exploration factor.
         let density_old = PDFParticles::from_particles(
@@ -57,12 +58,7 @@ where
             settings.rseed + 29,
         )?;
 
-        let flags = self.fevm_simulate(
-            series,
-            &mut temp_data,
-            &mut temp_output,
-            None::<(&FEVMNoiseNull, u64)>,
-        )?;
+        let flags = self.fevm_simulate(series, &mut temp_data, &mut temp_output, None)?;
 
         if flags.iter().map(|flag| *flag as usize).sum::<usize>() < ensemble_size {
             error!(
@@ -84,40 +80,44 @@ where
                     .iter_mut()
                     .map(|(out, flag)| {
                         if **flag {
-                            settings.noise.mvlh(out.as_slice(), series)
+                            settings.noise.likelihood(out, series)
                         } else {
-                            f64::NEG_INFINITY
+                            T::neg_infinity()
                         }
                     })
-                    .collect::<Vec<f64>>()
+                    .collect::<Vec<T>>()
             })
             .flatten()
-            .collect::<Vec<f64>>();
+            .collect::<Vec<T>>();
 
-        let lh_max = *likelihoods.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
+        let lh_max = *likelihoods
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
 
         let mut weights = likelihoods
             .iter()
-            .map(|lh| (lh - lh_max).exp())
-            .collect::<Vec<f64>>();
+            .map(|lh| Float::exp(*lh - lh_max))
+            .collect::<Vec<T>>();
 
         weights
             .par_iter_mut()
             .zip(temp_data.params.par_column_iter())
             .for_each(|(weight, params)| *weight *= self.model_prior().relative_density(&params));
 
-        let weights_total = weights.iter().sum::<f64>();
+        let weights_total = weights.iter().sum::<T>();
 
         weights.iter_mut().for_each(|w| *w /= weights_total);
 
         // Create a Particle PDF from the temporary simulations.
-        let density_new: PDFParticles<'_, P> = PDFParticles::from_particles(
+        let density_new = PDFParticles::from_particles(
             temp_data.params.as_view(),
             self.model_prior().valid_range(),
             &weights,
         )?;
 
-        let effective_sample_size = 1.0 / weights.iter().map(|v| v.powi(2)).sum::<f64>();
+        let effective_sample_size =
+            T::one() / weights.iter().map(|v| Float::powi(*v, 2)).sum::<T>();
 
         self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
 
@@ -128,17 +128,12 @@ where
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
             .dedup()
             .copied()
-            .collect::<Vec<f64>>()
+            .collect::<Vec<T>>()
             .len();
 
-        self.fevm_simulate(
-            series,
-            &mut target_data,
-            &mut target_output,
-            None::<(&FEVMNoiseNull, u64)>,
-        )?;
+        self.fevm_simulate(series, &mut target_data, &mut target_output, None)?;
 
-        target_data.weights = vec![1.0 / ensemble_size as f64; ensemble_size];
+        target_data.weights = vec![T::one() / ensemble_size.as_(); ensemble_size];
 
         info!(
             "bootpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",

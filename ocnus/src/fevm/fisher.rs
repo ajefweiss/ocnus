@@ -17,12 +17,12 @@ T: OFloat,
     GS: OState, f64: AsPrimitive<T>, usize: AsPrimitive<T>,  Self: Sync,
     StandardNormal: Distribution<T>,
 {
-    /// Compute the Fisher information matrix (FIM) for an array of model parameters using an auto-correlation function `acf`.
+    /// Compute the Fisher information matrix (FIM) for an array of model parameters using an auto-correlation function `acfunc`.
     fn fischer_information_matrix<C>(
         &self,
         series: &ScObsSeries<T,ObserVec<T,N>>,
         fevmd: &FEVMData<T,P, FS, GS>,
-        acf: &C,
+        acfunc: &C,
     ) -> Result<Vec<SMatrix<T, P, P>>, FEVMError<T>> 
       where 
       C:Fn(T) -> T + Sync {
@@ -128,7 +128,7 @@ T: OFloat,
                                 );
 
                                 let coviter = (0..valid_indices.len()).zip(series).filter_map(| (i,scobs_i)| if valid_indices[i] {Some(
-                                (0..valid_indices.len()).zip(series).filter_map(|(j, scobs_j)| if valid_indices[j] {Some(acf(Float::abs(*scobs_i.timestamp() - *scobs_j.timestamp())))} else {None} ))} else {None}).flatten();
+                                (0..valid_indices.len()).zip(series).filter_map(|(j, scobs_j)| if valid_indices[j] {Some(acfunc(Float::abs(*scobs_i.timestamp() - *scobs_j.timestamp())))} else {None} ))} else {None}).flatten();
                               
                          
                                 let covariance = CovMatrix::from_matrix(&DMatrix::<T>::from_iterator(obs_norm_a, obs_norm_b,coviter).as_view()).unwrap();

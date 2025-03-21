@@ -1,7 +1,7 @@
 use crate::{
     OFloat, OState,
     fevm::{
-        FEVMData, FEVMError, FEVMNoise, ParticleFilterError,
+        FEVMData, FEVMError, ParticleFilterError,
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
     },
     obser::{ObserVec, ScObsSeries},

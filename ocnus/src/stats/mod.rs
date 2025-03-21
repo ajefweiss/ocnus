@@ -12,7 +12,6 @@ pub use mvpdf::*;
 pub use ptpdf::*;
 pub use uvpdf::*;
 
-use crate::OFloat;
 use itertools::zip_eq;
 use nalgebra::{DMatrix, SVector, SVectorView};
 use rand::Rng;
@@ -37,7 +36,7 @@ pub enum StatsError<T> {
 /// A trait that must be implemented for any type that acts as a probability density function.
 pub trait PDF<T, const P: usize>: Debug
 where
-    T: OFloat,
+    T: PartialOrd,
     Self: Sync,
 {
     /// Estimates the relative density  at a specific position `x`.
@@ -63,7 +62,7 @@ where
 /// A trait that provides a function that calculates or estimates the exact density.
 pub trait PDFExactDensity<T, const P: usize>: PDF<T, P>
 where
-    T: OFloat,
+    T: PartialOrd,
 {
     /// Calculates or estimates the exact density  at a specific position `x`.
     fn exact_density(&self, x: &SVectorView<T, P>) -> T;

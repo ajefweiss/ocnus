@@ -1,23 +1,21 @@
-use crate::{
-    OFloat,
-    stats::{CovMatrix, PDF, StatsError},
-};
+use crate::stats::{CovMatrix, PDF, StatsError};
 use core::panic;
 use log::warn;
-use nalgebra::{Const, Dyn, MatrixView, SVector, SVectorView};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::{Const, Dyn, MatrixView, RealField, SVector, SVectorView, Scalar};
+use num_traits::Float;
 use rand::Rng;
-use rand_distr::{Normal, Uniform};
+use rand_distr::{Distribution, Normal, StandardNormal, Uniform, uniform::SampleUniform};
 use rayon::prelude::*;
-use std::ops::{Mul, MulAssign};
+use std::{
+    iter::Sum,
+    ops::{Mul, MulAssign},
+};
 
 /// A PDF defined by references to an ensemble of particles.
 #[derive(Debug)]
 pub struct PDFParticles<'a, T, const P: usize>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Scalar,
 {
     /// A [`CovMatrix`] that describes an estimate of the underlying particle PDF.
     covmat: CovMatrix<T>,
@@ -34,9 +32,7 @@ where
 
 impl<'a, T, const P: usize> PDFParticles<'a, T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + SampleUniform + Scalar + Sum<T> + for<'x> Sum<&'x T>,
 {
     /// Access the covariance matrix.
     pub fn covmat(&self) -> &CovMatrix<T> {
@@ -76,12 +72,12 @@ where
 
     /// Resample from existing particles.
     pub fn resample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
-        let uniform = Uniform::new(0.0, 1.0).unwrap();
+        let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
         let offset = {
             let pdx = {
                 // Select particle index by weight.
-                let wdx: T = rng.sample(uniform).as_();
+                let wdx: T = rng.sample(uniform);
 
                 // Here we abuse try_fold to return particle index early wrapped within Err().
                 match self
@@ -115,22 +111,21 @@ where
 
 impl<T, const P: usize> PDF<T, P> for &PDFParticles<'_, T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Float + RealField + SampleUniform + Scalar,
+    StandardNormal: Distribution<T>,
 {
     fn relative_density(&self, _x: &SVectorView<T, P>) -> T {
         unimplemented!()
     }
 
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
-        let normal = Normal::new(0.0, 1.0).unwrap();
-        let uniform = Uniform::new(0.0, 1.0).unwrap();
+        let normal = Normal::new(T::zero(), T::one()).unwrap();
+        let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
         let offset = {
             let pdx = {
                 // Select particle index by weight.
-                let wdx = rng.sample(uniform).as_();
+                let wdx = rng.sample(uniform);
 
                 // Here we abuse try_fold to return particle index early wrapped within Err().
                 match self
@@ -155,7 +150,7 @@ where
 
         let mut proposal = offset
             + self.covmat.cholesky_ltm()
-                * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal).as_()));
+                * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
@@ -163,7 +158,7 @@ where
         while !self.validate_sample(&proposal.as_view()) {
             proposal = offset
                 + self.covmat.cholesky_ltm()
-                    * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal).as_()));
+                    * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
@@ -187,9 +182,7 @@ where
 
 impl<'a, T, const P: usize> Mul<T> for PDFParticles<'a, T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + Scalar,
 {
     type Output = PDFParticles<'a, T, P>;
 
@@ -231,9 +224,7 @@ impl<'a, const P: usize> Mul<PDFParticles<'a, f64, P>> for f64 {
 
 impl<T, const P: usize> MulAssign<T> for PDFParticles<'_, T, P>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField,
 {
     fn mul_assign(&mut self, rhs: T) {
         self.covmat *= rhs;
@@ -247,10 +238,8 @@ pub fn ptpdf_importance_weighting<T, D, const P: usize>(
     prior: &D,
 ) -> Vec<T>
 where
+    T: Copy + Float + RealField + SampleUniform + Sum<T> + for<'x> Sum<&'x T>,
     D: PDF<T, P>,
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
 {
     let covmat_inv = ptpdf_from.covmat().inverse_matrix();
 

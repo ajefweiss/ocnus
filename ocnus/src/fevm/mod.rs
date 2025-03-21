@@ -1,31 +1,32 @@
 //! Implementations of forward ensemble vector models (FEVMs).
 
-// mod cylm;
-pub mod filters;
-mod fisher;
+// // mod cylm;
+// pub mod filters;
+// mod fisher;
 
-// pub use cylm::*;
-pub use fisher::*;
-use rand_distr::{Distribution, Normal, StandardNormal};
+// // pub use cylm::*;
+// pub use fisher::*;
+// use rand_distr::{Distribution, Normal, StandardNormal};
 
 use crate::{
-    OFloat, OState,
     geom::OcnusGeometry,
     obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
     stats::{CovMatrix, PDF, PDFParticles, StatsError},
 };
-use filters::ParticleFilterError;
+// use filters::ParticleFilterError;
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{Const, DMatrix, DVector, Dyn, Matrix, Scalar};
-use nalgebra::{SVectorView, VecStorage};
-use num_traits::AsPrimitive;
+use nalgebra::{
+    Const, DMatrix, DVector, DVectorView, Dyn, Matrix, RealField, SVectorView, Scalar, VecStorage,
+};
+use num_traits::Float;
 use rand::{Rng, SeedableRng};
+use rand_distr::{Distribution, Normal, StandardNormal, uniform::SampleUniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
-use std::time::Instant;
+use std::{fmt::Display, io::Write, iter::Sum};
+use std::{ops::AddAssign, time::Instant};
 use thiserror::Error;
 
 /// A data structure that stores the parameters, states and random seed for a FEVM.
@@ -49,11 +50,10 @@ where
 
 impl<T, const P: usize, FS, GS> FEVMData<T, P, FS, GS>
 where
-    T: OFloat,
+    T: Clone + RealField + Scalar,
     FS: Clone + Default,
     GS: Clone + Default,
     Self: Serialize,
-    usize: AsPrimitive<T>,
 {
     /// Create a new [`FEVMData`] filled with zeros.
     pub fn new(size: usize) -> Self {
@@ -61,7 +61,7 @@ where
             params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::zeros(size),
             fevm_states: vec![FS::default(); size],
             geom_states: vec![GS::default(); size],
-            weights: vec![T::one() / size.as_(); size],
+            weights: vec![T::one() / T::from_usize(size).unwrap(); size],
         }
     }
 
@@ -99,8 +99,8 @@ pub enum FEVMError<T> {
     NegativeTimeStep(T),
     #[error("observation cannot be a vector with any NaN valus")]
     ObservationNaN,
-    #[error("particle filter error")]
-    ParticleFilter(#[from] ParticleFilterError<T>),
+    // #[error("particle filter error")]
+    // ParticleFilter(#[from] ParticleFilterError<T>),
     #[error("stats error")]
     Stats(#[from] StatsError<T>),
 }
@@ -108,12 +108,10 @@ pub enum FEVMError<T> {
 /// The trait that must be implemented for any FEVM (forward ensemble vector model) with an N-dimensional vector observable.
 pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusGeometry<T, P, GS>
 where
-    T: OFloat,
-    FS: OState,
-    GS: OState,
+    T: Copy + for<'x> Deserialize<'x> + Float + RealField + SampleUniform + Scalar + Serialize,
+    FS: Send,
+    GS: Send,
     Self: Sync,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
     StandardNormal: Distribution<T>,
 {
     /// The rayon chunk size that is used for any parallel iterators.
@@ -173,8 +171,8 @@ where
 
         debug!(
             "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -188,7 +186,10 @@ where
         fevmd: &mut FEVMData<T, P, FS, GS>,
         pdf: &PDFParticles<T, P>,
         rseed: u64,
-    ) -> Result<(), FEVMError<T>> {
+    ) -> Result<(), FEVMError<T>>
+    where
+        T: Sum<T> + for<'x> Sum<&'x T>,
+    {
         let start = Instant::now();
 
         fevmd
@@ -218,8 +219,8 @@ where
 
         debug!(
             "fevm_initialize: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -259,8 +260,8 @@ where
 
         debug!(
             "fevm_initialize_params_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -294,8 +295,8 @@ where
 
         debug!(
             "fevm_initialize_states_only: {:2.2}M evaluations in {:.2} sec",
-            fevmd.params.ncols().as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            fevmd.params.ncols() as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         Ok(())
@@ -319,7 +320,10 @@ where
         fevmd: &mut FEVMData<T, P, FS, GS>,
         output: &mut DMatrix<ObserVec<T, N>>,
         opt_noise: Option<&mut FEVMNoise<T>>,
-    ) -> Result<Vec<bool>, FEVMError<T>> {
+    ) -> Result<Vec<bool>, FEVMError<T>>
+    where
+        T: for<'x> AddAssign<&'x T> + Default + Send + Sync,
+    {
         let start = Instant::now();
         let mut timer = T::zero();
 
@@ -385,8 +389,8 @@ where
 
         debug!(
             "fevm_simulate: {:2.2}M evaluations in {:.2} sec",
-            (series.len() * fevmd.params.ncols()).as_() / 1e6.as_(),
-            (start.elapsed().as_millis() as f64 / 1e3).as_()
+            (series.len() * fevmd.params.ncols()) as f64 / 1e6,
+            start.elapsed().as_millis() as f64 / 1e3
         );
 
         let mut valid_indices_flags = vec![false; fevmd.params.ncols()];
@@ -434,7 +438,7 @@ where
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum FEVMNoise<T>
 where
-    T: Clone + Scalar,
+    T: Copy + Scalar,
 {
     Gaussian(T, u64),
     Multivariate(CovMatrix<T>, u64),
@@ -442,10 +446,8 @@ where
 
 impl<T> FEVMNoise<T>
 where
-    T: OFloat,
+    T: Copy + for<'x> Deserialize<'x> + Display + Float + RealField + Scalar + Serialize,
     StandardNormal: Distribution<T>,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
 {
     /// Generate a random noise time-series.
     pub fn generate_noise<const N: usize>(
@@ -504,11 +506,40 @@ where
             }
         }
     }
+
+    /// Compute the likelihood for an observation `x` with expected mean `mu`.
+    pub fn likelihood<const N: usize>(
+        &self,
+        x: &DVectorView<ObserVec<T, N>>,
+        mu: &ScObsSeries<T, ObserVec<T, N>>,
+    ) -> T {
+        let x_flat = x
+            .iter()
+            .flat_map(|x_obs| x_obs.iter().cloned().collect::<Vec<T>>())
+            .collect::<Vec<T>>();
+
+        let mu_flat = mu
+            .into_iter()
+            .flat_map(|mu_scobs| mu_scobs.observation().iter().cloned().collect::<Vec<T>>())
+            .collect::<Vec<T>>();
+
+        match self {
+            FEVMNoise::Gaussian(std_dev, ..) => {
+                let covmat = CovMatrix::from_matrix(
+                    &DMatrix::from_diagonal_element(x.len(), x.len(), *std_dev).as_view(),
+                )
+                .unwrap();
+
+                covmat.multivariate_likelihood(x_flat, mu_flat)
+            }
+            FEVMNoise::Multivariate(covmat, ..) => covmat.multivariate_likelihood(x_flat, mu_flat),
+        }
+    }
 }
 
 impl<T> Default for FEVMNoise<T>
 where
-    T: OFloat,
+    T: Copy + RealField,
 {
     fn default() -> Self {
         FEVMNoise::Gaussian(T::one(), 0)

@@ -1,11 +1,10 @@
-use crate::{
-    OFloat,
-    stats::{PDF, StatsError},
-};
+use std::fmt::Debug;
+
+use crate::stats::{PDF, StatsError};
 use derive_more::{Deref, DerefMut, IntoIterator};
 use log::warn;
-use nalgebra::{MatrixView, SVector, SVectorView, U1};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::{MatrixView, RealField, SVector, SVectorView, U1};
+use num_traits::{Float, FromPrimitive};
 use rand::Rng;
 use rand_distr::{Distribution, Normal, StandardNormal, Uniform, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
@@ -18,11 +17,11 @@ pub struct PDFUnivariates<T, const P: usize>(
     [PDFUnivariate<T>; P],
 )
 where
-    T: OFloat;
+    T: for<'x> Deserialize<'x> + Serialize;
 
 impl<T, const P: usize> PDFUnivariates<T, P>
 where
-    T: OFloat,
+    T: for<'x> Deserialize<'x> + Serialize,
 {
     /// Create a new [`PDFUnivariates`].
     pub fn new(uvpdfs: [PDFUnivariate<T>; P]) -> Self {
@@ -32,10 +31,8 @@ where
 
 impl<T, const P: usize> PDF<T, P> for &PDFUnivariates<T, P>
 where
-    T: OFloat + SampleUniform,
+    T: Copy + for<'x> Deserialize<'x> + Float + PartialOrd + RealField + SampleUniform + Serialize,
     StandardNormal: Distribution<T>,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
 {
     fn relative_density(&self, x: &SVectorView<T, P>) -> T {
         let mut rlh = T::one();
@@ -87,10 +84,8 @@ pub enum PDFUnivariate<T> {
 
 impl<T> PDF<T, 1> for &PDFUnivariate<T>
 where
-    T: OFloat + SampleUniform,
+    T: Float + RealField + SampleUniform,
     StandardNormal: Distribution<T>,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
 {
     fn relative_density(&self, x: &MatrixView<T, U1, U1>) -> T {
         match self {
@@ -131,12 +126,7 @@ pub struct PDFConstant<T> {
     constant: T,
 }
 
-impl<T> PDFConstant<T>
-where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
-{
+impl<T> PDFConstant<T> {
     /// Create a new [`PDFConstant`].
     pub fn new(constant: T) -> Self {
         Self { constant }
@@ -150,9 +140,7 @@ where
 
 impl<T> PDF<T, 1> for &PDFConstant<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Debug + PartialOrd + RealField + Sync,
 {
     fn relative_density(&self, _x: &MatrixView<T, U1, U1>) -> T {
         T::one()
@@ -175,15 +163,16 @@ pub struct PDFCosine<T> {
 
 impl<T> PDFCosine<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + PartialOrd,
 {
     /// Create a new [`PDFCosine`].
     pub fn new(range: (T, T)) -> Result<Self, StatsError<T>> {
         let (minv, maxv) = range;
 
-        if (minv < -T::pi() / 2.0.as_()) || (maxv > T::pi() / 2.0.as_()) || (minv > maxv) {
+        if (minv < -T::pi() / T::from_f64(2.0).unwrap())
+            || (maxv > T::pi() / T::from_f64(2.0).unwrap())
+            || (minv > maxv)
+        {
             return Err(StatsError::InvalidRange {
                 name: "PDFCosine",
                 maxv,
@@ -202,9 +191,7 @@ where
 
 impl<T> PDF<T, 1> for &PDFCosine<T>
 where
-    T: OFloat + SampleUniform,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + Float + RealField + SampleUniform,
 {
     fn relative_density(&self, x: &MatrixView<T, U1, U1>) -> T {
         Float::cos(x[0])
@@ -235,9 +222,7 @@ pub struct PDFNormal<T> {
 
 impl<T> PDFNormal<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + PartialOrd,
 {
     /// Create a new [`PDFNormal`].
     pub fn new(mean: T, std_dev: T, range: (T, T)) -> Result<Self, StatsError<T>> {
@@ -270,12 +255,15 @@ where
 
 impl<T> PDF<T, 1> for &PDFNormal<T>
 where
-    T: OFloat,
+    T: Copy + Float + FromPrimitive + PartialOrd + RealField,
     StandardNormal: Distribution<T>,
-    f64: AsPrimitive<T>,
 {
     fn relative_density(&self, x: &MatrixView<T, U1, U1>) -> T {
-        Float::exp(Float::powi(x[0] - self.mean, 2) / 2.0.as_() / Float::powi(self.std_dev, 2))
+        Float::exp(
+            Float::powi(x[0] - self.mean, 2)
+                / T::from_f64(2.0).unwrap()
+                / Float::powi(self.std_dev, 2),
+        )
     }
 
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, 1>, StatsError<T>> {
@@ -319,9 +307,7 @@ pub struct PDFReciprocal<T> {
 
 impl<T> PDFReciprocal<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: Copy + RealField + SampleUniform,
 {
     /// Create a new [`PDFReciprocal`].
     pub fn new(range: (T, T)) -> Result<Self, StatsError<T>> {
@@ -346,13 +332,12 @@ where
 
 impl<T> PDF<T, 1> for &PDFReciprocal<T>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
+    T: Copy + RealField + SampleUniform,
 {
     fn relative_density(&self, x: &MatrixView<T, U1, U1>) -> T {
         let (minv, maxv) = self.range;
 
-        T::one() / (x[0] * (Float::ln(maxv) - Float::ln(minv)))
+        T::one() / (x[0] * (maxv.ln() - minv.ln()))
     }
 
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, 1>, StatsError<T>> {
@@ -368,10 +353,10 @@ where
 
         // Inverse transform sampling.
         let ratio = maxv / minv;
-        let cdf_inv = |u: T| minv * Float::exp(Float::ln(ratio) * u);
-        let uniform = Uniform::new_inclusive(0.0, 1.0).unwrap();
+        let cdf_inv = |u: T| minv * (ratio.ln() * u).exp();
+        let uniform = Uniform::new_inclusive(T::zero(), T::one()).unwrap();
 
-        Ok(SVector::from([cdf_inv(rng.sample(uniform).as_())]))
+        Ok(SVector::from([cdf_inv(rng.sample(uniform))]))
     }
 
     fn valid_range(&self) -> [(T, T); 1] {
@@ -387,7 +372,7 @@ pub struct PDFUniform<T> {
 
 impl<T> PDFUniform<T>
 where
-    T: OFloat,
+    T: Copy + PartialOrd + RealField + SampleUniform,
 {
     /// Create a new [`PDFUniform`].
     pub fn new(range: (T, T)) -> Result<Self, StatsError<T>> {
@@ -412,7 +397,7 @@ where
 
 impl<T> PDF<T, 1> for &PDFUniform<T>
 where
-    T: OFloat + SampleUniform,
+    T: Copy + PartialOrd + RealField + SampleUniform,
 {
     fn relative_density(&self, _x: &MatrixView<T, U1, U1>) -> T {
         T::one()
