@@ -7,7 +7,6 @@ pub use abc::*;
 pub use sir::*;
 
 use crate::{
-    OFloat, OState,
     fevm::{FEVM, FEVMData, FEVMError, FEVMNoise},
     obser::{ObserVec, ScObsSeries},
     stats::PDFUnivariates,
@@ -15,12 +14,12 @@ use crate::{
 use derive_builder::Builder;
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{DMatrix, DVectorView, Dyn, U1};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::{DMatrix, DVectorView, Dyn, RealField, Scalar, U1};
+use num_traits::{AsPrimitive, Float, FromPrimitive};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{io::Write, time::Instant};
+use std::{io::Write, iter::Sum, ops::AddAssign, time::Instant};
 use thiserror::Error;
 
 /// Errors associated with particle filters.
@@ -40,21 +39,19 @@ pub enum ParticleFilterError<T> {
 
 /// A data structure that holds particle filter diagnostics and settings.
 #[derive(Builder, Debug, Default, Deserialize, Serialize)]
-#[serde(bound = "T: OFloat")]
 pub struct ParticleFilterSettings<T, const N: usize>
 where
-    T: OFloat,
-    f64: AsPrimitive<T>,
+    T: Copy + FromPrimitive + RealField + Scalar,
 {
     /// Percentange of effective samples required for each iteration.
-    #[builder(default = 0.175_f64.as_())]
+    #[builder(default = T::from_f64(0.175).unwrap())]
     pub effective_sample_size_threshold_factor: T,
 
     /// Multiplier for the transition kernel (covariance matrix),
     /// a higher value leads to a better exploration of the parameter
     /// space but slower convergence. The "optimal" value is 2.0
     /// (see Filippi et al. 2013).
-    #[builder(default = 2.0_f64.as_())]
+    #[builder(default = T::from_f64(2.0).unwrap())]
     pub exploration_factor: T,
 
     /// Iteration counter,
@@ -69,7 +66,7 @@ where
     pub rseed: u64,
 
     /// Time limit (in seconds).
-    #[builder(default = 5.0_f64.as_())]
+    #[builder(default = T::from_f64(5.0).unwrap())]
     pub time_limit: T,
 
     /// Total simulation runs counter,
@@ -77,16 +74,20 @@ where
     pub truns: usize,
 
     /// Quantile evaluations.
-    #[builder(default = [0.25.as_(), 0.5.as_(), 0.75.as_()])]
+    #[builder(default = [T::from_f64(0.25).unwrap(),T::from_f64(0.5).unwrap(),T::from_f64(0.75).unwrap()])]
     pub quantiles: [T; 3],
 }
 
 /// A data structure holding the results of any particle filtering method.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound = "FS: for<'x> Deserialize<'x> + Serialize, GS: for<'x> Deserialize<'x> + Serialize")]
+#[serde(bound = "
+    T: for<'x> Deserialize<'x> + Serialize, 
+    FS: for<'x> Deserialize<'x> + Serialize, 
+    GS: for<'x> Deserialize<'x> + Serialize
+")]
 pub struct ParticleFilterResults<T, const P: usize, const N: usize, FS, GS>
 where
-    T: OFloat,
+    T: Clone + Float + Scalar,
 {
     /// [`FEVMData`] object.
     pub fevmd: FEVMData<T, P, FS, GS>,
@@ -103,7 +104,7 @@ where
 
 impl<T, const P: usize, const N: usize, FS, GS> ParticleFilterResults<T, P, N, FS, GS>
 where
-    T: OFloat,
+    T: Clone + Float + Scalar,
     Self: Serialize,
 {
     /// Write data to a file.
@@ -119,11 +120,9 @@ where
 /// A trait that enables the use of generic particle filter methods for a [`FEVM`].
 pub trait ParticleFilter<T, const P: usize, const N: usize, FS, GS>: FEVM<T, P, N, FS, GS>
 where
-    T: OFloat,
-    FS: OState,
-    GS: OState,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: AsPrimitive<usize> + Copy + Float + RealField + SampleUniform + Scalar + Serialize,
+    FS: Clone + Default + Serialize + Send,
+    GS: Clone + Default + Serialize + Send,
     StandardNormal: Distribution<T>,
 {
     /// Creates a new [`FEVMData`], optionally using filter (recommended).
@@ -139,7 +138,7 @@ where
     ) -> Result<ParticleFilterResults<T, P, N, FS, GS>, FEVMError<T>>
     where
         E: Fn(&DVectorView<ObserVec<T, N>>, &ScObsSeries<T, ObserVec<T, N>>) -> T + Send + Sync,
-        T: SampleUniform,
+        T: for<'x> AddAssign<&'x T> + Default + SampleUniform + Send + Sync,
         StandardNormal: Distribution<T>,
     {
         let start = Instant::now();
@@ -225,10 +224,11 @@ where
 
             iteration += 1;
 
-            if (start.elapsed().as_millis() as f64 / 1e3).as_() > settings.time_limit {
+            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap() > settings.time_limit
+            {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: (start.elapsed().as_millis() as f64 / 1e3).as_(),
+                        elapsed: T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
                         limit: settings.time_limit,
                     },
                 ));
@@ -243,12 +243,15 @@ where
                 .collect::<Vec<T>>();
 
             // Compute quantiles for logging purposes.
-            let eps_1 = filter_values_sorted[(ensemble_size.as_() * settings.quantiles[0]).as_()];
-            let eps_2 = filter_values_sorted[(ensemble_size.as_() * settings.quantiles[1]).as_()];
+            let eps_1 = filter_values_sorted
+                [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[0]).as_()];
+            let eps_2 = filter_values_sorted
+                [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[1]).as_()];
             let eps_3 = if settings.quantiles[2] >= T::one() {
                 filter_values_sorted[ensemble_size - 1]
             } else {
-                filter_values_sorted[(ensemble_size.as_() * settings.quantiles[2]).as_()]
+                filter_values_sorted
+                    [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[2]).as_()]
             };
 
             info!(
@@ -258,8 +261,9 @@ where
                 eps_1,
                 eps_2,
                 eps_3,
-                (iteration as usize * sim_ensemble_size * series.len()).as_() / 1e6.as_(),
-                (start.elapsed().as_millis() as f64 / 1e3).as_(),
+                T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
+                    .unwrap(),
+                T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
             );
 
             settings.rseed += 1;
@@ -270,8 +274,9 @@ where
                 "pf_initialize_data\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec",
                 0.0,
                 2.0,
-                (iteration as usize * sim_ensemble_size * series.len()).as_() / 1e6.as_(),
-                (start.elapsed().as_millis() as f64 / 1e3).as_(),
+                T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
+                    .unwrap(),
+                T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
             );
 
             settings.rseed += 1;
@@ -296,14 +301,13 @@ pub fn mean_square_filter<T, const N: usize>(
     series: &ScObsSeries<T, ObserVec<T, N>>,
 ) -> T
 where
-    T: OFloat,
-    usize: AsPrimitive<T>,
+    T: Default + Float + FromPrimitive + Scalar + Send + Sum + Sync,
 {
     out.into_iter()
         .zip(series)
         .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.observation()))
         .sum::<T>()
-        / series.count_observations().as_()
+        / T::from_usize(series.count_observations()).unwrap()
 }
 
 /// Root mean square error filter for particle filtering methods.
@@ -312,14 +316,13 @@ pub fn root_mean_square_filter<T, const N: usize>(
     series: &ScObsSeries<T, ObserVec<T, N>>,
 ) -> T
 where
-    T: OFloat,
-    usize: AsPrimitive<T>,
+    T: Default + Float + FromPrimitive + Scalar + Send + Sum + Sync,
 {
     Float::sqrt(
         out.into_iter()
             .zip(series)
             .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.observation()))
             .sum::<T>()
-            / series.count_observations().as_(),
+            / T::from_usize(series.count_observations()).unwrap(),
     )
 }

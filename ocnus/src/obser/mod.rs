@@ -6,10 +6,8 @@ mod vector;
 pub use scobs::*;
 pub use vector::ObserVec;
 
-use serde::Serialize;
-
 /// A trait that must be implemented for any type that acts as a model observable.
-pub trait OcnusObser: Clone + Default + Send + Serialize + Sync {
+pub trait OcnusObser: Clone + Default + Send + Sync {
     /// Returns `true` if the observation is considered valid.
     fn is_valid(&self) -> bool;
 }

@@ -1,20 +1,22 @@
 
-use crate::{OFloat, OState,fevm::{FEVMData,filters::ParticleFilter, FEVMError}, obser::{ScObsSeries,ObserVec},stats::CovMatrix};
-use nalgebra::{Const, DMatrix, Dyn, Matrix, SMatrix, VecStorage};
-use num_traits::{AsPrimitive, Float};
-use rand_distr::{Distribution, StandardNormal};
+use std::{iter::Sum, ops::AddAssign};
+
+use crate::{fevm::{FEVMData, FEVMError, FEVM}, obser::{ScObsSeries,ObserVec},stats::CovMatrix};
+use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SMatrix, Scalar, VecStorage};
+use num_traits::{FromPrimitive, Float};
+use rand_distr::{uniform::SampleUniform, Distribution, StandardNormal};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 
 
-/// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`ForwardEnsembleVectorModel`].
-pub trait FisherInformation<T,const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<T,P, N, FS, GS>
-where
-T: OFloat,
-   
-    FS: OState,
-    GS: OState, f64: AsPrimitive<T>, usize: AsPrimitive<T>,  Self: Sync,
+/// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`FEVM`].
+pub trait FisherInformation<T,const P: usize, const N: usize, FS, GS>: FEVM<T, P, N, FS, GS>
+where   
+T: for<'x> AddAssign<&'x T> + Copy + Default+ for<'x> Deserialize<'x> + Float + FromPrimitive + RealField + SampleUniform+Serialize + Scalar + Sum<T> ,
+   FS:Clone+ Default + Send,
+   GS:Clone+Default + Send,
+     Self: Sync,
     StandardNormal: Distribution<T>,
 {
     /// Compute the Fisher information matrix (FIM) for an array of model parameters using an auto-correlation function `acfunc`.
@@ -42,14 +44,14 @@ T: OFloat,
                         params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
                         fevm_states: vec![FS::default(); P],
                         geom_states: vec![GS::default(); P],
-                        weights: vec![T::one() / P.as_(); P],
+                        weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
                     let mut dam = FEVMData {
                         params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(&[*params_ref; P]),
                         fevm_states: vec![FS::default(); P],
                         geom_states: vec![GS::default(); P],
-                        weights: vec![T::one() / P.as_(); P],
+                        weights: vec![T::one() /  T::from_usize(P).unwrap(); P],
                     };
 
                     dap.params
@@ -91,14 +93,14 @@ T: OFloat,
                             if rdx <= cdx {
                                 
                                 let dmu_a = dap_output.row_iter().zip(dam_output.row_iter()).map(|(dap_col, dam_col)| {
-                                  (&dap_col[rdx] - &dam_col[rdx]) * (0.5.as_() / step_sizes[rdx]) 
+                                  (&dap_col[rdx] - &dam_col[rdx]) * (T::from_f64(0.5).unwrap() / step_sizes[rdx]) 
                                   
                                 }).collect::<Vec<ObserVec<T,N>>>();
 
                                 
 
                                 let dmu_b = dap_output.row_iter().zip(dam_output.row_iter()).map(|(dap_col, dam_col)| {
-                                    (&dap_col[cdx] - &dam_col[cdx]) * (0.5.as_() / step_sizes[cdx]) 
+                                    (&dap_col[cdx] - &dam_col[cdx]) * (T::from_f64(0.5).unwrap() / step_sizes[cdx]) 
                                 }).collect::<Vec<ObserVec<T,N>>>();
                   
                                 // Normalization procedure.

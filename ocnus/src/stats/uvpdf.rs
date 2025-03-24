@@ -14,15 +14,11 @@ use serde::{Deserialize, Serialize};
 pub struct PDFUnivariates<T, const P: usize>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
+    #[serde(bound = "T: for<'x> Deserialize<'x> + Serialize")]
     [PDFUnivariate<T>; P],
-)
-where
-    T: for<'x> Deserialize<'x> + Serialize;
+);
 
-impl<T, const P: usize> PDFUnivariates<T, P>
-where
-    T: for<'x> Deserialize<'x> + Serialize,
-{
+impl<T, const P: usize> PDFUnivariates<T, P> {
     /// Create a new [`PDFUnivariates`].
     pub fn new(uvpdfs: [PDFUnivariate<T>; P]) -> Self {
         Self(uvpdfs)
@@ -31,7 +27,7 @@ where
 
 impl<T, const P: usize> PDF<T, P> for &PDFUnivariates<T, P>
 where
-    T: Copy + for<'x> Deserialize<'x> + Float + PartialOrd + RealField + SampleUniform + Serialize,
+    T: Copy + Float + PartialOrd + RealField + SampleUniform,
     StandardNormal: Distribution<T>,
 {
     fn relative_density(&self, x: &SVectorView<T, P>) -> T {

@@ -4,7 +4,7 @@ use crate::obser::OcnusObser;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
 use nalgebra::SVector;
-use num_traits::{AsPrimitive, Float, Zero};
+use num_traits::{Float, FromPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Debug, Display, Formatter},
@@ -17,14 +17,13 @@ use std::{
 pub struct ObserVec<T, const N: usize>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
+    #[serde(bound = "T: for<'x> Deserialize<'x> + Serialize")]
     pub [T; N],
-)
-where
-    T: for<'x> Deserialize<'x> + Serialize;
+);
 
 impl<T, const N: usize> ObserVec<T, N>
 where
-    T: for<'x> Deserialize<'x> + Float + Serialize,
+    T: Float + FromPrimitive,
 {
     /// Returns true if any entry within the observation vector is `NaN`.
     pub fn any_nan(&self) -> bool {
@@ -43,11 +42,10 @@ where
     pub fn mean_square_error(&self, other: &Self) -> T
     where
         T: 'static + Copy + Debug + Sum,
-        usize: AsPrimitive<T>,
         Self: OcnusObser,
     {
         if self.is_valid() & other.is_valid() {
-            (self - other).sum_of_squares() / N.as_()
+            (self - other).sum_of_squares() / T::from_usize(N).unwrap()
         } else if !self.is_valid() & !other.is_valid() {
             T::zero()
         } else {
@@ -71,7 +69,7 @@ where
 
 impl<T, const N: usize> Add for ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     type Output = ObserVec<T, N>;
 
@@ -88,7 +86,7 @@ where
 
 impl<'a, T, const N: usize> Add<&'a ObserVec<T, N>> for &'a ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     type Output = ObserVec<T, N>;
 
@@ -105,7 +103,7 @@ where
 
 impl<T, const N: usize> AddAssign for ObserVec<T, N>
 where
-    T: for<'x> AddAssign<&'x T> + for<'x> Deserialize<'x> + Float + Serialize,
+    T: for<'x> AddAssign<&'x T> + Float,
 {
     fn add_assign(&mut self, rhs: Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += rhs);
@@ -114,7 +112,7 @@ where
 
 impl<T, const N: usize> Default for ObserVec<T, N>
 where
-    T: for<'x> Deserialize<'x> + Float + Serialize,
+    T: Float,
 {
     fn default() -> Self {
         ObserVec([T::nan(); N])
@@ -123,7 +121,7 @@ where
 
 impl<T> Display for ObserVec<T, 3>
 where
-    T: Display + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Display + Float,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{:.2} | {:.2} | {:.2}]", self[0], self[1], self[2])
@@ -132,7 +130,7 @@ where
 
 impl<T> Display for ObserVec<T, 4>
 where
-    T: Display + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Display + Float,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -145,7 +143,7 @@ where
 
 impl<T, const N: usize> From<SVector<T, N>> for ObserVec<T, N>
 where
-    T: for<'x> Deserialize<'x> + Float + Serialize,
+    T: Float,
 {
     fn from(value: SVector<T, N>) -> Self {
         ObserVec::from(value.data.0[0])
@@ -154,7 +152,7 @@ where
 
 impl<T, const N: usize> Mul<T> for ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     type Output = ObserVec<T, N>;
 
@@ -171,7 +169,7 @@ where
 
 impl<T, const N: usize> Mul<T> for &ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     type Output = ObserVec<T, N>;
 
@@ -244,7 +242,7 @@ impl<'a, const N: usize> Mul<&'a ObserVec<f64, N>> for f64 {
 
 impl<T, const N: usize> OcnusObser for ObserVec<T, N>
 where
-    T: Copy + Default + for<'x> Deserialize<'x> + Float + Send + Serialize + Sync,
+    T: Copy + Default + Float + FromPrimitive + Send + Sync,
 {
     fn is_valid(&self) -> bool {
         !self.any_nan()
@@ -253,7 +251,7 @@ where
 
 impl<T, const N: usize> PartialEq for ObserVec<T, N>
 where
-    T: for<'x> Deserialize<'x> + Float + Serialize,
+    T: Float,
 {
     fn eq(&self, other: &Self) -> bool {
         self.iter()
@@ -265,7 +263,7 @@ where
 
 impl<T, const N: usize> Sub for ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     type Output = ObserVec<T, N>;
 
@@ -282,7 +280,7 @@ where
 
 impl<T, const N: usize> SubAssign for ObserVec<T, N>
 where
-    T: for<'x> Deserialize<'x> + Float + Serialize + for<'x> SubAssign<&'x T>,
+    T: Float + for<'x> SubAssign<&'x T>,
 {
     fn sub_assign(&mut self, rhs: Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= rhs);
@@ -291,7 +289,7 @@ where
 
 impl<'a, T, const N: usize> Sub<&'a ObserVec<T, N>> for &'a ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     type Output = ObserVec<T, N>;
 
@@ -308,7 +306,7 @@ where
 
 impl<T, const N: usize> Zero for ObserVec<T, N>
 where
-    T: Debug + for<'x> Deserialize<'x> + Float + Serialize,
+    T: Debug + Float,
 {
     fn is_zero(&self) -> bool {
         self.0.iter().all(|value| value == &T::zero())

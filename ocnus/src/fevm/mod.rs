@@ -1,19 +1,18 @@
 //! Implementations of forward ensemble vector models (FEVMs).
 
 // // mod cylm;
-// pub mod filters;
-// mod fisher;
+pub mod filters;
+mod fisher;
 
 // // pub use cylm::*;
-// pub use fisher::*;
-// use rand_distr::{Distribution, Normal, StandardNormal};
+pub use fisher::*;
 
 use crate::{
     geom::OcnusGeometry,
     obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
     stats::{CovMatrix, PDF, PDFParticles, StatsError},
 };
-// use filters::ParticleFilterError;
+use filters::ParticleFilterError;
 use itertools::zip_eq;
 use log::debug;
 use nalgebra::{
@@ -99,8 +98,8 @@ pub enum FEVMError<T> {
     NegativeTimeStep(T),
     #[error("observation cannot be a vector with any NaN valus")]
     ObservationNaN,
-    // #[error("particle filter error")]
-    // ParticleFilter(#[from] ParticleFilterError<T>),
+    #[error("particle filter error")]
+    ParticleFilter(#[from] ParticleFilterError<T>),
     #[error("stats error")]
     Stats(#[from] StatsError<T>),
 }
@@ -108,7 +107,7 @@ pub enum FEVMError<T> {
 /// The trait that must be implemented for any FEVM (forward ensemble vector model) with an N-dimensional vector observable.
 pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusGeometry<T, P, GS>
 where
-    T: Copy + for<'x> Deserialize<'x> + Float + RealField + SampleUniform + Scalar + Serialize,
+    T: Copy + Float + RealField + SampleUniform + Scalar,
     FS: Send,
     GS: Send,
     Self: Sync,
@@ -446,7 +445,7 @@ where
 
 impl<T> FEVMNoise<T>
 where
-    T: Copy + for<'x> Deserialize<'x> + Display + Float + RealField + Scalar + Serialize,
+    T: Copy + Display + Float + RealField + Scalar,
     StandardNormal: Distribution<T>,
 {
     /// Generate a random noise time-series.

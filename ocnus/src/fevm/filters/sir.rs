@@ -1,30 +1,40 @@
 use crate::{
-    OFloat, OState,
     fevm::{
-        FEVMData, FEVMError, ParticleFilterError,
-        filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
+        FEVMData, FEVMError,
+        filters::{
+            ParticleFilter, ParticleFilterError, ParticleFilterResults, ParticleFilterSettings,
+        },
     },
     obser::{ObserVec, ScObsSeries},
     stats::{PDF, PDFParticles},
 };
 use itertools::Itertools;
 use log::{error, info};
-use nalgebra::DMatrix;
+use nalgebra::{DMatrix, RealField, Scalar};
 use num_traits::{AsPrimitive, Float};
-use rand_distr::{Distribution, StandardNormal};
+use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use std::time::Instant;
+use serde::Serialize;
+use std::{iter::Sum, ops::AddAssign, time::Instant};
 
 /// A trait that enables the use of a bootstrap particle filter method
-/// for a [`FEVM`].
+/// for a [`FEVM`](crate::fevm::FEVM).
 pub trait SIRParticleFilter<T, const P: usize, const N: usize, FS, GS>:
     ParticleFilter<T, P, N, FS, GS>
 where
-    T: OFloat,
-    FS: OState,
-    GS: OState,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: for<'x> AddAssign<&'x T>
+        + AsPrimitive<usize>
+        + Copy
+        + Default
+        + Float
+        + RealField
+        + SampleUniform
+        + Scalar
+        + Serialize
+        + Sum<T>
+        + for<'x> Sum<&'x T>,
+    FS: Clone + Default + Serialize + Send,
+    GS: Clone + Default + Serialize + Send,
     StandardNormal: Distribution<T>,
 {
     /// Basic bootstrap filter (single iteration) with multivariate likelihood.
@@ -133,7 +143,7 @@ where
 
         self.fevm_simulate(series, &mut target_data, &mut target_output, None)?;
 
-        target_data.weights = vec![T::one() / ensemble_size.as_(); ensemble_size];
+        target_data.weights = vec![T::one() / T::from_usize(ensemble_size).unwrap(); ensemble_size];
 
         info!(
             "bootpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",

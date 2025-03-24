@@ -1,5 +1,4 @@
 use crate::{
-    OFloat, OState,
     fevm::{
         FEVMData, FEVMError, ParticleFilterError,
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
@@ -9,11 +8,12 @@ use crate::{
 };
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{DMatrix, DVectorView, Dyn, U1};
+use nalgebra::{DMatrix, DVectorView, Dyn, RealField, Scalar, U1};
 use num_traits::{AsPrimitive, Float};
-use rand_distr::{Distribution, StandardNormal};
+use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use std::time::Instant;
+use serde::Serialize;
+use std::{iter::Sum, ops::AddAssign, time::Instant};
 
 /// ABC-SMC algorithm mode.
 #[derive(Clone, Debug)]
@@ -26,15 +26,23 @@ pub enum ABCParticleFilterMode<'a, T, E, const N: usize> {
 }
 
 /// A trait that enables the use of approximate Bayesian computation (ABC) particle filter methods
-/// for a [`FEVM`].
+/// for a [`FEVM`](crate::fevm::FEVM).
 pub trait ABCParticleFilter<T, const P: usize, const N: usize, FS, GS>:
     ParticleFilter<T, P, N, FS, GS>
 where
-    T: OFloat,
-    FS: OState,
-    GS: OState,
-    f64: AsPrimitive<T>,
-    usize: AsPrimitive<T>,
+    T: for<'x> AddAssign<&'x T>
+        + AsPrimitive<usize>
+        + Copy
+        + Default
+        + Float
+        + RealField
+        + SampleUniform
+        + Scalar
+        + Serialize
+        + Sum<T>
+        + for<'x> Sum<&'x T>,
+    FS: Clone + Default + Serialize + Send,
+    GS: Clone + Default + Serialize + Send,
     StandardNormal: Distribution<T>,
 {
     /// Basic ABC-SMC algorithm (single iteration) with fixed acceptance ratio.
@@ -86,7 +94,8 @@ where
 
             let filter_values = match mode {
                 ABCParticleFilterMode::AcceptanceRate((filter, accrate)) => {
-                    if !(0.001.as_()..0.5.as_()).contains(&accrate) {
+                    if !(T::from_f64(0.001).unwrap()..T::from_f64(0.5).unwrap()).contains(&accrate)
+                    {
                         return Err(FEVMError::InvalidParameter {
                             name: "acceptance rate",
                             value: accrate,
@@ -118,7 +127,8 @@ where
                         .copied()
                         .collect::<Vec<T>>();
 
-                    let mut epsilon = values_sorted[(sim_ensemble_size.as_() * accrate).as_()];
+                    let mut epsilon =
+                        values_sorted[(T::from_usize(sim_ensemble_size).unwrap() * accrate).as_()];
 
                     if !epsilon.is_finite() {
                         epsilon = Float::max_value();
@@ -193,10 +203,11 @@ where
 
             iteration += 1;
 
-            if (start.elapsed().as_millis() as f64 / 1e3).as_() > settings.time_limit {
+            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap() > settings.time_limit
+            {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: (start.elapsed().as_millis() as f64 / 1e3).as_(),
+                        elapsed: T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
                         limit: settings.time_limit,
                     },
                 ));
@@ -228,7 +239,8 @@ where
                 .sum::<T>();
 
         if effective_sample_size
-            < ensemble_size.as_() * settings.effective_sample_size_threshold_factor
+            < T::from_usize(ensemble_size).unwrap()
+                * settings.effective_sample_size_threshold_factor
         {
             return Err(FEVMError::ParticleFilter(
                 ParticleFilterError::SmallSampleSize {
@@ -245,12 +257,15 @@ where
             .collect::<Vec<T>>();
 
         // Compute quantiles for logging purposes.
-        let eps_1 = filter_values_sorted[(ensemble_size.as_() * settings.quantiles[0]).as_()];
-        let eps_2 = filter_values_sorted[(ensemble_size.as_() * settings.quantiles[1]).as_()];
+        let eps_1 = filter_values_sorted
+            [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[0]).as_()];
+        let eps_2 = filter_values_sorted
+            [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[1]).as_()];
         let eps_3 = if settings.quantiles[2] >= T::one() {
             filter_values_sorted[ensemble_size - 1]
         } else {
-            filter_values_sorted[(ensemble_size.as_() * settings.quantiles[2]).as_()]
+            filter_values_sorted
+                [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[2]).as_()]
         };
 
         let mode_string = match mode {
