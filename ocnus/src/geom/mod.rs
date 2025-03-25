@@ -2,7 +2,7 @@
 
 mod xcgm;
 
-pub use xcgm::{CCModel, XCState};
+pub use xcgm::*;
 
 use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};
 
@@ -49,10 +49,7 @@ pub trait OcnusGeometry<T, const P: usize, GS> {
     ) -> Vector3<T>;
 
     /// Initialize the geometry state for given model parameters.
-    fn initialize_geom_state<CStride: Dim>(
-        params: &VectorView<T, Const<P>, U1, CStride>,
-        geom_state: &mut GS,
-    );
+    fn geom_state<CStride: Dim>(params: &VectorView<T, Const<P>, U1, CStride>, geom_state: &mut GS);
 
     /// Retrieve a model parameter index by name.
     fn param_index(name: &str) -> usize {

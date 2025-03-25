@@ -7,9 +7,6 @@ edition = "2024"
 name = "ocnus"
 crate-type = ["lib"]
 
-[features]
-# Enables the usage of 64-bit floating-point values as default.
-f64 = []
 
 [dependencies]
 chrono = "*"
@@ -31,8 +28,8 @@ serde_json = "*"
 thiserror = "*"
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = "*"
 
-# [[bench]]
-# name = "acylm"
-# harness = false
+[[bench]]
+name = "cylm"
+harness = false

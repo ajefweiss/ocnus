@@ -12,11 +12,21 @@ use serde::{Deserialize, Serialize};
 
 /// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`FEVM`].
 pub trait FisherInformation<T,const P: usize, const N: usize, FS, GS>: FEVM<T, P, N, FS, GS>
-where   
-T: for<'x> AddAssign<&'x T> + Copy + Default+ for<'x> Deserialize<'x> + Float + FromPrimitive + RealField + SampleUniform+Serialize + Scalar + Sum<T> ,
-   FS:Clone+ Default + Send,
-   GS:Clone+Default + Send,
-     Self: Sync,
+where 
+    T: for<'x> AddAssign<&'x T>
+    + Copy
+    + Default
+    + for<'x> Deserialize<'x>
+    + Float
+    + FromPrimitive
+    + RealField
+    + SampleUniform
+    + Serialize
+    + Scalar
+    + Sum<T>,
+    FS:Clone+ Default + Send,
+    GS:Clone+Default + Send,
+    Self: Sync,
     StandardNormal: Distribution<T>,
 {
     /// Compute the Fisher information matrix (FIM) for an array of model parameters using an auto-correlation function `acfunc`.

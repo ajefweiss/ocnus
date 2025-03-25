@@ -1,11 +1,11 @@
 use crate::math::factorial;
 use num_traits::{Float, FromPrimitive, float::TotalOrder};
-use std::{cmp::Ordering, ops::Mul};
+use std::cmp::Ordering;
 
 /// Bessel function of the first kind.
 pub fn bessel_jn<T>(x: T, k: usize) -> T
 where
-    T: 'static + Copy + Float + FromPrimitive + Mul<T> + TotalOrder,
+    T: 'static + Copy + Float + FromPrimitive + TotalOrder,
 {
     match x.total_cmp(&T::zero()) {
         Ordering::Equal => T::from_usize(matches!(k, 0) as usize).unwrap(),

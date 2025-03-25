@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use std::{iter::Sum, ops::AddAssign, time::Instant};
 
-/// A trait that enables the use of a bootstrap particle filter method
+/// A trait that enables the use of a sequential importance resampling (SIR) particle filter method
 /// for a [`FEVM`](crate::fevm::FEVM).
 pub trait SIRParticleFilter<T, const P: usize, const N: usize, FS, GS>:
     ParticleFilter<T, P, N, FS, GS>
@@ -37,7 +37,7 @@ where
     GS: Clone + Default + Serialize + Send,
     StandardNormal: Distribution<T>,
 {
-    /// Basic bootstrap filter (single iteration) with multivariate likelihood.
+    /// Basic SIR filter (single iteration) with multivariate likelihood.
     fn sirpf_run(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
@@ -146,7 +146,7 @@ where
         target_data.weights = vec![T::one() / T::from_usize(ensemble_size).unwrap(); ensemble_size];
 
         info!(
-            "bootpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",
+            "sirpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",
             0.0,
             2.0,
             (series.len() * sim_ensemble_size) as f64 / 1e6,

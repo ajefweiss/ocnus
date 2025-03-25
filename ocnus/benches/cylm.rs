@@ -1,17 +1,17 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
-    ScObs, ScObsConf, ScObsSeries,
-    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNullState, noise::FEVMNoiseNull},
-    geometry::XCState,
+    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNullState},
+    geom::XCState,
     obser::ObserVec,
+    obser::{ScObs, ScObsConf, ScObsSeries},
     stats::{PDFConstant, PDFUniform, PDFUnivariates},
 };
 use std::{hint::black_box, time::Duration};
 
 const ENSEMBLE_SIZE: usize = 2_usize.pow(18);
 
-fn benchmark_lff(c: &mut Criterion) {
+fn benchmark_lff_f32(c: &mut Criterion) {
     let prior = PDFUnivariates::new([
         PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
         PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
@@ -23,7 +23,7 @@ fn benchmark_lff(c: &mut Criterion) {
         PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
     ]);
 
-    let model = CCLFFModel(prior);
+    let model = CCLFFModel::new(prior);
 
     #[allow(clippy::excessive_precision)]
     let refobs = [
@@ -39,25 +39,25 @@ fn benchmark_lff(c: &mut Criterion) {
         ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
     ];
 
-    let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
+    let sc = ScObsSeries::<f32, ObserVec<f32, 3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
-            224640.0 + i as f64 * 3600.0 * 2.0,
+            224640.0 + i as f32 * 3600.0 * 2.0,
             ScObsConf::Distance(1.0),
             Some(refobs[i].clone()),
         )
     }));
 
-    let mut group = c.benchmark_group("acylm_lff_bench");
+    let mut group = c.benchmark_group("cylm_lff_bench");
 
     // Create temporary simulation data and out arrays, if necessary.
     let mut data = FEVMData {
-        params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(ENSEMBLE_SIZE),
+        params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(ENSEMBLE_SIZE),
         fevm_states: vec![FEVMNullState::default(); ENSEMBLE_SIZE],
         geom_states: vec![XCState::default(); ENSEMBLE_SIZE],
-        weights: vec![1.0 / ENSEMBLE_SIZE as f64; ENSEMBLE_SIZE],
+        weights: vec![1.0 / ENSEMBLE_SIZE as f32; ENSEMBLE_SIZE],
     };
 
-    let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), ENSEMBLE_SIZE);
+    let mut output = DMatrix::<ObserVec<f32, 3>>::zeros(sc.len(), ENSEMBLE_SIZE);
 
     group
         .significance_level(0.05)
@@ -65,18 +65,18 @@ fn benchmark_lff(c: &mut Criterion) {
         .measurement_time(Duration::from_secs(10));
 
     group.throughput(Throughput::Elements((ENSEMBLE_SIZE * sc.len()) as u64));
-    group.bench_function("acylm_lff", |b| {
+    group.bench_function("cylm_lff", |b| {
         b.iter(|| {
             model
                 .fevm_initialize(
                     black_box(&sc),
                     black_box(&mut data),
-                    black_box(None::<&PDFUnivariates<8>>),
+                    black_box(None::<&PDFUnivariates<f32, 8>>),
                     42,
                 )
                 .unwrap();
             model
-                .fevm_simulate(&sc, &mut data, &mut output, None::<(&FEVMNoiseNull, u64)>)
+                .fevm_simulate(&sc, &mut data, &mut output, None)
                 .unwrap();
         });
     });
@@ -84,5 +84,5 @@ fn benchmark_lff(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, benchmark_lff);
+criterion_group!(benches, benchmark_lff_f32);
 criterion_main!(benches);
