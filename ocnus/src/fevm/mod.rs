@@ -313,6 +313,15 @@ where
         geom_state: &GS,
     ) -> Result<ObserVec<T, N>, FEVMError<T>>;
 
+    /// Return intrinsic coordinates of the observation.
+    fn fevm_observe_diagnostics(
+        &self,
+        scobs: &ScObs<T, ObserVec<T, N>>,
+        params: &SVectorView<T, P>,
+        fevm_state: &FS,
+        geom_state: &GS,
+    ) -> Result<ObserVec<T, 12>, FEVMError<T>>;
+
     /// Perform an ensemble forward simulation and generate synthetic vector observables
     /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t.
     /// to the spacecraft observation series.
@@ -413,6 +422,64 @@ where
             });
 
         Ok(valid_indices_flags)
+    }
+
+    /// Perform an ensemble forward simulation and return diagnostic values.
+    fn fevm_simulate_diagnostics(
+        &self,
+        series: &ScObsSeries<T, ObserVec<T, N>>,
+        fevmd: &mut FEVMData<T, P, FS, GS>,
+        output: &mut DMatrix<ObserVec<T, 12>>,
+    ) -> Result<(), FEVMError<T>>
+    where
+        T: for<'x> AddAssign<&'x T> + Default + Send + Sync,
+    {
+        let mut timer = T::zero();
+
+        if (series.len() != output.nrows()) || (fevmd.params.ncols() != output.ncols()) {
+            return Err(FEVMError::InvalidOutputShape {
+                expected_cols: fevmd.params.ncols(),
+                expected_rows: series.len(),
+                output_cols: output.ncols(),
+                output_rows: output.nrows(),
+            });
+        }
+
+        zip_eq(series, output.row_iter_mut()).try_for_each(|(scobs, mut output_col)| {
+            // Compute time step to next observation.
+            let time_step = *scobs.timestamp() - timer;
+            timer = *scobs.timestamp();
+
+            if time_step < T::zero() {
+                return Err(FEVMError::NegativeTimeStep(time_step));
+            } else {
+                fevmd
+                    .params
+                    .par_column_iter()
+                    .zip(fevmd.fevm_states.par_iter_mut())
+                    .zip(fevmd.geom_states.par_iter_mut())
+                    .zip(output_col.par_column_iter_mut())
+                    .chunks(Self::RCS)
+                    .try_for_each(|mut chunks| {
+                        chunks.iter_mut().try_for_each(
+                            |(((data, fevm_state), geom_state), out)| {
+                                self.fevm_forward(time_step, data, fevm_state, geom_state)?;
+                                out[(0, 0)] = self.fevm_observe_diagnostics(
+                                    scobs, data, fevm_state, geom_state,
+                                )?;
+
+                                Ok::<(), FEVMError<T>>(())
+                            },
+                        )?;
+
+                        Ok::<(), FEVMError<T>>(())
+                    })?;
+            }
+
+            Ok::<(), FEVMError<T>>(())
+        })?;
+
+        Ok(())
     }
 
     /// Initialize a model state.

@@ -62,19 +62,19 @@ where
 
     let phi_nom = T::from_f64(2.0).unwrap() * T::pi() * delta * mu * radius_linearized;
 
-    let dr = Vector3::from([
+    let dmu = Vector3::from([
         delta * radius_linearized * com / denom,
         T::zero(),
         delta * radius_linearized * som / denom,
     ]);
-    let dphi = Vector3::from([
+    let dnu = Vector3::from([
         -phi_nom * Float::powi(delta, 2) * som / Float::powi(denom, 3),
         T::zero(),
         phi_nom * com / Float::powi(denom, 3),
     ]);
-    let dpsi = Vector3::from([T::zero(), T::one(), T::zero()]);
+    let ds = Vector3::from([T::zero(), T::one(), T::zero()]);
 
-    [dr, dphi, dpsi]
+    [dmu, dnu, ds]
 }
 
 /// The circular-cylindric coordinate transformation (xyz -> ics).
@@ -177,12 +177,12 @@ where
     Vector3::new(x, s, y)
 }
 
-macro_rules! impl_acylm {
+macro_rules! impl_xcgm_geom {
     ($model: ident, $params: expr, $fn_basis: tt, $fn_ics: tt, $fn_xyz: tt, $docs: literal) => {
         #[doc=$docs]
         #[allow(non_camel_case_types)]
         #[derive(Debug)]
-        pub struct $model<T>(pub PhantomData<T>)
+        pub struct $model<T>(PhantomData<T>)
         where
             T: Float + RealField + SimdRealField;
 
@@ -264,9 +264,9 @@ macro_rules! impl_acylm {
 
                 let quaternion = quaternion_xyz(phi, T::zero(), theta);
 
-                let [dr, dphi, dpsi] = Self::basis_vectors(ics, params, geom_state);
+                let [d1, d2, d3] = Self::basis_vectors(ics, params, geom_state);
 
-                let vec = dr * vec[0] + dphi * vec[1] + dpsi * vec[2];
+                let vec = d1 * vec[0] + d2 * vec[1] + d3 * vec[2];
 
                 quaternion.transform_vector(&vec)
             }
@@ -293,8 +293,8 @@ macro_rules! impl_acylm {
     };
 }
 
-// Implementation of a circular cylindrical geometry.
-impl_acylm!(
+// Implementation of a circular-cylindrical geometry.
+impl_xcgm_geom!(
     CCModel,
     ["phi", "theta", "y", "radius", "x_0"],
     cc_basis,
@@ -303,8 +303,8 @@ impl_acylm!(
     "Circular-cylindric flux rope geometry."
 );
 
-// Implementation of a elliptipc cylindrical geometry.
-impl_acylm!(
+// Implementation of a elliptic-cylindrical geometry.
+impl_xcgm_geom!(
     ECModel,
     ["phi", "theta", "psi", "y", "delta", "radius", "x_0"],
     ec_basis,

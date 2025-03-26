@@ -23,7 +23,7 @@ pub struct FEVMNullState {}
 
 /// Linear force-free magnetic field observable.
 pub fn cc_lff_obs<T, const P: usize, M, GS>(
-    (r, _phi, _psi): (T, T, T),
+    (r, _phi, _z): (T, T, T),
     params: &SVectorView<T, P>,
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
@@ -68,7 +68,7 @@ where
 
 /// Uniform twist magnetic field observable.
 pub fn cc_ut_obs<T, const P: usize, M, GS>(
-    (r, _phi, _psi): (T, T, T),
+    (r, _phi, _z): (T, T, T),
     params: &SVectorView<T, P>,
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
@@ -141,6 +141,7 @@ where
                 let b_linearized = b / (T::one() - y_offset.powi(2));
 
                 // We remove one radius_lineralized everywhere as it cancels out.
+                // See Eqs. 7-9 in Weiss 2024 et al.
                 let sqrtg = T::from_f64(2.0 * std::f64::consts::PI).unwrap()
                     * delta.powi(2)
                     * mu
@@ -202,7 +203,7 @@ macro_rules! concat_arrays {
     }};
 }
 
-macro_rules! impl_fevm {
+macro_rules! impl_cylm_fevm {
     ($model: ident, $parent: ident, $params: expr, $fn_obs: tt, $docs: literal) => {
         #[doc=$docs]
         #[derive(Debug)]
@@ -222,6 +223,7 @@ macro_rules! impl_fevm {
             }
         }
 
+        // Re-implement the OcnusGeometry trait because we have no inheritance.
         impl<T, D> OcnusGeometry<T, { $parent::<f32>::PARAMS.len() + $params.len() }, XCState<T>>
             for $model<T, D>
         where
@@ -368,14 +370,14 @@ macro_rules! impl_fevm {
 
                 let q = Self::coords_xyz_to_ics(&sc_pos.as_view(), params, geom_state);
 
-                let (r, phi, z) = (q[0], q[1], q[2]);
+                let (mu, nu, s) = (q[0], q[1], q[2]);
 
                 let obs = $fn_obs::<
                     T,
                     { $parent::<f32>::PARAMS.len() + $params.len() },
                     Self,
                     XCState<T>,
-                >((r, phi, z), params, geom_state);
+                >((mu, nu, s), params, geom_state);
 
                 match obs {
                     Some(b_q) => {
@@ -390,6 +392,35 @@ macro_rules! impl_fevm {
                     }
                     None => Ok(ObserVec::default()),
                 }
+            }
+
+            fn fevm_observe_diagnostics(
+                &self,
+                scobs: &ScObs<T, ObserVec<T, 3>>,
+                params: &VectorView<
+                    T,
+                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    U1,
+                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                >,
+                _fevm_state: &FEVMNullState,
+                geom_state: &XCState<T>,
+            ) -> Result<ObserVec<T, 12>, FEVMError<T>> {
+                let sc_pos = Vector3::from(match scobs.configuration() {
+                    ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
+                    ScObsConf::Position(r) => *r,
+                });
+
+                let q = Self::coords_xyz_to_ics(&sc_pos.as_view(), params, geom_state);
+
+                let (mu, nu, s) = (q[0], q[1], q[2]);
+
+                let [e1, e2, e3] =
+                    Self::basis_vectors(&Vector3::from([mu, nu, s]).as_view(), params, geom_state);
+
+                Ok(ObserVec::<T, 12>::from([
+                    mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
+                ]))
             }
 
             fn fevm_state(
@@ -529,28 +560,28 @@ macro_rules! impl_fevm {
     };
 }
 
-impl_fevm!(
+impl_cylm_fevm!(
     CCLFFModel,
     CCModel,
     ["v", "B", "alpha"],
     cc_lff_obs,
-    "Circular cylindrical linear force-free magnetic flux rope model."
+    "Circular-cylindrical linear force-free magnetic flux rope model."
 );
 
-impl_fevm!(
+impl_cylm_fevm!(
     CCUTModel,
     CCModel,
     ["v", "B", "tau"],
     cc_ut_obs,
-    "Circular cylindrical uniform twist magnetic flux rope model."
+    "Circular-cylindrical uniform twist magnetic flux rope model."
 );
 
-impl_fevm!(
+impl_cylm_fevm!(
     ECHModel,
     ECModel,
     ["v", "B", "lambda", "alpha", "tau"],
     ec_hybrid_obs,
-    "Circular cylindrical uniform twist magnetic flux rope model."
+    "Elliptic-cylindrical uniform twist magnetic flux rope model."
 );
 
 #[cfg(test)]
@@ -631,7 +662,7 @@ mod tests {
             PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
             PDFConstant::new_uvpdf(1125.0),
             PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
-            PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
+            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
         ]);
 
         let model = CCUTModel(prior, PhantomData::<f64>);
@@ -679,5 +710,73 @@ mod tests {
         assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
         assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
         assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_echmodel() {
+        let prior = PDFUnivariates::new([
+            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
+            PDFUniform::new_uvpdf((0.1, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
+            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
+            PDFConstant::new_uvpdf(1125.0),
+            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
+            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
+            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
+            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
+        ]);
+
+        let model = ECHModel::new(prior);
+
+        let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f64 * 3600.0 * 2.0,
+                ScObsConf::Distance(1.0),
+                None,
+            )
+        }));
+
+        let mut data = FEVMData {
+            params: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
+            fevm_states: vec![FEVMNullState::default(); 1],
+            geom_states: vec![XCState::default(); 1],
+            weights: vec![1.0; 1],
+        };
+
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+
+        data.params.set_column(
+            0,
+            &SVector::<f64, 12>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
+                0.0.to_radians(),
+                0.1,
+                1.0,
+                0.25,
+                0.0,
+                600.0,
+                20.0,
+                0.0,
+                1.0 / 0.25,
+                1.0 / 0.25,
+            ]),
+        );
+
+        model
+            .fevm_initialize_states_only(&sc, &mut data)
+            .expect("initialization failed");
+
+        model
+            .fevm_simulate(&sc, &mut data, &mut output, None)
+            .expect("simulation failed");
+
+        // assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
+        // assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
+        // assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
+        // assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
     }
 }
