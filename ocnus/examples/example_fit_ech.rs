@@ -1,18 +1,15 @@
 use chrono::Local;
-use core::f64;
 use env_logger::Builder;
 use nalgebra::DMatrix;
 use ocnus::{
-    ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        CCLFFModel, FEVMError,
+        ECHModel, FEVMError, FEVMNoise,
         filters::{
-            ABCParticleFilter, ABCParticleFilterMode, BSParticleFilter, ParticleFilter,
-            ParticleFilterError, ParticleFilterSettingsBuilder, root_mean_square_filter,
+            ABCParticleFilter, ABCParticleFilterMode, ParticleFilter, ParticleFilterError,
+            ParticleFilterSettingsBuilder, SIRParticleFilter, root_mean_square_filter,
         },
-        noise::{FEVMNoiseGaussian, FEVMNoiseMultivariate},
     },
-    obser::ObserVec,
+    obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
     stats::{CovMatrix, PDFConstant, PDFReciprocal, PDFUniform, PDFUnivariates},
 };
 use std::io::prelude::*;
@@ -31,16 +28,22 @@ fn main() {
         .filter(None, log::LevelFilter::Info)
         .init();
 
-    let model = CCLFFModel(PDFUnivariates::new([
-        PDFUniform::new_uvpdf((-(90.0_f64.to_radians()), (90.0_f64.to_radians()))).unwrap(),
-        PDFUniform::new_uvpdf((0.0, f64::consts::TAU)).unwrap(),
+    let prior = PDFUnivariates::new([
+        PDFUniform::new_uvpdf((-1.5, 1.5)).unwrap(),
+        PDFUniform::new_uvpdf((1.5, 4.5)).unwrap(),
+        PDFConstant::new_uvpdf(1.0),
         PDFUniform::new_uvpdf((-0.75, 0.75)).unwrap(),
-        PDFReciprocal::new_uvpdf((0.05, 0.35)).unwrap(),
-        PDFConstant::new_uvpdf(750.0),
-        PDFUniform::new_uvpdf((5.0, 25.0)).unwrap(),
-        PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
-        PDFUniform::new_uvpdf((0.7, 1.0)).unwrap(),
-    ]));
+        PDFConstant::new_uvpdf(1.0),
+        PDFReciprocal::new_uvpdf((0.1, 0.35)).unwrap(),
+        PDFUniform::new_uvpdf((0.75, 0.9)).unwrap(),
+        PDFConstant::new_uvpdf(1125.0),
+        PDFUniform::new_uvpdf((10.0, 25.0)).unwrap(),
+        PDFConstant::new_uvpdf(1.0),
+        PDFUniform::new_uvpdf((0.0, 15.0)).unwrap(),
+        PDFConstant::new_uvpdf(0.0),
+    ]);
+
+    let model = ECHModel::new(prior);
 
     #[allow(clippy::excessive_precision)]
     let refobs = [
@@ -58,7 +61,7 @@ fn main() {
 
     const ENSEMBLE_SIZE: usize = 4096;
 
-    let sc = ScObsSeries::<ObserVec<3>>::from_iterator((0..refobs.len()).map(|i| {
+    let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
             10800.0 + i as f64 * 3600.0 * 2.0,
             ScObsConf::Distance(1.0),
@@ -66,9 +69,9 @@ fn main() {
         )
     }));
 
-    let mut pfsettings = ParticleFilterSettingsBuilder::<3, _>::default()
+    let mut pfsettings = ParticleFilterSettingsBuilder::<_, 3>::default()
         .exploration_factor(1.5)
-        .noise(FEVMNoiseGaussian(1.0))
+        .noise(FEVMNoise::Gaussian(1.0, 1))
         .quantiles([0.2, 0.5, 1.0])
         .rseed(70)
         .time_limit(1.5)
@@ -76,7 +79,7 @@ fn main() {
         .unwrap();
 
     let init_result = model
-        .pf_initialize_data(
+        .pf_initialize_ensemble(
             &sc,
             ENSEMBLE_SIZE,
             2_usize.pow(18),
@@ -133,9 +136,9 @@ fn main() {
     }
 
     for idx in 0..10 {
-        let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
+        let mut bssettings = ParticleFilterSettingsBuilder::<_, 3>::default()
             .exploration_factor(1.0)
-            .noise(FEVMNoiseMultivariate(
+            .noise(FEVMNoise::Multivariate(
                 CovMatrix::from_matrix(
                     &DMatrix::from_diagonal_element(
                         sc.len(),
@@ -145,11 +148,12 @@ fn main() {
                     .as_view(),
                 )
                 .unwrap(),
+                0,
             ))
             .build()
             .unwrap();
 
-        let result = model.bootpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
+        let result = model.sirpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
 
         let pfres = result.unwrap();
 
@@ -164,30 +168,30 @@ fn main() {
         total_counter += 1;
     }
 
-    for _ in 0..10 {
-        let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
-            .exploration_factor(1.0)
-            .noise(FEVMNoiseMultivariate(
-                CovMatrix::from_matrix(
-                    &DMatrix::from_diagonal_element(sc.len(), sc.len(), 1.0).as_view(),
-                )
-                .unwrap(),
-            ))
-            .build()
-            .unwrap();
+    // for _ in 0..10 {
+    //     let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
+    //         .exploration_factor(1.0)
+    //         .noise(FEVMNoiseMultivariate(
+    //             CovMatrix::from_matrix(
+    //                 &DMatrix::from_diagonal_element(sc.len(), sc.len(), 1.0).as_view(),
+    //             )
+    //             .unwrap(),
+    //         ))
+    //         .build()
+    //         .unwrap();
 
-        let result = model.bootpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
+    //     let result = model.bootpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
 
-        let pfres = result.unwrap();
+    //     let pfres = result.unwrap();
 
-        pfres
-            .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                total_counter
-            ))
-            .unwrap();
+    //     pfres
+    //         .write(format!(
+    //             "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
+    //             total_counter
+    //         ))
+    //         .unwrap();
 
-        fevmd = pfres.fevmd;
-        total_counter += 1;
-    }
+    //     fevmd = pfres.fevmd;
+    //     total_counter += 1;
+    // }
 }

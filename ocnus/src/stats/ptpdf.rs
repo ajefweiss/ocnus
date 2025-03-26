@@ -162,7 +162,7 @@ where
 
             attempts += 1;
 
-            if (attempts > 250) && (attempts % 250 == 0) {
+            if (attempts > 5000) && (attempts % 5000 == 0) {
                 warn!(
                     "PDFParticles::draw_sample has failed to draw a valid sample after {} tries",
                     attempts,

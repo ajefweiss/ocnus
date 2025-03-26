@@ -85,7 +85,7 @@ where
     }
 
     /// Compute the likelihood for an observation `x` with expected mean `mu`.
-    pub fn likelihood<const N: usize>(
+    pub fn multivariate_likelihood<const N: usize>(
         &self,
         x: &DVectorView<ObserVec<T, N>>,
         mu: &ScObsSeries<T, ObserVec<T, N>>,

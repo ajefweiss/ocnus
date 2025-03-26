@@ -15,7 +15,7 @@ use num_traits::{AsPrimitive, Float};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use serde::Serialize;
-use std::{iter::Sum, ops::AddAssign, time::Instant};
+use std::{cmp::Ordering, iter::Sum, ops::AddAssign, time::Instant};
 
 /// A trait that enables the use of a sequential importance resampling (SIR) particle filter method
 /// for a [`FEVM`](crate::fevm::FEVM).
@@ -90,7 +90,7 @@ where
                     .iter_mut()
                     .map(|(out, flag)| {
                         if **flag {
-                            settings.noise.likelihood(out, series)
+                            settings.noise.multivariate_likelihood(out, series)
                         } else {
                             T::neg_infinity()
                         }
@@ -102,7 +102,7 @@ where
 
         let lh_max = *likelihoods
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Greater))
             .unwrap();
 
         let mut weights = likelihoods

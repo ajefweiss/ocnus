@@ -4,17 +4,15 @@ use env_logger::Builder;
 use log::info;
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
-    ScObs, ScObsConf, ScObsSeries,
     fevm::{
-        CCLFFModel, FEVM, FEVMData, FEVMError, FEVMNullState, FisherInformation,
+        ECHModel, FEVM, FEVMData, FEVMError, FEVMNoise, FEVMNullState, FisherInformation,
         filters::{
-            ABCParticleFilter, ABCParticleFilterMode, BSParticleFilter, ParticleFilter,
-            ParticleFilterError, ParticleFilterSettingsBuilder, root_mean_square_filter,
+            ABCParticleFilter, ABCParticleFilterMode, ParticleFilter, ParticleFilterError,
+            ParticleFilterSettingsBuilder, SIRParticleFilter, root_mean_square_filter,
         },
-        noise::{FEVMNoiseGaussian, FEVMNoiseMultivariate, FEVMNoiseNull},
     },
-    geometry::XCState,
-    obser::ObserVec,
+    geom::XCState,
+    obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
     stats::{CovMatrix, PDFConstant, PDFReciprocal, PDFUniform, PDFUnivariates},
 };
 use std::io::prelude::*;
@@ -33,33 +31,43 @@ fn main() {
         .filter(None, log::LevelFilter::Info)
         .init();
 
-    let model = CCLFFModel(PDFUnivariates::new([
-        PDFUniform::new_uvpdf((-(90.0_f64.to_radians()), (90.0_f64.to_radians()))).unwrap(),
-        PDFUniform::new_uvpdf((0.0, f64::consts::TAU)).unwrap(),
-        PDFUniform::new_uvpdf((-0.75, 0.75)).unwrap(),
-        PDFReciprocal::new_uvpdf((0.05, 0.35)).unwrap(),
+    let prior = PDFUnivariates::new([
+        PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
+        PDFUniform::new_uvpdf((1.5, 4.5)).unwrap(),
+        PDFConstant::new_uvpdf(0.0),
+        PDFUniform::new_uvpdf((-0.5, 0.5)).unwrap(),
+        PDFConstant::new_uvpdf(1.0),
+        PDFReciprocal::new_uvpdf((0.1, 0.3)).unwrap(),
+        PDFUniform::new_uvpdf((0.7, 0.9)).unwrap(),
         PDFConstant::new_uvpdf(1125.0),
-        PDFUniform::new_uvpdf((5.0, 25.0)).unwrap(),
-        PDFUniform::new_uvpdf((-3.4, 3.4)).unwrap(),
-        PDFUniform::new_uvpdf((0.7, 1.0)).unwrap(),
-    ]));
+        PDFUniform::new_uvpdf((10.0, 25.0)).unwrap(),
+        PDFConstant::new_uvpdf(1.0),
+        PDFUniform::new_uvpdf((3.0, 12.0)).unwrap(),
+        PDFConstant::new_uvpdf(0.0),
+    ]);
 
-    let sc = ScObsSeries::<ObserVec<3>>::from_iterator(
+    let model = ECHModel::new(prior);
+
+    let sc: ScObsSeries<f64, ObserVec<f64, 3>> = ScObsSeries::<_, ObserVec<_, 3>>::from_iterator(
         (0..20).map(|i| ScObs::new(i as f64 * 1.0 * 3600.0, ScObsConf::Distance(1.0), None)),
     );
 
     let mut fevmd_0 = FEVMData {
-        params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::from_iterator(
+        params: Matrix::<f64, _, Dyn, VecStorage<f64, Const<12>, Dyn>>::from_iterator(
             1,
             [
-                -15.3943205_f64.to_radians(),
+                -15_f64.to_radians(),
                 177.20819_f64.to_radians(),
-                -0.03788574,
-                0.1880269,
+                0.0_f64.to_radians(),
+                -0.04,
+                1.0,
+                0.2,
+                0.75,
                 1125.0,
-                15.92187,
-                2.8,
-                0.8245641,
+                16.0,
+                1.0,
+                6.0,
+                0.0,
             ],
         ),
         fevm_states: vec![FEVMNullState::default(); 1],
@@ -67,7 +75,7 @@ fn main() {
         weights: vec![1.0],
     };
 
-    const NOISE_VAR: f64 = 0.1;
+    const NOISE_VAR: f64 = 1.0;
 
     let corrfunc = |d| if d == 0.0 { NOISE_VAR } else { 0.0 };
 
@@ -77,43 +85,35 @@ fn main() {
 
     let fim = result[0];
 
-    let fim_clean = fim
-        // .remove_column(7)
-        .remove_column(4)
-        // .remove_column(3)
-        // .remove_row(7)
-        .remove_row(4);
-    // .remove_row(3);
+    let fim_clean = fim;
 
-    println!("{:}", fim_clean);
-    println!("{:}", fim_clean.try_inverse().unwrap());
+    println!("{:.5}", fim_clean);
+    println!("{:.5}", fim_clean.pseudo_inverse(0.0001).unwrap());
     println!(
         "{:?}",
-        fim_clean
-            .try_inverse()
-            .unwrap()
-            .diagonal()
-            .iter()
-            .map(|v| v.sqrt())
-            .collect::<Vec<f64>>()
+        <std::vec::Vec<f64> as std::convert::TryInto<[f64; 12]>>::try_into(
+            fim_clean
+                .pseudo_inverse(0.00001)
+                .unwrap()
+                .diagonal()
+                .iter()
+                .map(|v| v.sqrt())
+                .collect::<Vec<f64>>()
+        )
+        .unwrap()
     );
 
     // Create synthetic output.
-    let mut output = DMatrix::<ObserVec<3>>::zeros(sc.len(), 1);
+    let mut output = DMatrix::<ObserVec<_, 3>>::zeros(sc.len(), 1);
 
     model
         .fevm_initialize_states_only(&sc, &mut fevmd_0)
         .unwrap();
     model
-        .fevm_simulate(
-            &sc,
-            &mut fevmd_0,
-            &mut output,
-            None::<(&FEVMNoiseNull, u64)>,
-        )
+        .fevm_simulate(&sc, &mut fevmd_0, &mut output, None)
         .unwrap();
 
-    let sc_synth = ScObsSeries::<ObserVec<3>>::from_iterator((0..20).map(|i| {
+    let sc_synth = ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..20).map(|i| {
         ScObs::new(
             i as f64 * 1.0 * 3600.0,
             ScObsConf::Distance(1.0),
@@ -127,9 +127,9 @@ fn main() {
 
     const ENSEMBLE_SIZE: usize = 4096;
 
-    let mut pfsettings = ParticleFilterSettingsBuilder::<3, _>::default()
+    let mut pfsettings = ParticleFilterSettingsBuilder::<_, 3>::default()
         .exploration_factor(1.5)
-        .noise(FEVMNoiseGaussian(NOISE_VAR.sqrt()))
+        .noise(FEVMNoise::Gaussian(NOISE_VAR.sqrt(), 1))
         .quantiles([0.2, 0.5, 1.0])
         .rseed(70)
         .time_limit(1.5)
@@ -137,7 +137,7 @@ fn main() {
         .unwrap();
 
     let init_result = model
-        .pf_initialize_data(
+        .pf_initialize_ensemble(
             &sc_synth,
             ENSEMBLE_SIZE,
             2_usize.pow(18),
@@ -148,7 +148,7 @@ fn main() {
 
     init_result
         .write(format!(
-            "/Users/ajweiss/Documents/Data/ocnus_fisher_lim/{:03}.particles",
+            "/Users/ajweiss/Documents/Data/ocnus_fisher/{:03}.particles",
             0
         ))
         .unwrap();
@@ -183,7 +183,7 @@ fn main() {
 
         run_pfresult
             .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_fisher_lim/{:03}.particles",
+                "/Users/ajweiss/Documents/Data/ocnus_fisher/{:03}.particles",
                 total_counter
             ))
             .unwrap();
@@ -195,26 +195,31 @@ fn main() {
 
     info!("switching to bootstrap");
 
-    for _ in 0..10 {
-        let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
+    for siri in 0..10 {
+        let mut bssettings = ParticleFilterSettingsBuilder::<_, 3>::default()
             .exploration_factor(1.0)
-            .noise(FEVMNoiseMultivariate(
+            .noise(FEVMNoise::Multivariate(
                 CovMatrix::from_matrix(
-                    &DMatrix::from_diagonal_element(sc_synth.len(), sc_synth.len(), NOISE_VAR)
-                        .as_view(),
+                    &DMatrix::from_diagonal_element(
+                        sc_synth.len(),
+                        sc_synth.len(),
+                        NOISE_VAR * ((5 * (10 - siri) + 1) as f64),
+                    )
+                    .as_view(),
                 )
                 .unwrap(),
+                0,
             ))
             .build()
             .unwrap();
 
-        let result = model.bootpf_run(&sc_synth, &fevmd, ENSEMBLE_SIZE, 16 * 4096, &mut bssettings);
+        let result = model.sirpf_run(&sc_synth, &fevmd, ENSEMBLE_SIZE, 32 * 4096, &mut bssettings);
 
         let pfres = result.unwrap();
 
         pfres
             .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_fisher_lim/{:03}.particles",
+                "/Users/ajweiss/Documents/Data/ocnus_fisher/{:03}.particles",
                 total_counter
             ))
             .unwrap();

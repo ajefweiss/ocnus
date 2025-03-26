@@ -222,8 +222,10 @@ where
         )?;
 
         // Update weights here.
+        debug!("start");
         target_data.weights =
             ptpdf_importance_weighting(&density_new, &density_old, &self.model_prior());
+        debug!("end");
 
         // Reset the covariance matrix in the old density.
         density_old *= T::one() / settings.exploration_factor;

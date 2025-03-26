@@ -56,7 +56,7 @@ where
                 let b_linearized = b / (T::one() - y_offset.powi(2));
 
                 // Bessel function evaluation uses 11 terms.
-                let b_s = b_linearized * bessel_jn(alpha * r, 0);
+                let b_s = b_linearized * bessel_jn(alpha * r * radius_linearized, 0);
                 let b_phi = b_linearized * sign * bessel_jn(alpha * r * radius_linearized, 1);
 
                 Some(Vector3::new(T::zero(), b_phi, b_s))
@@ -121,9 +121,6 @@ where
     let alpha_signed = M::param_value("alpha", params);
     let tau = M::param_value("tau", params);
 
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-    let omega = T::from_f64(2.0 * std::f64::consts::PI).unwrap() * (nu - psi);
-
     let (alpha, sign) = match alpha_signed.partial_cmp(&T::zero()) {
         Some(ord) => match ord {
             Ordering::Less => (-alpha_signed, T::neg(T::one())),
@@ -139,6 +136,8 @@ where
             Ordering::Greater => None,
             _ => {
                 let b_linearized = b / (T::one() - y_offset.powi(2));
+                let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
+                let omega = T::from_f64(2.0 * std::f64::consts::PI).unwrap() * (nu - psi);
 
                 // We remove one radius_lineralized everywhere as it cancels out.
                 // See Eqs. 7-9 in Weiss 2024 et al.
@@ -146,7 +145,7 @@ where
                     * delta.powi(2)
                     * mu
                     * radius_linearized
-                    / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2)).sqrt();
+                    / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2));
 
                 // LFF terms.
                 let b_s_lff = T::from_f64(2.0 * std::f64::consts::PI).unwrap()
@@ -165,7 +164,7 @@ where
                     * b_linearized
                     / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
                     / sqrtg;
-                let b_nu_ut = mu * b_linearized * tau
+                let b_nu_ut = mu * radius_linearized * b_linearized * tau
                     / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
                     / sqrtg;
 
@@ -210,12 +209,12 @@ macro_rules! impl_cylm_fevm {
         pub struct $model<T, D>(pub D, PhantomData<T>)
         where
             T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>;
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
             T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -224,20 +223,20 @@ macro_rules! impl_cylm_fevm {
         }
 
         // Re-implement the OcnusGeometry trait because we have no inheritance.
-        impl<T, D> OcnusGeometry<T, { $parent::<f32>::PARAMS.len() + $params.len() }, XCState<T>>
+        impl<T, D> OcnusGeometry<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>
             for $model<T, D>
         where
             T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
-            const PARAMS: [&'static str; { $parent::<f32>::PARAMS.len() + $params.len() }] =
-                concat_arrays!($parent::<f32>::PARAMS, $params);
+            const PARAMS: [&'static str; { $parent::<f64>::PARAMS.len() + $params.len() }] =
+                concat_arrays!($parent::<f64>::PARAMS, $params);
 
             fn basis_vectors<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
@@ -245,7 +244,7 @@ macro_rules! impl_cylm_fevm {
             ) -> [Vector3<T>; 3] {
                 $parent::basis_vectors(
                     ics,
-                    &params.fixed_rows::<{ $parent::<f32>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
@@ -254,7 +253,7 @@ macro_rules! impl_cylm_fevm {
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
@@ -262,7 +261,7 @@ macro_rules! impl_cylm_fevm {
             ) -> Vector3<T> {
                 $parent::coords_ics_to_xyz(
                     ics,
-                    &params.fixed_rows::<{ $parent::<f32>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
@@ -271,7 +270,7 @@ macro_rules! impl_cylm_fevm {
                 xyz: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
@@ -279,7 +278,7 @@ macro_rules! impl_cylm_fevm {
             ) -> Vector3<T> {
                 $parent::coords_xyz_to_ics(
                     xyz,
-                    &params.fixed_rows::<{ $parent::<f32>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
@@ -289,7 +288,7 @@ macro_rules! impl_cylm_fevm {
                 vec: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
@@ -298,7 +297,7 @@ macro_rules! impl_cylm_fevm {
                 $parent::create_xyz_vector(
                     ics,
                     vec,
-                    &params.fixed_rows::<{ $parent::<f32>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
@@ -306,28 +305,28 @@ macro_rules! impl_cylm_fevm {
             fn geom_state<CStride: Dim>(
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 geom_state: &mut XCState<T>,
             ) {
                 $parent::geom_state(
-                    &params.fixed_rows::<{ $parent::<f32>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     geom_state,
                 )
             }
         }
 
         impl<T, D>
-            FEVM<T, { $parent::<f32>::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState<T>>
+            FEVM<T, { $parent::<f64>::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState<T>>
             for $model<T, D>
         where
             T: Copy + Float + RealField + SampleUniform + Scalar + TotalOrder,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
-            Self: OcnusGeometry<T, { $parent::<f32>::PARAMS.len() + $params.len() }, XCState<T>>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            Self: OcnusGeometry<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
         {
             const RCS: usize = 128;
 
@@ -336,9 +335,9 @@ macro_rules! impl_cylm_fevm {
                 time_step: T,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
                 _fevm_state: &mut FEVMNullState,
                 geom_state: &mut XCState<T>,
@@ -356,9 +355,9 @@ macro_rules! impl_cylm_fevm {
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
                 _fevm_state: &FEVMNullState,
                 geom_state: &XCState<T>,
@@ -374,7 +373,7 @@ macro_rules! impl_cylm_fevm {
 
                 let obs = $fn_obs::<
                     T,
-                    { $parent::<f32>::PARAMS.len() + $params.len() },
+                    { $parent::<f64>::PARAMS.len() + $params.len() },
                     Self,
                     XCState<T>,
                 >((mu, nu, s), params, geom_state);
@@ -399,9 +398,9 @@ macro_rules! impl_cylm_fevm {
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
                 _fevm_state: &FEVMNullState,
                 geom_state: &XCState<T>,
@@ -428,9 +427,9 @@ macro_rules! impl_cylm_fevm {
                 _series: &ScObsSeries<T, ObserVec<T, 3>>,
                 _params: &VectorView<
                     T,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f32>::PARAMS.len() + $params.len() }>,
+                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
                 _fevm_state: &mut FEVMNullState,
                 _geom_state: &mut XCState<T>,
@@ -438,17 +437,17 @@ macro_rules! impl_cylm_fevm {
                 Ok(())
             }
 
-            fn fevm_step_sizes(&self) -> [T; { $parent::<f32>::PARAMS.len() + $params.len() }] {
+            fn fevm_step_sizes(&self) -> [T; { $parent::<f64>::PARAMS.len() + $params.len() }] {
                 (&self.0)
                     .valid_range()
                     .iter()
-                    .map(|(min, max)| (*max - *min) * T::epsilon())
+                    .map(|(min, max)| (*max - *min) * T::from_f64(128.0).unwrap() * T::epsilon())
                     .collect::<Vec<T>>()
                     .try_into()
                     .unwrap()
             }
 
-            fn model_prior(&self) -> impl PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }> {
+            fn model_prior(&self) -> impl PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
@@ -456,7 +455,7 @@ macro_rules! impl_cylm_fevm {
         impl<T, D>
             ParticleFilter<
                 T,
-                { $parent::<f32>::PARAMS.len() + $params.len() },
+                { $parent::<f64>::PARAMS.len() + $params.len() },
                 3,
                 FEVMNullState,
                 XCState<T>,
@@ -473,14 +472,14 @@ macro_rules! impl_cylm_fevm {
                 + Serialize,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
         impl<T, D>
             ABCParticleFilter<
                 T,
-                { $parent::<f32>::PARAMS.len() + $params.len() },
+                { $parent::<f64>::PARAMS.len() + $params.len() },
                 3,
                 FEVMNullState,
                 XCState<T>,
@@ -500,14 +499,14 @@ macro_rules! impl_cylm_fevm {
                 + for<'x> Sum<&'x T>,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
         impl<T, D>
             SIRParticleFilter<
                 T,
-                { $parent::<f32>::PARAMS.len() + $params.len() },
+                { $parent::<f64>::PARAMS.len() + $params.len() },
                 3,
                 FEVMNullState,
                 XCState<T>,
@@ -527,14 +526,14 @@ macro_rules! impl_cylm_fevm {
                 + for<'x> Sum<&'x T>,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
         impl<T, D>
             FisherInformation<
                 T,
-                { $parent::<f32>::PARAMS.len() + $params.len() },
+                { $parent::<f64>::PARAMS.len() + $params.len() },
                 3,
                 FEVMNullState,
                 XCState<T>,
@@ -554,7 +553,7 @@ macro_rules! impl_cylm_fevm {
                 + Sum<T>,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f32>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
     };
@@ -646,9 +645,9 @@ mod tests {
             .fevm_simulate(&sc, &mut data, &mut output, None)
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 8.997781).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 17.356544).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.6578388).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
         assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
     }
 
@@ -753,7 +752,7 @@ mod tests {
             &SVector::<f64, 12>::from([
                 5.0_f64.to_radians(),
                 -3.0_f64.to_radians(),
-                0.0.to_radians(),
+                0.0_f64.to_radians(),
                 0.1,
                 1.0,
                 0.25,
@@ -774,9 +773,40 @@ mod tests {
             .fevm_simulate(&sc, &mut data, &mut output, None)
             .expect("simulation failed");
 
-        // assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
-        // assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
-        // assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
-        // assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
+        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+
+        data.params.set_column(
+            0,
+            &SVector::<f64, 12>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
+                0.0_f64.to_radians(),
+                0.1,
+                1.0,
+                0.25,
+                0.0,
+                600.0,
+                20.0,
+                1.0,
+                1.0 / 0.25,
+                1.0 / 0.25,
+            ]),
+        );
+
+        model
+            .fevm_initialize_states_only(&sc, &mut data)
+            .expect("initialization failed");
+
+        model
+            .fevm_simulate(&sc, &mut data, &mut output, None)
+            .expect("simulation failed");
+
+        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
+        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
     }
 }
