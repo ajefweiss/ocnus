@@ -90,15 +90,26 @@ where
         x: &DVectorView<ObserVec<T, N>>,
         mu: &ScObsSeries<T, ObserVec<T, N>>,
     ) -> T {
-        let x_flat = x
+        let mut x_flat = x
             .iter()
             .flat_map(|x_obs| x_obs.iter().cloned().collect::<Vec<T>>())
             .collect::<Vec<T>>();
 
-        let mu_flat = mu
+        let mut mu_flat = mu
             .into_iter()
             .flat_map(|mu_scobs| mu_scobs.observation().iter().cloned().collect::<Vec<T>>())
             .collect::<Vec<T>>();
+
+        // Correct matching NaN's
+        x_flat
+            .iter_mut()
+            .zip(mu_flat.iter_mut())
+            .for_each(|(xv, muv)| {
+                if xv.is_nan() && muv.is_nan() {
+                    *xv = T::zero();
+                    *muv = T::zero();
+                }
+            });
 
         match self {
             FEVMNoise::Gaussian(std_dev, ..) => {

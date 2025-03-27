@@ -136,7 +136,7 @@ where
 
         let lh_max = *likelihoods
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Greater))
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Less))
             .unwrap();
 
         let mut weights = likelihoods

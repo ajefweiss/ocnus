@@ -200,12 +200,8 @@ fn main() {
             .exploration_factor(1.0)
             .noise(FEVMNoise::Multivariate(
                 CovMatrix::from_matrix(
-                    &DMatrix::from_diagonal_element(
-                        sc_synth.len(),
-                        sc_synth.len(),
-                        NOISE_VAR * 100.0,
-                    )
-                    .as_view(),
+                    &DMatrix::from_diagonal_element(sc_synth.len(), sc_synth.len(), NOISE_VAR)
+                        .as_view(),
                 )
                 .unwrap(),
                 0,
