@@ -26,8 +26,6 @@ use thiserror::Error;
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
 pub enum ParticleFilterError<T> {
-    #[error("sampling from the distribution is too inefficient")]
-    InefficientSampling,
     #[error("insufficiently large sample size {effective_sample_size} / {ensemble_size}")]
     SmallSampleSize {
         effective_sample_size: T,

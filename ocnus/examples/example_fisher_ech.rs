@@ -195,7 +195,7 @@ fn main() {
 
     info!("switching to bootstrap");
 
-    for siri in 0..10 {
+    for _ in 0..1 {
         let mut bssettings = ParticleFilterSettingsBuilder::<_, 3>::default()
             .exploration_factor(1.0)
             .noise(FEVMNoise::Multivariate(
@@ -203,7 +203,7 @@ fn main() {
                     &DMatrix::from_diagonal_element(
                         sc_synth.len(),
                         sc_synth.len(),
-                        NOISE_VAR * ((5 * (10 - siri) + 1) as f64),
+                        NOISE_VAR * 100.0,
                     )
                     .as_view(),
                 )
@@ -213,7 +213,7 @@ fn main() {
             .build()
             .unwrap();
 
-        let result = model.sirpf_run(&sc_synth, &fevmd, ENSEMBLE_SIZE, 32 * 4096, &mut bssettings);
+        let result = model.sirpf_run(&sc_synth, &fevmd, ENSEMBLE_SIZE, 4 * 4096, &mut bssettings);
 
         let pfres = result.unwrap();
 

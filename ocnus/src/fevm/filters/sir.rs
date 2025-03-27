@@ -9,7 +9,7 @@ use crate::{
     stats::{PDF, PDFParticles},
 };
 use itertools::Itertools;
-use log::{error, info};
+use log::{debug, info};
 use nalgebra::{DMatrix, RealField, Scalar};
 use num_traits::{AsPrimitive, Float};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
@@ -48,11 +48,17 @@ where
     ) -> Result<ParticleFilterResults<T, P, N, FS, GS>, FEVMError<T>> {
         let start = Instant::now();
 
+        let mut counter = 0;
+        let mut iteration = 0;
+
         let mut target_data = FEVMData::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
 
         let mut temp_data = FEVMData::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
+
+        let mut interim_data = FEVMData::<T, P, FS, GS>::new(sim_ensemble_size);
+        let mut interim_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle PDF from input and multiply by the exploration factor.
         let density_old = PDFParticles::from_particles(
@@ -61,40 +67,68 @@ where
             &fevmd.weights,
         )? * settings.exploration_factor;
 
-        self.fevm_initialize(
-            series,
-            &mut temp_data,
-            Some(&density_old),
-            settings.rseed + 29,
-        )?;
+        while counter != sim_ensemble_size {
+            self.fevm_initialize(
+                series,
+                &mut temp_data,
+                Some(&density_old),
+                settings.rseed + 23 * iteration as u64,
+            )?;
 
-        let flags = self.fevm_simulate(series, &mut temp_data, &mut temp_output, None)?;
+            let mut indices_valid = self
+                .fevm_simulate(
+                    series,
+                    &mut temp_data,
+                    &mut temp_output,
+                    Some(&mut settings.noise),
+                )?
+                .into_iter()
+                .enumerate()
+                .filter_map(|(idx, flag)| if flag { Some(idx) } else { None })
+                .collect::<Vec<usize>>();
 
-        if flags.iter().map(|flag| *flag as usize).sum::<usize>() < ensemble_size {
-            error!(
-                "inefficient sampling {}",
-                flags.iter().map(|flag| *flag as usize).sum::<usize>()
-            );
-            return Err(FEVMError::ParticleFilter(
-                ParticleFilterError::InefficientSampling,
-            ));
+            debug!("valid: {}", indices_valid.len());
+
+            // Remove excessive ensemble members.
+            if counter + indices_valid.len() > temp_data.size() {
+                debug!(
+                    "removing excessive ensemble members simulations n={}",
+                    counter + indices_valid.len() - interim_data.size()
+                );
+                indices_valid.drain((interim_data.size() - counter)..indices_valid.len());
+            }
+
+            // Copy over results.
+            indices_valid.iter().enumerate().for_each(|(edx, idx)| {
+                interim_data
+                    .params
+                    .set_column(counter + edx, &temp_data.params.column(*idx));
+
+                interim_output.set_column(counter + edx, &temp_output.column(*idx));
+            });
+
+            counter += indices_valid.len();
+
+            iteration += 1;
+
+            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap() > settings.time_limit
+            {
+                return Err(FEVMError::ParticleFilter(
+                    ParticleFilterError::TimeLimitExceeded {
+                        elapsed: T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+                        limit: settings.time_limit,
+                    },
+                ));
+            }
         }
 
-        // Compute likelihoods.
-        let likelihoods = temp_output
+        let likelihoods = interim_output
             .par_column_iter()
-            .zip(flags.par_iter())
             .chunks(Self::RCS)
             .map(|mut chunks| {
                 chunks
                     .iter_mut()
-                    .map(|(out, flag)| {
-                        if **flag {
-                            settings.noise.multivariate_likelihood(out, series)
-                        } else {
-                            T::neg_infinity()
-                        }
-                    })
+                    .map(|out| settings.noise.multivariate_likelihood(out, series))
                     .collect::<Vec<T>>()
             })
             .flatten()
@@ -121,7 +155,7 @@ where
 
         // Create a Particle PDF from the temporary simulations.
         let density_new = PDFParticles::from_particles(
-            temp_data.params.as_view(),
+            interim_data.params.as_view(),
             self.model_prior().valid_range(),
             &weights,
         )?;
