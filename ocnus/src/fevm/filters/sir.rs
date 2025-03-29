@@ -111,12 +111,13 @@ where
 
             iteration += 1;
 
-            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap() > settings.time_limit
+            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap()
+                > settings.simulation_time_limit
             {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
                         elapsed: T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
-                        limit: settings.time_limit,
+                        limit: settings.simulation_time_limit,
                     },
                 ));
             }

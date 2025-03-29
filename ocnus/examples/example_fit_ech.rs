@@ -74,7 +74,7 @@ fn main() {
         .noise(FEVMNoise::Gaussian(1.0, 1))
         .quantiles([0.2, 0.5, 1.0])
         .rseed(70)
-        .time_limit(1.5)
+        .simulation_time_limit(1.5)
         .build()
         .unwrap();
 

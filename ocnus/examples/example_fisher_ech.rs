@@ -132,7 +132,7 @@ fn main() {
         .noise(FEVMNoise::Gaussian(NOISE_VAR.sqrt(), 1))
         .quantiles([0.2, 0.5, 1.0])
         .rseed(70)
-        .time_limit(1.5)
+        .simulation_time_limit(5.0)
         .build()
         .unwrap();
 
@@ -157,7 +157,7 @@ fn main() {
     let mut fevmd = init_result.fevmd;
     let mut epsilon = init_result.error_quantiles.unwrap()[0];
 
-    for _ in 1..20 {
+    for _ in 1..10 {
         let run = model.abcpf_run(
             &sc_synth,
             &fevmd,
@@ -192,8 +192,6 @@ fn main() {
         total_counter += 1;
         epsilon = run_pfresult.error_quantiles.unwrap()[0];
     }
-
-    info!("switching to bootstrap");
 
     for _ in 0..1 {
         let mut bssettings = ParticleFilterSettingsBuilder::<_, 3>::default()
