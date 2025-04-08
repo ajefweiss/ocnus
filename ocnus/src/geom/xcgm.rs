@@ -295,7 +295,7 @@ macro_rules! impl_xcgm_geom {
 
 // Implementation of a circular-cylindrical geometry.
 impl_xcgm_geom!(
-    CCModel,
+    CCGeometry,
     ["phi", "theta", "y", "radius", "x_0"],
     cc_basis,
     cc_xyz_to_ics,
@@ -305,7 +305,7 @@ impl_xcgm_geom!(
 
 // Implementation of a elliptic-cylindrical geometry.
 impl_xcgm_geom!(
-    ECModel,
+    ECGeometry,
     ["phi", "theta", "psi", "y", "delta", "radius", "x_0"],
     ec_basis,
     ec_xyz_to_ics,
@@ -317,7 +317,7 @@ impl_xcgm_geom!(
 mod tests {
     use nalgebra::SVector;
 
-    use super::{ECModel, XCState, ec_ics_to_xyz, ec_xyz_to_ics};
+    use super::{ECGeometry, XCState, ec_ics_to_xyz, ec_xyz_to_ics};
 
     #[test]
     fn test_ec_coords() {
@@ -333,20 +333,20 @@ mod tests {
 
         let state = XCState::default();
 
-        let xyz = ec_ics_to_xyz::<_, 7, ECModel<f64>, _, _>(
+        let xyz = ec_ics_to_xyz::<_, 7, ECGeometry<f64>, _, _>(
             (0.6, 0.11, 0.5),
             &params.fixed_rows::<7>(0),
             &state,
         );
 
-        println!("{}", xyz);
-
-        let ics = ec_xyz_to_ics::<_, 7, ECModel<f64>, _, _>(
+        let ics = ec_xyz_to_ics::<_, 7, ECGeometry<f64>, _, _>(
             (xyz[0], xyz[1], xyz[2]),
             &params.fixed_rows::<7>(0),
             &state,
         );
 
-        println!("{}", ics);
+        assert!((ics[0] - 0.6) < 1e-4);
+        assert!((ics[1] - 0.11) < 1e-4);
+        assert!((ics[2] - 0.5) < 1e-4);
     }
 }

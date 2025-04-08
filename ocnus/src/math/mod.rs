@@ -1,4 +1,4 @@
-//! Generic mathematical functions and/or routines.
+//! Mathematical functions and routines.
 
 mod bessel;
 mod factorial;

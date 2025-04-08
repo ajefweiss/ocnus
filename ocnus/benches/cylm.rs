@@ -1,7 +1,7 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
-    fevm::{CCLFFModel, FEVM, FEVMData, FEVMNullState},
+    fevm::{FEVM, FEVMData, FEVMNullState, models::CCLFFModel},
     geom::XCState,
     obser::ObserVec,
     obser::{ScObs, ScObsConf, ScObsSeries},
@@ -64,8 +64,22 @@ fn benchmark_lff_f32(c: &mut Criterion) {
         .sample_size(100)
         .measurement_time(Duration::from_secs(10));
 
+    group.throughput(Throughput::Elements(ENSEMBLE_SIZE as u64));
+    group.bench_function("cylm_lff_initialize", |b| {
+        b.iter(|| {
+            model
+                .fevm_initialize(
+                    black_box(&sc),
+                    black_box(&mut data),
+                    black_box(None::<&PDFUnivariates<f32, 8>>),
+                    42,
+                )
+                .unwrap();
+        });
+    });
+
     group.throughput(Throughput::Elements((ENSEMBLE_SIZE * sc.len()) as u64));
-    group.bench_function("cylm_lff", |b| {
+    group.bench_function("cylm_lff_simulate", |b| {
         b.iter(|| {
             model
                 .fevm_initialize(

@@ -1,11 +1,9 @@
-# Ocnus - A Magnetic Flux Rope Modeling Framework
-
+# Ocnus - A Heliospheric Flux Rope & Solar Wind Modeling Framework
 **Ocnus** attempts to leverage Rust's type system to provide a flexible framework that aims to
-simplify the implementation of analytical or numerical magnetic flux rope models.
+simplify the implementation of magnetic flux rope or solar wind models
+and provide numerical algorithms.
 
-## Core Concepts
-
-
+<!-- ## Core Concepts -->
 
 <!-- ## Implemented FEMV Models
 - Classical circular-cylindrical models (Gold & Hoyle 1960, Lepping et al. 1990).

@@ -6,9 +6,3 @@ pub mod geom;
 pub mod math;
 pub mod obser;
 pub mod stats;
-
-// /// Internal trait for states.
-// pub trait OState:
-//     Clone + std::fmt::Debug + Default + for<'x> serde::Deserialize<'x> + Send + serde::Serialize
-// {
-// }

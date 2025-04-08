@@ -1,108 +1,39 @@
-//! Implementations of forward ensemble vector models (FEVMs).
+//! Forward ensemble vector modeling framework.
+//!
+//! # Forward Ensemble Vector Models (FEVMs)
+//!
+//! This module contains the bread and butter for ensemble modeling with either
+//! magnetic flux rope or solar wind models. The [`FEVM`] trait can be implemented
+//! for models that are forward simulations and are numerically cheap enough to run
+//! in large ensembles. It further assumes that the model output can be interpreted
+//! as a N-dimensional vector observable (i.e. [`ObserVec`]). A [`FEVM`] must be built
+//! ontop of a geometry model (a type that implements [`OcnusGeometry`]), and also make
+//! use an additional state type to handle  time-dependence on top of the geometry state.
+//!
+//! The basic type within this module is [`FEVMData`], which describes an ensemble, with a
+//! matrix describing the model parameters, and two vectors
+//! for the geometry and fevm states. Each ensemble member must also be assigned a
+//! weight according to the importance within the ensemble.
+//!
+//! The [`FEVM`] trait provides, among others, the following important methods:
+//! - [`FEVM::fevm_initialize`]: Initializes the model parameters of a [`FEVMData`]
+//!   to a model or given prior PDF.
+//! - [`FEVM::fevm_initialize_params_only`] / [`FEVM::fevm_initialize_states_only`]:
+//!   These two functions only initialize the model parameters or the model states respectively.
+//! - [`FEVM::fevm_simulate`]: Generates the model outputs for a given [`ScObsSeries`].
+//! - [`FEVM::fevm_simulate_diagnostics`]: Computes and returns the internal coordinates,
+//!   and basis vectors for a given [`ScObsSeries`]. This function exists primarily for
+//!   diagnostic purposes.
+//!
+//!
 
-mod cylm;
 pub mod filters;
 mod fisher;
+pub mod models;
 mod noise;
 
-pub use cylm::*;
 pub use fisher::*;
 pub use noise::*;
-
-use crate::{
-    geom::OcnusGeometry,
-    obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
-    stats::{PDF, PDFParticles, StatsError},
-};
-use filters::ParticleFilterError;
-use itertools::zip_eq;
-use log::debug;
-use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SVectorView, Scalar, VecStorage};
-use num_traits::Float;
-use rand::SeedableRng;
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
-use rand_xoshiro::Xoshiro256PlusPlus;
-use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::{io::Write, iter::Sum};
-use std::{ops::AddAssign, time::Instant};
-use thiserror::Error;
-
-/// A data structure that stores the parameters, states and random seed for a FEVM.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FEVMData<T, const P: usize, FS, GS>
-where
-    T: Clone + Scalar,
-{
-    /// FEVM ensemble parameters.
-    pub params: Matrix<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>,
-
-    /// FEVM ensemble states.
-    pub fevm_states: Vec<FS>,
-
-    /// Geometry ensemble states.
-    pub geom_states: Vec<GS>,
-
-    /// Ensemble member weights.
-    pub weights: Vec<T>,
-}
-
-impl<T, const P: usize, FS, GS> FEVMData<T, P, FS, GS>
-where
-    T: Clone + RealField + Scalar,
-    FS: Clone + Default,
-    GS: Clone + Default,
-    Self: Serialize,
-{
-    /// Create a new [`FEVMData`] filled with zeros.
-    pub fn new(size: usize) -> Self {
-        Self {
-            params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::zeros(size),
-            fevm_states: vec![FS::default(); size],
-            geom_states: vec![GS::default(); size],
-            weights: vec![T::one() / T::from_usize(size).unwrap(); size],
-        }
-    }
-
-    /// Returns the size of the ensemble.
-    pub fn size(&self) -> usize {
-        self.params.ncols()
-    }
-
-    /// Write data to a file.
-    pub fn write(&self, path: String) -> std::io::Result<()> {
-        let mut file = std::fs::File::create(path)?;
-
-        file.write_all(serde_json::to_string(&self).unwrap().as_bytes())?;
-
-        Ok(())
-    }
-}
-
-/// Errors associated with types that implement the [`FEVM`] trait.
-#[allow(missing_docs)]
-#[derive(Debug, Error)]
-pub enum FEVMError<T> {
-    #[error("invalid model parameter {name}={value}")]
-    InvalidParameter { name: &'static str, value: T },
-    #[error(
-        "invalid range {output_rows} x {output_cols} but expected {expected_rows} x {expected_cols}"
-    )]
-    InvalidOutputShape {
-        expected_cols: usize,
-        expected_rows: usize,
-        output_cols: usize,
-        output_rows: usize,
-    },
-    #[error("attempted to simulate backwards in time (dt=-{0:.2}sec)")]
-    NegativeTimeStep(T),
-    #[error("observation cannot be a vector with any NaN valus")]
-    ObservationNaN,
-    #[error("particle filter error")]
-    ParticleFilter(#[from] ParticleFilterError<T>),
-    #[error("stats error")]
-    Stats(#[from] StatsError<T>),
-}
 
 /// The trait that must be implemented for any FEVM (forward ensemble vector model) with an N-dimensional vector observable.
 pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusGeometry<T, P, GS>
@@ -497,3 +428,102 @@ where
     /// Returns a reference to the underlying model prior.
     fn model_prior(&self) -> impl PDF<T, P>;
 }
+
+use crate::{
+    geom::OcnusGeometry,
+    obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
+    stats::{PDF, PDFParticles, StatsError},
+};
+use filters::ParticleFilterError;
+use itertools::zip_eq;
+use log::debug;
+use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SVectorView, Scalar, VecStorage};
+use num_traits::Float;
+use rand::SeedableRng;
+use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::{io::Write, iter::Sum};
+use std::{ops::AddAssign, time::Instant};
+use thiserror::Error;
+
+/// A data structure that stores the parameters, states and random seed for a FEVM.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct FEVMData<T, const P: usize, FS, GS>
+where
+    T: Clone + Scalar,
+{
+    /// FEVM ensemble parameters.
+    pub params: Matrix<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>,
+
+    /// FEVM ensemble states.
+    pub fevm_states: Vec<FS>,
+
+    /// Geometry ensemble states.
+    pub geom_states: Vec<GS>,
+
+    /// Ensemble member weights.
+    pub weights: Vec<T>,
+}
+
+impl<T, const P: usize, FS, GS> FEVMData<T, P, FS, GS>
+where
+    T: Clone + RealField + Scalar,
+    FS: Clone + Default,
+    GS: Clone + Default,
+    Self: Serialize,
+{
+    /// Create a new [`FEVMData`] filled with zeros.
+    pub fn new(size: usize) -> Self {
+        Self {
+            params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::zeros(size),
+            fevm_states: vec![FS::default(); size],
+            geom_states: vec![GS::default(); size],
+            weights: vec![T::one() / T::from_usize(size).unwrap(); size],
+        }
+    }
+
+    /// Returns the size of the ensemble.
+    pub fn size(&self) -> usize {
+        self.params.ncols()
+    }
+
+    /// Write data to a file.
+    pub fn write(&self, path: String) -> std::io::Result<()> {
+        let mut file = std::fs::File::create(path)?;
+
+        file.write_all(serde_json::to_string(&self).unwrap().as_bytes())?;
+
+        Ok(())
+    }
+}
+
+/// Errors associated with types that implement the [`FEVM`] trait.
+#[allow(missing_docs)]
+#[derive(Debug, Error)]
+pub enum FEVMError<T> {
+    #[error("invalid model parameter {name}={value}")]
+    InvalidParameter { name: &'static str, value: T },
+    #[error(
+        "invalid range {output_rows} x {output_cols} but expected {expected_rows} x {expected_cols}"
+    )]
+    InvalidOutputShape {
+        expected_cols: usize,
+        expected_rows: usize,
+        output_cols: usize,
+        output_rows: usize,
+    },
+    #[error("attempted to simulate backwards in time (dt=-{0:.2}sec)")]
+    NegativeTimeStep(T),
+    #[error("observation cannot be a vector with any NaN valus")]
+    ObservationNaN,
+    #[error("particle filter error")]
+    ParticleFilter(#[from] ParticleFilterError<T>),
+    #[error("stats error")]
+    Stats(#[from] StatsError<T>),
+}
+
+/// An empty FEVM state.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FEVMNullState {}

@@ -10,7 +10,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-/// A generic noise generator for [`FEVM`].
+/// A generic noise generator for a [FEVM](`crate::fevm::FEVM`).
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum FEVMNoise<T>
@@ -49,7 +49,7 @@ where
                 );
 
                 for i in 0..N {
-                    let values = covmat.cholesky_ltm()
+                    let values = covmat.ref_cholesky_ltm()
                         * DVector::from_iterator(size, (0..size).map(|_| rng.sample(normal)));
 
                     result

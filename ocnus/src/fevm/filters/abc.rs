@@ -4,7 +4,7 @@ use crate::{
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
     },
     obser::{ObserVec, ScObsSeries},
-    stats::{PDF, PDFParticles, ptpdf_importance_weighting},
+    stats::{PDF, PDFParticles},
 };
 use itertools::Itertools;
 use log::{debug, info};
@@ -74,7 +74,7 @@ where
         let mut density_old = PDFParticles::from_particles(
             fevmd.params.as_view(),
             self.model_prior().valid_range(),
-            &fevmd.weights,
+            fevmd.weights.clone(),
         )? * settings.exploration_factor;
 
         while counter != ensemble_size {
@@ -215,26 +215,22 @@ where
             }
         }
 
-        // Create a Particle PDF from our result.
-        let density_new = PDFParticles::from_particles(
+        // Create new density using importance weights.
+        let density_new = PDFParticles::from_particles_and_ptpdf(
             target_data.params.as_view(),
-            self.model_prior().valid_range(),
-            &target_data.weights,
+            &density_old,
+            &self.model_prior(),
         )?;
-
-        // Update weights here.
-        debug!("start");
-        target_data.weights =
-            ptpdf_importance_weighting(&density_new, &density_old, &self.model_prior());
-        debug!("end");
 
         // Reset the covariance matrix in the old density.
         density_old *= T::one() / settings.exploration_factor;
 
+        let kld = density_new.kullback_leibler_divergence_mvpdf_estimate(&density_old);
+
         // Compute the effective sample size.
         let effective_sample_size = T::one()
-            / target_data
-                .weights
+            / density_new
+                .weights()
                 .iter()
                 .map(|value| Float::powi(*value, 2))
                 .sum::<T>();
@@ -277,10 +273,9 @@ where
         };
 
         info!(
-            "abcpf_run ({})\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
+            "abcpf_run ({})\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
             mode_string,
-            0.0,
-            2.0,
+            kld,
             eps_1,
             eps_2,
             eps_3,
@@ -292,11 +287,11 @@ where
 
         settings.rseed += 1;
 
-        Ok(ParticleFilterResults {
-            fevmd: target_data,
-            output: target_output,
-            errors: Some(target_filter_values),
-            error_quantiles: Some([eps_1, eps_2, eps_3]),
-        })
+        Ok(ParticleFilterResults::ByMetric(
+            target_data,
+            target_output,
+            target_filter_values,
+            [eps_1, eps_2, eps_3],
+        ))
     }
 }

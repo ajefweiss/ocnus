@@ -194,7 +194,7 @@ where
                                 *value = (0..N)
                                     .map(|idx| {
                                         (dmu_a_mat.row(idx)
-                                            * covariance.inverse_matrix()
+                                            * covariance.ref_inverse_matrix()
                                             * dmu_b_mat.row(idx).transpose())[(0, 0)]
                                     })
                                     .sum::<T>();

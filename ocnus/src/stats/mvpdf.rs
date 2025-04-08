@@ -1,11 +1,14 @@
 use crate::stats::{CovMatrix, PDF, PDFExactDensity, StatsError};
 use log::warn;
-use nalgebra::{RealField, SVector, SVectorView, Scalar};
+use nalgebra::{Const, DMatrix, Dyn, MatrixView, RealField, SVector, SVectorView, Scalar};
 use num_traits::Float;
 use rand::Rng;
 use rand_distr::{Distribution, Normal, StandardNormal};
 use serde::{Deserialize, Serialize};
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::{
+    iter::Sum,
+    ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
+};
 
 /// A multivariate normal PDF .
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -26,8 +29,14 @@ where
 
 impl<T, const P: usize> PDFMultivariate<T, P>
 where
-    T: Copy + RealField + Scalar,
+    T: Copy + Float + RealField + Scalar + Sum<T> + for<'x> Sum<&'x T>,
 {
+    /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition
+    /// of the covariance matrix.
+    pub fn ref_cholesky_ltm(&self) -> &DMatrix<T> {
+        &self.covmat.ref_cholesky_ltm()
+    }
+
     /// Create a [`PDFMultivariate`] from a covariance matrix.
     pub fn from_covmat(covmat: CovMatrix<T>, mean: SVector<T, P>, range: [(T, T); P]) -> Self {
         Self {
@@ -37,12 +46,52 @@ where
         }
     }
 
+    /// Create a [`PDFMultivariate`] from an ensemble of particles.
+    pub fn from_particles<'a>(
+        particles: &MatrixView<'a, T, Const<P>, Dyn>,
+        range: [(T, T); P],
+        weights: Option<&[T]>,
+    ) -> Result<Self, StatsError<T>> {
+        let covmat = CovMatrix::from_particles(&particles.as_view(), weights)?;
+
+        Ok(Self {
+            covmat,
+            mean: particles.column_mean(),
+            range,
+        })
+    }
+
+    /// Returns a reference to the inverse of the underlying covariance matrix.
+    pub fn ref_inverse_matrix(&self) -> &DMatrix<T> {
+        &self.covmat.ref_inverse_matrix()
+    }
+
     /// Compute the Kullback-Leibler divergence between two [`PDFMultivariate`].
     pub fn kullback_leibler_divergence(&self, other: &PDFMultivariate<T, P>) -> T {
-        let _l_0 = self.covmat.cholesky_ltm();
-        let _l_1 = other.covmat.cholesky_ltm();
+        let l_0 = self.covmat.ref_cholesky_ltm();
+        let mu_0 = self.mean;
 
-        unimplemented!();
+        let l_1 = other.covmat.ref_cholesky_ltm();
+        let mu_1 = other.mean;
+
+        let m = l_0.clone().cholesky().unwrap().solve(&l_1);
+        let y = l_1.clone().cholesky().unwrap().solve(&(&mu_1 - &mu_0));
+
+        T::from_f64(0.5).unwrap()
+            * (m.iter().sum::<T>() - T::from_usize(P).unwrap()
+                + y.norm()
+                + T::from_usize(2).unwrap()
+                    * l_1
+                        .diagonal()
+                        .iter()
+                        .zip(l_0.diagonal().iter())
+                        .map(|(a, b)| Float::ln(*a / *b))
+                        .sum::<T>())
+    }
+
+    /// Returns a reference to the underlying covariance matrix.
+    pub fn ref_matrix(&self) -> &DMatrix<T> {
+        &self.covmat.ref_matrix()
     }
 }
 
@@ -53,7 +102,7 @@ where
 {
     fn relative_density(&self, x: &SVectorView<T, P>) -> T {
         let diff = x - self.mean;
-        let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
+        let value = (diff.transpose() * self.covmat.ref_inverse_matrix() * diff)[(0, 0)];
 
         Float::exp(T::from_f64(-0.5).unwrap() * value)
     }
@@ -62,7 +111,7 @@ where
         let normal = Normal::new(T::zero(), T::one()).unwrap();
 
         let mut proposal = self.mean
-            + self.covmat.cholesky_ltm()
+            + self.covmat.ref_cholesky_ltm()
                 * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
@@ -70,7 +119,7 @@ where
 
         while !self.validate_sample(&proposal.as_view()) {
             proposal = self.mean
-                + self.covmat.cholesky_ltm()
+                + self.covmat.ref_cholesky_ltm()
                     * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
 
             attempts += 1;
@@ -98,7 +147,7 @@ where
 {
     fn exact_density(&self, x: &SVectorView<T, P>) -> T {
         let diff = x - self.mean;
-        let value = (diff.transpose() * self.covmat.inverse_matrix() * diff)[(0, 0)];
+        let value = (diff.transpose() * self.covmat.ref_inverse_matrix() * diff)[(0, 0)];
 
         Float::exp(T::from_f64(-0.5).unwrap() * value)
             / Float::sqrt(

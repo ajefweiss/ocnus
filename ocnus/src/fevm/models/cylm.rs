@@ -1,9 +1,9 @@
 use crate::{
     fevm::{
-        FEVM, FEVMError, FisherInformation,
+        FEVM, FEVMError, FEVMNullState, FisherInformation,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
     },
-    geom::{CCModel, ECModel, OcnusGeometry, XCState},
+    geom::{CCGeometry, ECGeometry, OcnusGeometry, XCState},
     math::bessel_jn,
     obser::ObserVec,
     obser::{ScObs, ScObsConf, ScObsSeries},
@@ -16,10 +16,6 @@ use num_traits::{AsPrimitive, Float, FromPrimitive, float::TotalOrder};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, iter::Sum, marker::PhantomData, ops::AddAssign};
-
-/// An empty FEVM state.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct FEVMNullState {}
 
 /// Linear force-free magnetic field observable.
 pub fn cc_lff_obs<T, const P: usize, M, GS>(
@@ -561,7 +557,7 @@ macro_rules! impl_cylm_fevm {
 
 impl_cylm_fevm!(
     CCLFFModel,
-    CCModel,
+    CCGeometry,
     ["v", "B", "alpha"],
     cc_lff_obs,
     "Circular-cylindrical linear force-free magnetic flux rope model."
@@ -569,7 +565,7 @@ impl_cylm_fevm!(
 
 impl_cylm_fevm!(
     CCUTModel,
-    CCModel,
+    CCGeometry,
     ["v", "B", "tau"],
     cc_ut_obs,
     "Circular-cylindrical uniform twist magnetic flux rope model."
@@ -577,7 +573,7 @@ impl_cylm_fevm!(
 
 impl_cylm_fevm!(
     ECHModel,
-    ECModel,
+    ECGeometry,
     ["v", "B", "lambda", "alpha", "tau"],
     ec_hybrid_obs,
     "Elliptic-cylindrical uniform twist magnetic flux rope model."

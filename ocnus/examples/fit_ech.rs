@@ -1,18 +1,22 @@
 use chrono::Local;
+use directories::UserDirs;
+use dyn_fmt::AsStrFormatExt;
 use env_logger::Builder;
+use log::warn;
 use nalgebra::DMatrix;
 use ocnus::{
     fevm::{
-        ECHModel, FEVMError, FEVMNoise,
+        FEVMError, FEVMNoise,
         filters::{
             ABCParticleFilter, ABCParticleFilterMode, ParticleFilter, ParticleFilterError,
             ParticleFilterSettingsBuilder, SIRParticleFilter, root_mean_square_filter,
         },
+        models::ECHModel,
     },
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
     stats::{CovMatrix, PDFConstant, PDFReciprocal, PDFUniform, PDFUnivariates},
 };
-use std::io::prelude::*;
+use std::{io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -69,7 +73,7 @@ fn main() {
         )
     }));
 
-    let mut pfsettings = ParticleFilterSettingsBuilder::<_, 3>::default()
+    let mut abc_settings = ParticleFilterSettingsBuilder::<_, 3>::default()
         .exploration_factor(1.5)
         .noise(FEVMNoise::Gaussian(1.0, 1))
         .quantiles([0.2, 0.5, 1.0])
@@ -84,20 +88,45 @@ fn main() {
             ENSEMBLE_SIZE,
             2_usize.pow(18),
             Some((&root_mean_square_filter, 9.5)),
-            &mut pfsettings,
+            &mut abc_settings,
         )
         .unwrap();
 
-    init_result
-        .write(format!(
-            "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-            0
-        ))
-        .unwrap();
+    let base_dir_opt = if let Some(user_dirs) = UserDirs::new() {
+        let doc_dir = user_dirs.document_dir().unwrap();
+
+        let path = Path::new(doc_dir).join("Data").join("example_fit_ech");
+
+        if path.exists() {
+            Some(path)
+        } else {
+            warn!(
+                "path {} not found, results will not be saved",
+                path.into_os_string().into_string().unwrap()
+            );
+
+            None
+        }
+    } else {
+        warn!("no document fold found, results will not be saved");
+
+        None
+    };
+
+    if let Some(base_dir) = &base_dir_opt {
+        let format_str = base_dir
+            .join("{}.particles")
+            .into_os_string()
+            .into_string()
+            .unwrap()
+            .format(&[0]);
+
+        init_result.write(format_str).unwrap();
+    }
 
     let mut total_counter = 1;
-    let mut fevmd = init_result.fevmd;
-    let mut epsilon = init_result.error_quantiles.unwrap()[0];
+    let mut fevmd = init_result.get_fevmd().clone();
+    let mut epsilon = init_result.get_error_quantiles().unwrap()[0];
 
     for _ in 1..20 {
         let run = model.abcpf_run(
@@ -106,16 +135,16 @@ fn main() {
             ENSEMBLE_SIZE,
             2_usize.pow(16),
             ABCParticleFilterMode::Threshold((&root_mean_square_filter, epsilon)),
-            &mut pfsettings,
+            &mut abc_settings,
         );
 
-        let run_pfresult = match run {
+        let run_abc_result = match run {
             Ok(result) => result,
             Err(err) => match err {
                 FEVMError::ParticleFilter(pferr) => match pferr {
                     ParticleFilterError::TimeLimitExceeded { .. } => break,
                     _ => {
-                        pfsettings.rseed += 1;
+                        abc_settings.rseed += 1;
                         continue;
                     }
                 },
@@ -123,20 +152,24 @@ fn main() {
             },
         };
 
-        run_pfresult
-            .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                total_counter
-            ))
-            .unwrap();
+        if let Some(base_dir) = &base_dir_opt {
+            let format_str = base_dir
+                .join("{}.particles")
+                .into_os_string()
+                .into_string()
+                .unwrap()
+                .format(&[total_counter]);
 
-        fevmd = run_pfresult.fevmd;
+            run_abc_result.write(format_str).unwrap();
+        }
+
+        fevmd = run_abc_result.get_fevmd().clone();
         total_counter += 1;
-        epsilon = run_pfresult.error_quantiles.unwrap()[0];
+        epsilon = run_abc_result.get_error_quantiles().unwrap()[0];
     }
 
     for idx in 0..10 {
-        let mut bssettings = ParticleFilterSettingsBuilder::<_, 3>::default()
+        let mut sir_settings = ParticleFilterSettingsBuilder::<_, 3>::default()
             .exploration_factor(1.0)
             .noise(FEVMNoise::Multivariate(
                 CovMatrix::from_matrix(
@@ -153,45 +186,28 @@ fn main() {
             .build()
             .unwrap();
 
-        let result = model.sirpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
+        let run = model.sirpf_run(
+            &sc,
+            &fevmd,
+            ENSEMBLE_SIZE,
+            2_usize.pow(16),
+            &mut sir_settings,
+        );
 
-        let pfres = result.unwrap();
+        let run_sir_result = run.unwrap();
 
-        pfres
-            .write(format!(
-                "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-                total_counter
-            ))
-            .unwrap();
+        if let Some(base_dir) = &base_dir_opt {
+            let format_str = base_dir
+                .join("{}.particles")
+                .into_os_string()
+                .into_string()
+                .unwrap()
+                .format(&[total_counter]);
 
-        fevmd = pfres.fevmd;
+            run_sir_result.write(format_str).unwrap();
+        }
+
+        fevmd = run_sir_result.get_fevmd().clone();
         total_counter += 1;
     }
-
-    // for _ in 0..10 {
-    //     let mut bssettings = ParticleFilterSettingsBuilder::<3, _>::default()
-    //         .exploration_factor(1.0)
-    //         .noise(FEVMNoiseMultivariate(
-    //             CovMatrix::from_matrix(
-    //                 &DMatrix::from_diagonal_element(sc.len(), sc.len(), 1.0).as_view(),
-    //             )
-    //             .unwrap(),
-    //         ))
-    //         .build()
-    //         .unwrap();
-
-    //     let result = model.bootpf_run(&sc, &fevmd, ENSEMBLE_SIZE, 2_usize.pow(16), &mut bssettings);
-
-    //     let pfres = result.unwrap();
-
-    //     pfres
-    //         .write(format!(
-    //             "/Users/ajweiss/Documents/Data/ocnus_pf/{:03}.particles",
-    //             total_counter
-    //         ))
-    //         .unwrap();
-
-    //     fevmd = pfres.fevmd;
-    //     total_counter += 1;
-    // }
 }

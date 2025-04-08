@@ -19,7 +19,7 @@ use num_traits::{AsPrimitive, Float, FromPrimitive};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{io::Write, iter::Sum, ops::AddAssign, time::Instant};
+use std::{io::Write, iter::Sum, ops::AddAssign, path::Path, time::Instant};
 use thiserror::Error;
 
 /// Errors associated with particle filters.
@@ -76,28 +76,28 @@ where
     pub quantiles: [T; 3],
 }
 
-/// A data structure holding the results of any particle filtering method.
+/// An algebraic data type holding the results of any particle filtering method.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound = "
     T: for<'x> Deserialize<'x> + Serialize, 
     FS: for<'x> Deserialize<'x> + Serialize, 
     GS: for<'x> Deserialize<'x> + Serialize
 ")]
-pub struct ParticleFilterResults<T, const P: usize, const N: usize, FS, GS>
+pub enum ParticleFilterResults<T, const P: usize, const N: usize, FS, GS>
 where
     T: Clone + Float + Scalar,
 {
-    /// [`FEVMData`] object.
-    pub fevmd: FEVMData<T, P, FS, GS>,
-
-    /// Output array with noise.
-    pub output: DMatrix<ObserVec<T, N>>,
-
-    /// Error values.
-    pub errors: Option<Vec<T>>,
-
-    /// Error quantiles values.
-    pub error_quantiles: Option<[T; 3]>,
+    /// Default result holding the particles and output.
+    Default(FEVMData<T, P, FS, GS>, DMatrix<ObserVec<T, N>>),
+    /// Result holding additional likelihood values.
+    ByLikelihood(FEVMData<T, P, FS, GS>, DMatrix<ObserVec<T, N>>, Vec<T>),
+    /// Result holding additional error values and quantile statistics.
+    ByMetric(
+        FEVMData<T, P, FS, GS>,
+        DMatrix<ObserVec<T, N>>,
+        Vec<T>,
+        [T; 3],
+    ),
 }
 
 impl<T, const P: usize, const N: usize, FS, GS> ParticleFilterResults<T, P, N, FS, GS>
@@ -105,8 +105,47 @@ where
     T: Clone + Float + Scalar,
     Self: Serialize,
 {
+    /// Get the errors (for [`ParticleFilterResults::ByMetric`] only).
+    pub fn get_errors(&self) -> Option<&Vec<T>> {
+        match self {
+            ParticleFilterResults::Default(..) => None,
+            ParticleFilterResults::ByLikelihood(..) => None,
+            ParticleFilterResults::ByMetric(_, _, errors, _) => Some(errors),
+        }
+    }
+
+    /// Get the error quantiles (for [`ParticleFilterResults::ByMetric`] only).
+    pub fn get_error_quantiles(&self) -> Option<&[T; 3]> {
+        match self {
+            ParticleFilterResults::Default(..) => None,
+            ParticleFilterResults::ByLikelihood(..) => None,
+            ParticleFilterResults::ByMetric(_, _, _, error_quantiles) => Some(error_quantiles),
+        }
+    }
+
+    /// Access the underlying [`FEVMData`].
+    pub fn get_fevmd(&self) -> &FEVMData<T, P, FS, GS> {
+        match self {
+            ParticleFilterResults::Default(fevmd, ..) => fevmd,
+            ParticleFilterResults::ByLikelihood(fevmd, ..) => fevmd,
+            ParticleFilterResults::ByMetric(fevmd, ..) => fevmd,
+        }
+    }
+
+    /// Get the likelihoods (for [`ParticleFilterResults::ByLikelihood`] only).
+    pub fn get_likelihoods(&self) -> Option<&Vec<T>> {
+        match self {
+            ParticleFilterResults::Default(..) => None,
+            ParticleFilterResults::ByLikelihood(_, _, likelihoods) => Some(likelihoods),
+            ParticleFilterResults::ByMetric(..) => None,
+        }
+    }
+
     /// Write data to a file.
-    pub fn write(&self, path: String) -> std::io::Result<()> {
+    pub fn write<S>(&self, path: S) -> std::io::Result<()>
+    where
+        S: AsRef<Path>,
+    {
         let mut file = std::fs::File::create(path)?;
 
         file.write_all(serde_json::to_string(&self).unwrap().as_bytes())?;
@@ -234,7 +273,7 @@ where
             }
         }
 
-        let (errors, error_quantiles) = if !target_filter_values.is_empty() {
+        if !target_filter_values.is_empty() {
             let filter_values_sorted = target_filter_values
                 .iter()
                 .sorted_by(|a, b| a.partial_cmp(b).unwrap())
@@ -254,9 +293,7 @@ where
             };
 
             info!(
-                "pf_initialize_data\n\tKL delta: {:.3} | ln det {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
-                0.0,
-                2.0,
+                "pf_initialize_data\n\tKL delta: n/a | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
                 eps_1,
                 eps_2,
                 eps_3,
@@ -267,12 +304,18 @@ where
 
             settings.rseed += 1;
 
-            (Some(target_filter_values), Some([eps_1, eps_2, eps_3]))
+            self.fevm_simulate(series, &mut target, &mut target_output, None)?;
+
+            Ok(ParticleFilterResults::ByMetric(
+                target,
+                target_output,
+                target_filter_values,
+                [eps_1, eps_2, eps_3],
+            ))
         } else {
             info!(
-                "pf_initialize_data\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec",
+                "pf_initialize_data\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
                 0.0,
-                2.0,
                 T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
                     .unwrap(),
                 T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
@@ -280,17 +323,8 @@ where
 
             settings.rseed += 1;
 
-            (None, None)
-        };
-
-        self.fevm_simulate(series, &mut target, &mut target_output, None)?;
-
-        Ok(ParticleFilterResults {
-            fevmd: target,
-            output: target_output,
-            errors,
-            error_quantiles,
-        })
+            Ok(ParticleFilterResults::Default(target, target_output))
+        }
     }
 }
 

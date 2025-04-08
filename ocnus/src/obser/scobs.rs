@@ -9,12 +9,6 @@ use std::{
 };
 
 /// The configuration of a single spacecraft observation, as used in [`ScObs`].
-///
-/// The following variants are currently implemented:
-/// - [`ScObsConf::Distance`] : (x) - position of the spacecraft in a heliocentric coordinate
-///   system.
-/// - [`ScObsConf::Position`] : (x, y, z) - position of the spacecraft in a heliocentric coordinate
-///   system.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ScObsConf<T> {
     /// Distance from the Sun.
@@ -60,15 +54,7 @@ impl<T, O> ScObs<T, O> {
     }
 }
 
-/// Represents a time series of spacecraft observations, with optional observations.
-///
-/// [`ScObsSeries`] has, among others, three important implementations:
-/// - [`ScObsSeries::add`] : Allows composition of two [`ScObsSeries`] objects.
-/// - [`ScObsSeries::sort_by_timestamp`] : Sorts the underlying vector of [`ScObs`]
-///   objets by their timestamps.
-/// - [`ScObsSeries::split`] : The reciprocal of one or multiple [`ScObsSeries::add`] calls.
-///   Calling this function consumes a composite [`ScObsSeries`] and returns the original
-///   [`ScObsSeries`] objects in a vector.
+/// Represents a time series of spacecraft observations.
 #[derive(Clone, Debug, Deserialize, IntoIterator, Serialize)]
 pub struct ScObsSeries<T, O> {
     /// Vector of spacecraft observations.

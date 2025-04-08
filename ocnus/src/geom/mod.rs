@@ -1,7 +1,25 @@
-//! Implementations of flux rope geometries.
+//! Geometry models and states.
+//!
+//! # Geometry & State
+//!
+//! A geometry model defines the basis of any more complex model within the **ocnus** framework
+//! and defines the underlying internal coordinate system (ics) which is being used to
+//! conveniently describe the physical system. One can introduce time-dependence for
+//! the geometry by describing the ics in terms of a `state` type/variable.
+//!
+//! Currently implemented geometries:
+//! - [`CCGeometry`]: A circular-cylindrical geometry with internal coordinates (r, ϕ, z) for flux rope models.
+//! - [`ECGeometry`]: An elliptic-cylindrical geometry with internal coordinates (r, ϕ, z) for flux rope models.
+//! - [`SPHGeometry`]: A spherical geometry with internal coordiantes (r, ϕ, θ) for solar wind or spheromak models.
+//!
+//! Currently implemented state types:
+//! - [`XCState`]: A generic state for cylindrical geometries with arbitrary cross-sections.
+//! - [`SPHState`]: A state for spherical geometries.
 
+mod sphgm;
 mod xcgm;
 
+pub use sphgm::*;
 pub use xcgm::*;
 
 use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};

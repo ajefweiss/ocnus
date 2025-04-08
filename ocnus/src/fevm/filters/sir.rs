@@ -64,7 +64,7 @@ where
         let density_old = PDFParticles::from_particles(
             fevmd.params.as_view(),
             self.model_prior().valid_range(),
-            &fevmd.weights,
+            fevmd.weights.clone(),
         )? * settings.exploration_factor;
 
         while counter != sim_ensemble_size {
@@ -72,7 +72,7 @@ where
                 series,
                 &mut temp_data,
                 Some(&density_old),
-                settings.rseed + 23 * iteration as u64,
+                settings.rseed + 27 * iteration as u64,
             )?;
 
             let mut indices_valid = self
@@ -158,11 +158,17 @@ where
         let density_new = PDFParticles::from_particles(
             interim_data.params.as_view(),
             self.model_prior().valid_range(),
-            &weights,
+            weights,
         )?;
 
-        let effective_sample_size =
-            T::one() / weights.iter().map(|v| Float::powi(*v, 2)).sum::<T>();
+        let kld = density_new.kullback_leibler_divergence_mvpdf_estimate(&density_old);
+
+        let effective_sample_size = T::one()
+            / density_new
+                .weights()
+                .iter()
+                .map(|v| Float::powi(*v, 2))
+                .sum::<T>();
 
         self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
 
@@ -181,23 +187,21 @@ where
         target_data.weights = vec![T::one() / T::from_usize(ensemble_size).unwrap(); ensemble_size];
 
         info!(
-            "sirpf_run\n\tKL delta: {:.3} | ln det {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\tunique samples = {} ({:.1}) / {}",
-            0.0,
-            2.0,
+            "sirpf_run\n\tKL delta: {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}\n\tunique samples = {}",
+            kld,
             (series.len() * sim_ensemble_size) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3,
-            uniques,
             effective_sample_size,
             ensemble_size,
+            uniques,
         );
 
         settings.rseed += 1;
 
-        Ok(ParticleFilterResults {
-            fevmd: target_data,
-            output: target_output,
-            errors: Some(likelihoods),
-            error_quantiles: None,
-        })
+        Ok(ParticleFilterResults::ByLikelihood(
+            target_data,
+            target_output,
+            likelihoods,
+        ))
     }
 }

@@ -1,4 +1,4 @@
-//! Implementation of [`CovMatrix`] and generic covariance functions.
+//! Implementation of [`CovMatrix`] and covariance functions.
 
 use crate::stats::StatsError;
 use derive_more::Deref;
@@ -37,16 +37,11 @@ impl<T> CovMatrix<T>
 where
     T: Copy + RealField + Scalar,
 {
-    /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition.
-    pub fn cholesky_ltm(&self) -> &DMatrix<T> {
-        &self.cholesky_ltm
-    }
-
-    /// Create a [`CovMatrix`] from a semi positive-definite square matrix.
+    /// Create a [`CovMatrix`] from a semi positive definite square matrix.
     pub fn from_matrix(matrix: &DMatrixView<T>) -> Result<Self, StatsError<T>> {
         let matrix_owned = matrix.into_owned();
 
-        let (cholesky_ltm, determinant) = match matrix.cholesky() {
+        let (cholesky_ltm, pseudo_determinant) = match matrix.cholesky() {
             Some(result) => (result.l(), result.determinant()),
             None => {
                 error!(
@@ -78,12 +73,12 @@ where
             cholesky_ltm,
             inverse_matrix,
             matrix: matrix_owned,
-            pseudo_determinant: determinant,
+            pseudo_determinant,
         })
     }
 
-    /// Create a [`CovMatrix`] from a matrix of N-dimensional vectors.
-    pub fn from_vectors<const N: usize>(
+    /// Create a [`CovMatrix`] from an ensemble of particles.
+    pub fn from_particles<const N: usize>(
         vectors: &MatrixView<T, Const<N>, Dyn>,
         opt_weights: Option<&[T]>,
     ) -> Result<Self, StatsError<T>>
@@ -150,19 +145,9 @@ where
         Ok(result)
     }
 
-    /// Returns a reference to the inverse of the covariance matrix.
-    pub fn inverse_matrix(&self) -> &DMatrix<T> {
-        &self.inverse_matrix
-    }
-
-    /// Returns a reference to the covariance matrix.
-    pub fn matrix(&self) -> &DMatrix<T> {
-        &self.matrix
-    }
-
     /// Compute the multivariate likelihood from two iterators over `T`.
     /// The length of both iterators must be equal and also a multiple
-    /// of the dimension of the covariance matrix (panic).
+    /// of the dimension of the covariance matrix (panic otherwise).
     pub fn multivariate_likelihood(
         &self,
         x: impl IntoIterator<Item = T>,
@@ -202,6 +187,21 @@ where
     /// Returns the pseudo-determinant of the covariance matrix.
     pub fn pseudo_determinant(&self) -> T {
         self.pseudo_determinant
+    }
+
+    /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition.
+    pub fn ref_cholesky_ltm(&self) -> &DMatrix<T> {
+        &self.cholesky_ltm
+    }
+
+    /// Returns a reference to the inverse of the covariance matrix.
+    pub fn ref_inverse_matrix(&self) -> &DMatrix<T> {
+        &self.inverse_matrix
+    }
+
+    /// Returns a reference to the covariance matrix.
+    pub fn ref_matrix(&self) -> &DMatrix<T> {
+        &self.matrix
     }
 }
 
@@ -395,7 +395,7 @@ mod tests {
 
         let array_view = &array.as_view();
 
-        let covmat = CovMatrix::from_vectors(array_view, None).unwrap();
+        let covmat = CovMatrix::from_particles(array_view, None).unwrap();
 
         assert!((covmat.cholesky_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
         assert!((covmat.cholesky_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);

@@ -12,7 +12,6 @@ crate-type = ["lib"]
 chrono = "*"
 derive_builder = "*"
 derive_more = { version = "*", features = ["full"] }
-env_logger = "*"
 itertools = "*"
 log = "*"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
@@ -28,7 +27,10 @@ serde_json = "*"
 thiserror = "*"
 
 [dev-dependencies]
+directories = "*"
+dyn-fmt = "*"
 criterion = "*"
+env_logger = "*"
 
 [[bench]]
 name = "cylm"
