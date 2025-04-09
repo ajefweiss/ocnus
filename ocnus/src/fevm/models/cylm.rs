@@ -157,16 +157,16 @@ where
     //         _ => {
     //             let b_linearized = b / (T::one() - y_offset.powi(2));
     //             let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-    //             let omega = t_from!(2.0 * std::f64::consts::PI) * (nu - psi);
+    //             let omega = t_from!(2.0) * T::pi() * (nu - psi);
 
     //             // We remove one radius_lineralized everywhere as it cancels out.
     //             // See Eqs. 7-9 in Weiss 2024 et al.
     //             let sqrtg =
-    //                 t_from!(2.0 * std::f64::consts::PI) * delta.powi(2) * mu * radius_linearized
+    //                 t_from!(2.0) * T::pi() * delta.powi(2) * mu * radius_linearized
     //                     / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2));
 
     //             // LFF terms.
-    //             let b_s_lff = t_from!(2.0 * std::f64::consts::PI)
+    //             let b_s_lff = t_from!(2.0) * T::pi()
     //                 * mu
     //                 * radius_linearized
     //                 * b_linearized
@@ -177,7 +177,7 @@ where
 
     //             // UT terms.
     //             let b_s_ut =
-    //                 t_from!(2.0 * std::f64::consts::PI) * mu * radius_linearized * b_linearized
+    //                 t_from!(2.0) * T::pi() * mu * radius_linearized * b_linearized
     //                     / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
     //                     / sqrtg;
     //             let b_nu_ut = mu * radius_linearized * b_linearized * tau
@@ -200,19 +200,17 @@ where
             _ => {
                 let b_linearized = b / (T::one() - Float::powi(y_offset, 2));
                 let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
-                let omega = t_from!(2.0 * std::f64::consts::PI) * (nu - psi);
+                let omega = t_from!(2.0) * T::pi() * (nu - psi);
 
                 // We remove one radius_linearized everywhere as it cancels out.
                 // See Eqs. 7-9 in Weiss 2024 et al.
-                let sqrtg = t_from!(2.0 * std::f64::consts::PI)
-                    * Float::powi(delta, 2)
-                    * mu
-                    * radius_linearized
+                let sqrtg = t_from!(2.0) * T::pi() * Float::powi(delta, 2) * mu * radius_linearized
                     / (Float::powi(Float::cos(omega), 2)
                         + Float::powi(delta, 2) * Float::powi(Float::sin(omega), 2));
 
                 // LFF terms.
-                let b_s_lff = t_from!(2.0 * std::f64::consts::PI)
+                let b_s_lff = t_from!(2.0)
+                    * T::pi()
                     * mu
                     * radius_linearized
                     * b_linearized
@@ -222,10 +220,9 @@ where
                     b_linearized * sign * bessel_jn(alpha * mu * radius_linearized, 1) / sqrtg;
 
                 // UT terms.
-                let b_s_ut =
-                    t_from!(2.0 * std::f64::consts::PI) * mu * radius_linearized * b_linearized
-                        / (T::one() + Float::powi(tau, 2) * Float::powi(mu * radius_linearized, 2))
-                        / sqrtg;
+                let b_s_ut = t_from!(2.0) * T::pi() * mu * radius_linearized * b_linearized
+                    / (T::one() + Float::powi(tau, 2) * Float::powi(mu * radius_linearized, 2))
+                    / sqrtg;
                 let b_nu_ut = mu * radius_linearized * b_linearized * tau
                     / (T::one() + Float::powi(tau, 2) * Float::powi(mu * radius_linearized, 2))
                     / sqrtg;

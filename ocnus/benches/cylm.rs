@@ -9,7 +9,7 @@ use ocnus::{
 };
 use std::{hint::black_box, time::Duration};
 
-const ENSEMBLE_SIZE: usize = 2_usize.pow(18);
+const ENSEMBLE_SIZE: usize = 2_usize.pow(16);
 
 fn benchmark_lff_f32(c: &mut Criterion) {
     let prior = PDFUnivariates::new([
@@ -61,8 +61,8 @@ fn benchmark_lff_f32(c: &mut Criterion) {
 
     group
         .significance_level(0.05)
-        .sample_size(100)
-        .measurement_time(Duration::from_secs(10));
+        .sample_size(50)
+        .measurement_time(Duration::from_secs(5));
 
     group.throughput(Throughput::Elements(ENSEMBLE_SIZE as u64));
     group.bench_function("cylm_lff_initialize", |b| {
