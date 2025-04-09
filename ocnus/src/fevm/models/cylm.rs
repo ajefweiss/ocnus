@@ -79,26 +79,6 @@ where
     let tau = M::param_value("tau", params);
     let radius = M::param_value("radius", params);
 
-    // Co-Pilot modified (backup)
-
-    // let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
-    // match r.partial_cmp(&T::one()) {
-    //     Some(ord) => match ord {
-    //         Ordering::Greater => None,
-    //         _ => {
-    //             let b_linearized = b / (T::one() - y_offset.powi(2));
-
-    //             let b_s = b_linearized / (T::one() + tau.powi(2) * (r * radius_linearized).powi(2));
-    //             let b_phi = r * radius_linearized * b_linearized * tau
-    //                 / (T::one() + tau.powi(2) * (r * radius_linearized).powi(2));
-
-    //             Some(Vector3::new(T::zero(), b_phi, b_s))
-    //         }
-    //     },
-    //     None => None,
-    // }
-
     let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
 
     match r.partial_cmp(&T::one()) {
@@ -148,51 +128,6 @@ where
             return None;
         }
     };
-
-    // Co-Pilot modified (backup)
-
-    // match mu.partial_cmp(&T::one()) {
-    //     Some(ord) => match ord {
-    //         Ordering::Greater => None,
-    //         _ => {
-    //             let b_linearized = b / (T::one() - y_offset.powi(2));
-    //             let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-    //             let omega = t_from!(2.0) * T::pi() * (nu - psi);
-
-    //             // We remove one radius_lineralized everywhere as it cancels out.
-    //             // See Eqs. 7-9 in Weiss 2024 et al.
-    //             let sqrtg =
-    //                 t_from!(2.0) * T::pi() * delta.powi(2) * mu * radius_linearized
-    //                     / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2));
-
-    //             // LFF terms.
-    //             let b_s_lff = t_from!(2.0) * T::pi()
-    //                 * mu
-    //                 * radius_linearized
-    //                 * b_linearized
-    //                 * bessel_jn(alpha * mu * radius_linearized, 0)
-    //                 / sqrtg;
-    //             let b_nu_lff =
-    //                 b_linearized * sign * bessel_jn(alpha * mu * radius_linearized, 1) / sqrtg;
-
-    //             // UT terms.
-    //             let b_s_ut =
-    //                 t_from!(2.0) * T::pi() * mu * radius_linearized * b_linearized
-    //                     / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
-    //                     / sqrtg;
-    //             let b_nu_ut = mu * radius_linearized * b_linearized * tau
-    //                 / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
-    //                 / sqrtg;
-
-    //             Some(Vector3::new(
-    //                 T::zero(),
-    //                 lambda * b_nu_lff + (T::one() - lambda) * b_nu_ut,
-    //                 lambda * b_s_lff + (T::one() - lambda) * b_s_ut,
-    //             ))
-    //         }
-    //     },
-    //     None => None,
-    // }
 
     match mu.partial_cmp(&T::one()) {
         Some(ord) => match ord {
@@ -831,6 +766,10 @@ mod tests {
         model
             .fevm_simulate(&sc, &mut data, &mut output, None)
             .expect("simulation failed");
+
+        println!("oo: {}", &output[(0, 0)]);
+        println!("oo: {}", &output[(2, 0)]);
+        println!("oo: {}", &output[(4, 0)]);
 
         assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);

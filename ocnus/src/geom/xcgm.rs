@@ -133,7 +133,7 @@ where
         / r
         / delta
         / radius_linearized;
-    let nu = psi - Float::acos(x / r) / t_from!(2.0 * std::f64::consts::PI);
+    let nu = psi - Float::acos(x / r) / t_from!(2.0) * T::pi();
 
     Vector3::new(mu, nu, y)
 }
@@ -323,9 +323,8 @@ impl_xcgm_geom!(
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::SVector;
-
     use super::{ECGeometry, XCState, ec_ics_to_xyz, ec_xyz_to_ics};
+    use nalgebra::SVector;
 
     #[test]
     fn test_ec_coords() {

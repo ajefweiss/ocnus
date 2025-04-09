@@ -27,10 +27,11 @@
 //! - [`SPHState`] A state for spherical geometries.
 
 mod sphgm;
-// mod ttgm;
+mod ttgm;
 mod xcgm;
 
 pub use sphgm::{SPHGeometry, SPHState};
+pub use ttgm::{TTGeometry, TTState};
 pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
 use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};
@@ -72,7 +73,7 @@ pub trait OcnusGeometry<T, const P: usize, GS> {
     /// at a specific location given by intrinsic coordiantes `ics`.
     fn create_xyz_vector<CStride: Dim>(
         ics: &VectorView3<T>,
-        ics_comp: &VectorView3<T>,
+        vec: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
         geom_state: &GS,
     ) -> Vector3<T>;
