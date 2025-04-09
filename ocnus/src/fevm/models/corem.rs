@@ -8,12 +8,11 @@ use crate::{
     obser::ObserVec,
     obser::{ScObs, ScObsConf, ScObsSeries},
     stats::PDF,
-    t_from,
 };
 use nalgebra::{
     Const, Dim, RealField, SVectorView, Scalar, SimdRealField, U1, Vector3, VectorView, VectorView3,
 };
-use num_traits::{AsPrimitive, Float, FromPrimitive, Zero, float::TotalOrder};
+use num_traits::{AsPrimitive, Float, FromPrimitive, float::TotalOrder};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, iter::Sum, marker::PhantomData, ops::AddAssign};
@@ -25,7 +24,7 @@ pub fn cc_lff_obs<T, const P: usize, M, GS>(
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
 where
-    T: 'static + Clone + Float + FromPrimitive + RealField + Scalar + TotalOrder + Zero,
+    T: 'static + Clone + Float + FromPrimitive + TotalOrder,
     M: OcnusGeometry<T, P, GS>,
 {
     // Extract parameters using their identifiers.
@@ -34,7 +33,7 @@ where
     let alpha_signed = M::param_value("alpha", params);
     let radius = M::param_value("radius", params);
 
-    let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     let (alpha, sign) = match alpha_signed.partial_cmp(&T::zero()) {
         Some(ord) => match ord {
@@ -50,7 +49,7 @@ where
         Some(ord) => match ord {
             Ordering::Greater => None,
             _ => {
-                let b_linearized = b / (T::one() - Float::powi(y_offset, 2));
+                let b_linearized = b / (T::one() - y_offset.powi(2));
 
                 // Bessel function evaluation uses 11 terms.
                 let b_s = b_linearized * bessel_jn(alpha * r * radius_linearized, 0);
@@ -70,7 +69,7 @@ pub fn cc_ut_obs<T, const P: usize, M, GS>(
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
 where
-    T: Clone + Float + FromPrimitive + RealField + Scalar + TotalOrder + Zero,
+    T: Clone + Float + FromPrimitive + TotalOrder,
     M: OcnusGeometry<T, P, GS>,
 {
     // Extract parameters using their identifiers.
@@ -79,38 +78,17 @@ where
     let tau = M::param_value("tau", params);
     let radius = M::param_value("radius", params);
 
-    // Co-Pilot modified (backup)
-
-    // let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
-    // match r.partial_cmp(&T::one()) {
-    //     Some(ord) => match ord {
-    //         Ordering::Greater => None,
-    //         _ => {
-    //             let b_linearized = b / (T::one() - y_offset.powi(2));
-
-    //             let b_s = b_linearized / (T::one() + tau.powi(2) * (r * radius_linearized).powi(2));
-    //             let b_phi = r * radius_linearized * b_linearized * tau
-    //                 / (T::one() + tau.powi(2) * (r * radius_linearized).powi(2));
-
-    //             Some(Vector3::new(T::zero(), b_phi, b_s))
-    //         }
-    //     },
-    //     None => None,
-    // }
-
-    let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     match r.partial_cmp(&T::one()) {
         Some(ord) => match ord {
             Ordering::Greater => None,
             _ => {
-                let b_linearized = b / (T::one() - Float::powi(y_offset, 2));
+                let b_linearized = b / (T::one() - y_offset.powi(2));
 
-                let b_s = b_linearized
-                    / (T::one() + Float::powi(tau, 2) * Float::powi(r * radius_linearized, 2));
+                let b_s = b_linearized / (T::one() + tau.powi(2) * (r * radius_linearized).powi(2));
                 let b_phi = r * radius_linearized * b_linearized * tau
-                    / (T::one() + Float::powi(tau, 2) * Float::powi(r * radius_linearized, 2));
+                    / (T::one() + tau.powi(2) * (r * radius_linearized).powi(2));
 
                 Some(Vector3::new(T::zero(), b_phi, b_s))
             }
@@ -126,7 +104,7 @@ pub fn ec_hybrid_obs<T, const P: usize, M, GS>(
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
 where
-    T: 'static + Clone + Float + FromPrimitive + RealField + Scalar + TotalOrder + Zero,
+    T: 'static + Clone + Float + FromPrimitive + TotalOrder,
     M: OcnusGeometry<T, P, GS>,
 {
     // Extract parameters using their identifiers.
@@ -149,70 +127,22 @@ where
         }
     };
 
-    // Co-Pilot modified (backup)
-
-    // match mu.partial_cmp(&T::one()) {
-    //     Some(ord) => match ord {
-    //         Ordering::Greater => None,
-    //         _ => {
-    //             let b_linearized = b / (T::one() - y_offset.powi(2));
-    //             let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-    //             let omega = t_from!(2.0 * std::f64::consts::PI) * (nu - psi);
-
-    //             // We remove one radius_lineralized everywhere as it cancels out.
-    //             // See Eqs. 7-9 in Weiss 2024 et al.
-    //             let sqrtg =
-    //                 t_from!(2.0 * std::f64::consts::PI) * delta.powi(2) * mu * radius_linearized
-    //                     / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2));
-
-    //             // LFF terms.
-    //             let b_s_lff = t_from!(2.0 * std::f64::consts::PI)
-    //                 * mu
-    //                 * radius_linearized
-    //                 * b_linearized
-    //                 * bessel_jn(alpha * mu * radius_linearized, 0)
-    //                 / sqrtg;
-    //             let b_nu_lff =
-    //                 b_linearized * sign * bessel_jn(alpha * mu * radius_linearized, 1) / sqrtg;
-
-    //             // UT terms.
-    //             let b_s_ut =
-    //                 t_from!(2.0 * std::f64::consts::PI) * mu * radius_linearized * b_linearized
-    //                     / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
-    //                     / sqrtg;
-    //             let b_nu_ut = mu * radius_linearized * b_linearized * tau
-    //                 / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
-    //                 / sqrtg;
-
-    //             Some(Vector3::new(
-    //                 T::zero(),
-    //                 lambda * b_nu_lff + (T::one() - lambda) * b_nu_ut,
-    //                 lambda * b_s_lff + (T::one() - lambda) * b_s_ut,
-    //             ))
-    //         }
-    //     },
-    //     None => None,
-    // }
-
     match mu.partial_cmp(&T::one()) {
         Some(ord) => match ord {
             Ordering::Greater => None,
             _ => {
-                let b_linearized = b / (T::one() - Float::powi(y_offset, 2));
-                let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
-                let omega = t_from!(2.0 * std::f64::consts::PI) * (nu - psi);
+                let b_linearized = b / (T::one() - y_offset.powi(2));
+                let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
+                let omega = t_from!(2.0) * T::pi() * (nu - psi);
 
-                // We remove one radius_linearized everywhere as it cancels out.
+                // We remove one radius_lineralized everywhere as it cancels out.
                 // See Eqs. 7-9 in Weiss 2024 et al.
-                let sqrtg = t_from!(2.0 * std::f64::consts::PI)
-                    * Float::powi(delta, 2)
-                    * mu
-                    * radius_linearized
-                    / (Float::powi(Float::cos(omega), 2)
-                        + Float::powi(delta, 2) * Float::powi(Float::sin(omega), 2));
+                let sqrtg = t_from!(2.0) * T::pi() * delta.powi(2) * mu * radius_linearized
+                    / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2));
 
                 // LFF terms.
-                let b_s_lff = t_from!(2.0 * std::f64::consts::PI)
+                let b_s_lff = t_from!(2.0)
+                    * T::pi()
                     * mu
                     * radius_linearized
                     * b_linearized
@@ -222,12 +152,11 @@ where
                     b_linearized * sign * bessel_jn(alpha * mu * radius_linearized, 1) / sqrtg;
 
                 // UT terms.
-                let b_s_ut =
-                    t_from!(2.0 * std::f64::consts::PI) * mu * radius_linearized * b_linearized
-                        / (T::one() + Float::powi(tau, 2) * Float::powi(mu * radius_linearized, 2))
-                        / sqrtg;
+                let b_s_ut = t_from!(2.0) * T::pi() * mu * radius_linearized * b_linearized
+                    / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
+                    / sqrtg;
                 let b_nu_ut = mu * radius_linearized * b_linearized * tau
-                    / (T::one() + Float::powi(tau, 2) * Float::powi(mu * radius_linearized, 2))
+                    / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
                     / sqrtg;
 
                 Some(Vector3::new(
@@ -405,7 +334,7 @@ macro_rules! impl_cylm_fevm {
                 geom_state: &mut XCState<T>,
             ) -> Result<(), FEVMError<T>> {
                 // Extract parameters using their identifiers.
-                let vel = Self::param_value("v", params) / t_from!(1.496e8);
+                let vel = Self::param_value("v", params) / t_from!(1.496e8).unwrap();
                 geom_state.t += time_step;
                 geom_state.x += vel * time_step as T;
 
@@ -503,7 +432,7 @@ macro_rules! impl_cylm_fevm {
                 (&self.0)
                     .valid_range()
                     .iter()
-                    .map(|(min, max)| (*max - *min) * t_from!(128.0) * T::epsilon())
+                    .map(|(min, max)| (*max - *min) * t_from!(128.0).unwrap() * T::epsilon())
                     .collect::<Vec<T>>()
                     .try_into()
                     .unwrap()
@@ -621,254 +550,10 @@ macro_rules! impl_cylm_fevm {
     };
 }
 
-impl_cylm_fevm!(
-    CCLFFModel,
-    CCGeometry,
+impl_core_fevm!(
+    COREModel,
+    COREGeometry,
     ["v", "B", "alpha"],
     cc_lff_obs,
-    "Circular-cylindrical linear force-free magnetic flux rope model."
+    "Standard 3DCORE magnetic flux rope model."
 );
-
-impl_cylm_fevm!(
-    CCUTModel,
-    CCGeometry,
-    ["v", "B", "tau"],
-    cc_ut_obs,
-    "Circular-cylindrical uniform twist magnetic flux rope model."
-);
-
-impl_cylm_fevm!(
-    ECHModel,
-    ECGeometry,
-    ["v", "B", "lambda", "alpha", "tau"],
-    ec_hybrid_obs,
-    "Elliptic-cylindrical uniform twist magnetic flux rope model."
-);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        fevm::FEVMData,
-        stats::{PDFConstant, PDFUniform, PDFUnivariates},
-    };
-    use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
-
-    #[test]
-    fn test_cclffmodel() {
-        let prior = PDFUnivariates::new([
-            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
-            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
-            PDFConstant::new_uvpdf(1125.0),
-            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
-            PDFUniform::new_uvpdf((-2.4, 2.4)).unwrap(),
-            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
-        ]);
-
-        let model = CCLFFModel(prior, PhantomData::<f64>);
-
-        let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
-            ScObs::new(
-                224640.0 + i as f64 * 3600.0 * 2.0,
-                ScObsConf::Distance(1.0),
-                None,
-            )
-        }));
-
-        let mut data = FEVMData {
-            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-            fevm_states: vec![FEVMNullState::default(); 1],
-            geom_states: vec![XCState::default(); 1],
-            weights: vec![1.0; 1],
-        };
-
-        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
-
-        data.params.set_column(
-            0,
-            &SVector::<f64, 8>::from([
-                5.0_f64.to_radians(),
-                -3.0_f64.to_radians(),
-                0.1,
-                0.25,
-                0.0,
-                600.0,
-                20.0,
-                1.0 / 0.25,
-            ]),
-        );
-
-        model
-            .fevm_initialize_states_only(&sc, &mut data)
-            .expect("initialization failed");
-        model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
-            .expect("simulation failed");
-
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_ccutmodel() {
-        let prior = PDFUnivariates::new([
-            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.5, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
-            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
-            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
-            PDFConstant::new_uvpdf(1125.0),
-            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
-            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
-        ]);
-
-        let model = CCUTModel(prior, PhantomData::<f64>);
-
-        let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
-            ScObs::new(
-                224640.0 + i as f64 * 3600.0 * 2.0,
-                ScObsConf::Distance(1.0),
-                None,
-            )
-        }));
-
-        let mut data = FEVMData {
-            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-            fevm_states: vec![FEVMNullState::default(); 1],
-            geom_states: vec![XCState::default(); 1],
-            weights: vec![1.0; 1],
-        };
-
-        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
-
-        data.params.set_column(
-            0,
-            &SVector::<f64, 8>::from([
-                5.0_f64.to_radians(),
-                -3.0_f64.to_radians(),
-                0.1,
-                0.25,
-                0.0,
-                600.0,
-                20.0,
-                1.0 / 0.25,
-            ]),
-        );
-
-        model
-            .fevm_initialize_states_only(&sc, &mut data)
-            .expect("initialization failed");
-
-        model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
-            .expect("simulation failed");
-
-        assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_echmodel() {
-        let prior = PDFUnivariates::new([
-            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((-1.0, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.05, 0.1)).unwrap(),
-            PDFUniform::new_uvpdf((0.1, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.1, 0.5)).unwrap(),
-            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
-            PDFConstant::new_uvpdf(1125.0),
-            PDFUniform::new_uvpdf((5.0, 100.0)).unwrap(),
-            PDFUniform::new_uvpdf((0.0, 1.0)).unwrap(),
-            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
-            PDFUniform::new_uvpdf((-10.0, 10.0)).unwrap(),
-        ]);
-
-        let model = ECHModel::new(prior);
-
-        let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
-            ScObs::new(
-                224640.0 + i as f64 * 3600.0 * 2.0,
-                ScObsConf::Distance(1.0),
-                None,
-            )
-        }));
-
-        let mut data = FEVMData {
-            params: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
-            fevm_states: vec![FEVMNullState::default(); 1],
-            geom_states: vec![XCState::default(); 1],
-            weights: vec![1.0; 1],
-        };
-
-        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
-
-        data.params.set_column(
-            0,
-            &SVector::<f64, 12>::from([
-                5.0_f64.to_radians(),
-                -3.0_f64.to_radians(),
-                0.0_f64.to_radians(),
-                0.1,
-                1.0,
-                0.25,
-                0.0,
-                600.0,
-                20.0,
-                0.0,
-                1.0 / 0.25,
-                1.0 / 0.25,
-            ]),
-        );
-
-        model
-            .fevm_initialize_states_only(&sc, &mut data)
-            .expect("initialization failed");
-
-        model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
-            .expect("simulation failed");
-
-        assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
-
-        data.params.set_column(
-            0,
-            &SVector::<f64, 12>::from([
-                5.0_f64.to_radians(),
-                -3.0_f64.to_radians(),
-                0.0_f64.to_radians(),
-                0.1,
-                1.0,
-                0.25,
-                0.0,
-                600.0,
-                20.0,
-                1.0,
-                1.0 / 0.25,
-                1.0 / 0.25,
-            ]),
-        );
-
-        model
-            .fevm_initialize_states_only(&sc, &mut data)
-            .expect("initialization failed");
-
-        model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
-            .expect("simulation failed");
-
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
-    }
-}

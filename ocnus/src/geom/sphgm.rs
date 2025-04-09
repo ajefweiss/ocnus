@@ -37,7 +37,7 @@ impl<T> OcnusGeometry<T, 4, SPHState<T>> for SPHGeometry<T>
 where
     T: Float + RealField + SimdRealField,
 {
-    const PARAMS: [&'static str; 4] = ["center_x0", "center_y0", "center_z0", "radius)"];
+    const PARAMS: [&'static str; 4] = ["center_x0", "center_y0", "center_z0", "radius"];
 
     fn basis_vectors<CStride: Dim>(
         ics: &VectorView3<T>,

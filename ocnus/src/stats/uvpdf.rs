@@ -1,6 +1,7 @@
-use std::fmt::Debug;
-
-use crate::stats::{PDF, StatsError};
+use crate::{
+    stats::{PDF, StatsError},
+    t_from,
+};
 use derive_more::{Deref, DerefMut, IntoIterator};
 use log::warn;
 use nalgebra::{MatrixView, RealField, SVector, SVectorView, U1};
@@ -8,6 +9,7 @@ use num_traits::{Float, FromPrimitive};
 use rand::Rng;
 use rand_distr::{Distribution, Normal, StandardNormal, Uniform, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
 /// A P-dimensional PDF composed of independent univariate PDFs.
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, IntoIterator, Serialize)]
@@ -165,10 +167,7 @@ where
     pub fn new(range: (T, T)) -> Result<Self, StatsError<T>> {
         let (minv, maxv) = range;
 
-        if (minv < -T::pi() / T::from_f64(2.0).unwrap())
-            || (maxv > T::pi() / T::from_f64(2.0).unwrap())
-            || (minv > maxv)
-        {
+        if (minv < -T::pi() / t_from!(2.0)) || (maxv > T::pi() / t_from!(2.0)) || (minv > maxv) {
             return Err(StatsError::InvalidRange {
                 name: "PDFCosine",
                 maxv,
@@ -255,11 +254,7 @@ where
     StandardNormal: Distribution<T>,
 {
     fn relative_density(&self, x: &MatrixView<T, U1, U1>) -> T {
-        Float::exp(
-            Float::powi(x[0] - self.mean, 2)
-                / T::from_f64(2.0).unwrap()
-                / Float::powi(self.std_dev, 2),
-        )
+        Float::exp(Float::powi(x[0] - self.mean, 2) / t_from!(2.0) / Float::powi(self.std_dev, 2))
     }
 
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, 1>, StatsError<T>> {

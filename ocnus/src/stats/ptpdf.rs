@@ -1,4 +1,7 @@
-use crate::stats::{PDF, StatsError};
+use crate::{
+    stats::{PDF, StatsError},
+    t_from,
+};
 use core::panic;
 use log::warn;
 use nalgebra::{
@@ -143,7 +146,7 @@ where {
         });
 
         let m_sum = m.iter().map(|value| *value * *value).sum::<T>();
-        let ln_sum = T::from_usize(2).unwrap()
+        let ln_sum = t_from!(2.0)
             * l_1
                 .diagonal()
                 .iter()
@@ -159,7 +162,7 @@ where {
                 })
                 .sum::<T>();
 
-        T::from_f64(0.5).unwrap() * (m_sum - k + Float::powi(y.norm(), 2) + ln_sum)
+        t_from!(0.5) * (m_sum - k + Float::powi(y.norm(), 2) + ln_sum)
     }
 
     /// Returns the number of particles in the ensemble.

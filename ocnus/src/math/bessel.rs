@@ -1,4 +1,4 @@
-use crate::math::factorial;
+use crate::{math::factorial, t_from};
 use num_traits::{Float, FromPrimitive, float::TotalOrder};
 use std::cmp::Ordering;
 
@@ -11,10 +11,10 @@ where
         Ordering::Equal => T::from_usize(matches!(k, 0) as usize).unwrap(),
         _ => {
             let sum = (1..11).try_fold(
-                (x / (T::one() * T::from_f64(2.0).unwrap())).powi(k as i32),
+                (x / (T::one() * t_from!(2.0))).powi(k as i32),
                 |acc, idx| {
                     let next = T::from_i32(i32::pow(-1, idx as u32)).unwrap()
-                        * (x / (T::from_f64(2.0).unwrap())).powi((2 * idx + k) as i32)
+                        * (x / (t_from!(2.0))).powi((2 * idx + k) as i32)
                         / T::from_usize(factorial(idx).unwrap() * factorial(idx + k).unwrap())
                             .unwrap();
 

@@ -1,4 +1,7 @@
-use crate::stats::{CovMatrix, PDF, PDFExactDensity, StatsError};
+use crate::{
+    stats::{CovMatrix, PDF, PDFExactDensity, StatsError},
+    t_from,
+};
 use log::warn;
 use nalgebra::{Const, DMatrix, Dyn, MatrixView, RealField, SVector, SVectorView, Scalar};
 use num_traits::Float;
@@ -77,10 +80,10 @@ where
         let m = l_0.clone().cholesky().unwrap().solve(&l_1);
         let y = l_1.clone().cholesky().unwrap().solve(&(&mu_1 - &mu_0));
 
-        T::from_f64(0.5).unwrap()
+        t_from!(0.5)
             * (m.iter().sum::<T>() - T::from_usize(P).unwrap()
                 + y.norm()
-                + T::from_usize(2).unwrap()
+                + t_from!(2.0)
                     * l_1
                         .diagonal()
                         .iter()
@@ -104,7 +107,7 @@ where
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.ref_inverse_matrix() * diff)[(0, 0)];
 
-        Float::exp(T::from_f64(-0.5).unwrap() * value)
+        Float::exp(t_from!(-0.5) * value)
     }
 
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
@@ -149,11 +152,8 @@ where
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.ref_inverse_matrix() * diff)[(0, 0)];
 
-        Float::exp(T::from_f64(-0.5).unwrap() * value)
-            / Float::sqrt(
-                Float::powi(T::from_f64(2.0).unwrap() * T::pi(), P as i32)
-                    * self.covmat.determinant(),
-            )
+        Float::exp(t_from!(-0.5) * value)
+            / Float::sqrt(Float::powi(t_from!(2.0) * T::pi(), P as i32) * self.covmat.determinant())
     }
 }
 

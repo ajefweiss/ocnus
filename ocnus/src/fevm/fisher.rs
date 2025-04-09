@@ -2,6 +2,7 @@ use crate::{
     fevm::{FEVM, FEVMData, FEVMError},
     obser::{ObserVec, ScObsSeries},
     stats::CovMatrix,
+    t_from,
 };
 use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SMatrix, Scalar, VecStorage};
 use num_traits::{Float, FromPrimitive};
@@ -100,7 +101,7 @@ where
                                             &pos_col[rdx] - &neg_col[rdx]
                                         } else {
                                             (&pos_col[rdx] - &neg_col[rdx])
-                                                * (T::from_f64(0.5).unwrap() / step_sizes[rdx])
+                                                * (t_from!(0.5) / step_sizes[rdx])
                                         }
                                     })
                                     .collect::<Vec<ObserVec<T, N>>>();
@@ -113,7 +114,7 @@ where
                                             &pos_col[rdx] - &neg_col[rdx]
                                         } else {
                                             (&pos_col[cdx] - &neg_col[cdx])
-                                                * (T::from_f64(0.5).unwrap() / step_sizes[cdx])
+                                                * (t_from!(0.5) / step_sizes[cdx])
                                         }
                                     })
                                     .collect::<Vec<ObserVec<T, N>>>();

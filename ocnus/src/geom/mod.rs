@@ -1,26 +1,37 @@
 //! Geometry models and states.
 //!
-//! # Geometry & State
+//! # Geometry
 //!
 //! A geometry model defines the basis of any more complex model within the **ocnus** framework
 //! and defines the underlying internal coordinate system (ics) which is being used to
-//! conveniently describe the physical system. One can introduce time-dependence for
-//! the geometry by describing the ics in terms of a `state` type/variable.
+//! conveniently describe the physical system. The [`OcnusGeometry`] trait guarantuees the
+//! existance of bi-directional coordinate transformations and also requires methods to
+//! compute the basis vectors within the overarching Cartesian coordinate system.
 //!
-//! Currently implemented geometries:
-//! - [`CCGeometry`]: A circular-cylindrical geometry with internal coordinates (r, ϕ, z) for flux rope models.
-//! - [`ECGeometry`]: An elliptic-cylindrical geometry with internal coordinates (r, ϕ, z) for flux rope models.
-//! - [`SPHGeometry`]: A spherical geometry with internal coordiantes (r, ϕ, θ) for solar wind or spheromak models.
+//! Default geometries:
+//! - [`CCGeometry`] A circular-cylindrical geometry with internal coordinates (r, ϕ, z)
+//!   for flux rope models.
+//! - [`ECGeometry`] An elliptic-cylindrical geometry with internal coordinates (r, ϕ, z)
+//!   for flux rope models.
+//! - [`SPHGeometry`] A spherical geometry with internal coordiantes (r, ϕ, θ) for solar wind
+//!   or spheromak models.
 //!
-//! Currently implemented state types:
-//! - [`XCState`]: A generic state for cylindrical geometries with arbitrary cross-sections.
-//! - [`SPHState`]: A state for spherical geometries.
+//! #### States
+//!
+//! The geometry can either depend on model parameters or on a state variable `geom_state`
+//! that is introduced to allow for time-dependence. Each geometry must make use of a state,
+//! although multiple geometries can share the same type.
+//!
+//! Default states:
+//! - [`XCState`] A generic state for cylindrical geometries with arbitrary cross-sections.
+//! - [`SPHState`] A state for spherical geometries.
 
 mod sphgm;
+// mod ttgm;
 mod xcgm;
 
-pub use sphgm::*;
-pub use xcgm::*;
+pub use sphgm::{SPHGeometry, SPHState};
+pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
 use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};
 
@@ -45,14 +56,14 @@ pub trait OcnusGeometry<T, const P: usize, GS> {
 
     /// Transform cartesian coordinates `xyz` into the intrinsic coordinates `ics`.
     fn coords_ics_to_xyz<CStride: Dim>(
-        xyz: &VectorView3<T>,
+        ics: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
         geom_state: &GS,
     ) -> Vector3<T>;
 
     /// Transform intrinsic coordinates `ics` into cartesian coordinates `xyz`.
     fn coords_xyz_to_ics<CStride: Dim>(
-        ics: &VectorView3<T>,
+        xyz: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
         geom_state: &GS,
     ) -> Vector3<T>;

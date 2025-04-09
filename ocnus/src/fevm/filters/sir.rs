@@ -7,6 +7,7 @@ use crate::{
     },
     obser::{ObserVec, ScObsSeries},
     stats::{PDF, PDFParticles},
+    t_from,
 };
 use itertools::Itertools;
 use log::{debug, info};
@@ -111,12 +112,10 @@ where
 
             iteration += 1;
 
-            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap()
-                > settings.simulation_time_limit
-            {
+            if t_from!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+                        elapsed: t_from!(start.elapsed().as_millis() as f64 / 1e3),
                         limit: settings.simulation_time_limit,
                     },
                 ));

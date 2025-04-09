@@ -1,12 +1,18 @@
-use crate::{geom::OcnusGeometry, math::quaternion_xyz};
-use nalgebra::{Const, Dim, RealField, SimdRealField, U1, Vector3, VectorView, VectorView3};
-use num_traits::{Float, FromPrimitive};
+use crate::{geom::OcnusGeometry, math::quaternion_xyz, t_from};
+use nalgebra::{
+    Const, Dim, RealField, Scalar, SimdRealField, U1, UnitQuaternion, Vector3, VectorView,
+    VectorView3,
+};
+use num_traits::{Float, FromPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
 /// Model state for analytical cylindrical models with arbitrary cross-section shapes.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct XCState<T> {
+pub struct XCState<T>
+where
+    T: Clone + RealField + Scalar + Zero,
+{
     /// Offset along the time axis.
     pub t: T,
 
@@ -15,6 +21,9 @@ pub struct XCState<T> {
 
     /// Offset along the z-axis.
     pub z: T,
+
+    /// Quaternion for orientation.
+    pub q: UnitQuaternion<T>,
 }
 
 /// The circular-cylindric coordinate basis vectors.
@@ -26,13 +35,13 @@ pub fn cc_basis<T, const P: usize, M, GS, CStride: Dim>(
 ) -> [Vector3<T>; 3]
 where
     M: OcnusGeometry<T, P, GS>,
-    T: 'static + Debug + Float,
+    T: 'static + Debug + Float + RealField,
 {
-    let dr = Vector3::from([phi.cos(), T::zero(), phi.sin()]);
-    let dphi = Vector3::from([-phi.sin(), T::zero(), phi.cos()]);
-    let dpsi = Vector3::from([T::zero(), T::one(), T::zero()]);
+    let dr = Vector3::from([Float::cos(phi), T::zero(), Float::sin(phi)]);
+    let dphi = Vector3::from([-Float::sin(phi), T::zero(), Float::cos(phi)]);
+    let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
 
-    [dr, dphi, dpsi]
+    [dr, dphi, dz]
 }
 
 /// The (non-orthogonal) elliptic-cylindric coordinate basis vectors.
@@ -53,25 +62,27 @@ where
 
     let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
 
-    let omega = T::from_f64(2.0).unwrap() * T::pi() * (nu - psi);
+    let omega = t_from!(2.0) * T::pi() * (nu - psi);
     let com = Float::cos(omega);
     let som = Float::sin(omega);
 
     let denom =
         Float::sqrt(Float::powi(Float::cos(omega), 2) + Float::powi(delta * Float::sin(omega), 2));
 
-    let phi_nom = T::from_f64(2.0).unwrap() * T::pi() * delta * mu * radius_linearized;
+    let phi_nom = T::from_usize(2).unwrap() * T::pi() * delta * mu * radius_linearized;
 
     let dmu = Vector3::from([
         delta * radius_linearized * com / denom,
         T::zero(),
         delta * radius_linearized * som / denom,
     ]);
+
     let dnu = Vector3::from([
         -phi_nom * Float::powi(delta, 2) * som / Float::powi(denom, 3),
         T::zero(),
         phi_nom * com / Float::powi(denom, 3),
     ]);
+
     let ds = Vector3::from([T::zero(), T::one(), T::zero()]);
 
     [dmu, dnu, ds]
@@ -85,16 +96,16 @@ pub fn cc_xyz_to_ics<T, const P: usize, M, GS, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusGeometry<T, P, GS>,
-    T: Float,
+    T: Clone + Float + RealField + Scalar + Zero,
 {
     let radius = M::param_value("radius", params);
     let y_offset = M::param_value("y", params);
 
-    let radius_linearized = radius * (T::one() - y_offset.abs().powi(2)).sqrt();
+    let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
 
     // Compute polar coordinates (r, phi).
-    let r = (x.powi(2) + z.powi(2)).sqrt() / radius_linearized;
-    let phi = z.atan2(x);
+    let r = Float::sqrt(Float::powi(x, 2) + Float::powi(z, 2)) / radius_linearized;
+    let phi = Float::atan2(z, x);
 
     Vector3::new(r, phi, y)
 }
@@ -107,7 +118,7 @@ pub fn ec_xyz_to_ics<T, const P: usize, M, GS, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusGeometry<T, P, GS>,
-    T: Float + FromPrimitive,
+    T: Clone + Float + FromPrimitive + RealField + Scalar + Zero,
 {
     let psi = M::param_value("psi", params);
     let y_offset = M::param_value("y", params);
@@ -117,9 +128,12 @@ where
     let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
 
     // Compute intrinsic coordinates (mu, nu).
-    let r = (x.powi(2) + z.powi(2)).sqrt();
-    let mu = r * (x.powi(2) + z.powi(2) * delta.powi(2)).sqrt() / r / delta / radius_linearized;
-    let nu = psi - (x / r).acos() / T::from_f64(2.0 * std::f64::consts::PI).unwrap();
+    let r = Float::sqrt(Float::powi(x, 2) + Float::powi(z, 2));
+    let mu = r * Float::sqrt(Float::powi(x, 2) + Float::powi(z, 2) * Float::powi(delta, 2))
+        / r
+        / delta
+        / radius_linearized;
+    let nu = psi - Float::acos(x / r) / t_from!(2.0 * std::f64::consts::PI);
 
     Vector3::new(mu, nu, y)
 }
@@ -132,16 +146,16 @@ pub fn cc_ics_to_xyz<T, const P: usize, M, GS, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusGeometry<T, P, GS>,
-    T: Float,
+    T: Clone + Float + RealField + Scalar + Zero,
 {
     let radius = M::param_value("radius", params);
     let y_offset = M::param_value("y", params);
 
-    let radius_linearized = radius * (T::one() - y_offset.abs().powi(2)).sqrt();
+    let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
 
     // Compute cartesian coordinates (x, y, z).
-    let x = phi.cos() * r * radius_linearized;
-    let z = phi.sin() * r * radius_linearized;
+    let x = Float::cos(phi) * r * radius_linearized;
+    let z = Float::sin(phi) * r * radius_linearized;
 
     Vector3::new(x, y, z)
 }
@@ -163,7 +177,7 @@ where
 
     let radius_linearized = radius * Float::sqrt(T::one() - Float::powi(y_offset, 2));
 
-    let omega = T::from_f64(2.0).unwrap() * T::pi() * (nu - psi);
+    let omega = T::from_usize(2).unwrap() * T::pi() * (nu - psi);
 
     let df = mu * delta * radius_linearized
         / Float::sqrt(
@@ -218,10 +232,7 @@ macro_rules! impl_xcgm_geom {
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
                 geom_state: &XCState<T>,
             ) -> Vector3<T> {
-                let phi = Self::param_value("phi", params);
-                let theta = Self::param_value("theta", params);
-
-                let quaternion = quaternion_xyz(phi, T::zero(), theta);
+                let quaternion = geom_state.q;
 
                 let xyz = $fn_xyz::<T, { $params.len() }, Self, XCState<T>, CStride>(
                     (ics[0], ics[1], ics[2]),
@@ -238,10 +249,8 @@ macro_rules! impl_xcgm_geom {
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
                 geom_state: &XCState<T>,
             ) -> Vector3<T> {
-                let phi = Self::param_value("phi", params);
-                let theta = Self::param_value("theta", params);
+                let quaternion = geom_state.q;
 
-                let quaternion = quaternion_xyz(phi, T::zero(), theta);
                 let xyz_t = quaternion
                     .conjugate()
                     .transform_vector(&(xyz - Vector3::new(geom_state.x, T::zero(), geom_state.z)));
@@ -259,10 +268,7 @@ macro_rules! impl_xcgm_geom {
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
                 geom_state: &XCState<T>,
             ) -> Vector3<T> {
-                let phi = Self::param_value("phi", params);
-                let theta = Self::param_value("theta", params);
-
-                let quaternion = quaternion_xyz(phi, T::zero(), theta);
+                let quaternion = geom_state.q;
 
                 let [d1, d2, d3] = Self::basis_vectors(ics, params, geom_state);
 
@@ -288,6 +294,8 @@ macro_rules! impl_xcgm_geom {
                     * Float::sqrt(T::one() - Float::powi(Float::sin(phi) * Float::sin(theta), 2))
                     / Float::cos(phi)
                     / Float::cos(theta);
+
+                geom_state.q = quaternion_xyz(phi, T::zero(), theta);
             }
         }
     };

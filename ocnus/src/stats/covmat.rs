@@ -1,6 +1,6 @@
 //! Implementation of [`CovMatrix`] and covariance functions.
 
-use crate::stats::StatsError;
+use crate::{stats::StatsError, t_from};
 use derive_more::Deref;
 use itertools::{Itertools, zip_eq};
 use log::error;
@@ -162,8 +162,8 @@ where
         }
 
         let mut lh = -(self.pseudo_determinant.ln()
-            + T::from_usize(ndim).unwrap() * (T::from_usize(2).unwrap() * T::pi()))
-            / T::from_f64(2.0).unwrap();
+            + T::from_usize(ndim).unwrap() * (t_from!(2.0) * T::pi()))
+            / t_from!(2.0);
 
         for idx in 0..ndim {
             let view = delta.rows_with_step(idx, self.ndim(), ndim - 1);
@@ -173,7 +173,7 @@ where
                     .inverse_matrix
                     .view((0, 0), (view.nrows(), view.nrows()))
                 * view)[(0, 0)]
-                / T::from_f64(2.0).unwrap();
+                / t_from!(2.0);
         }
 
         lh

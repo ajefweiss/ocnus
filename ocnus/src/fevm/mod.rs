@@ -16,16 +16,35 @@
 //! weight according to the importance within the ensemble.
 //!
 //! The [`FEVM`] trait provides, among others, the following important methods:
-//! - [`FEVM::fevm_initialize`]: Initializes the model parameters of a [`FEVMData`]
-//!   to a model or given prior PDF.
-//! - [`FEVM::fevm_initialize_params_only`] / [`FEVM::fevm_initialize_states_only`]:
+//! - [`FEVM::fevm_initialize`] Initializes the model parameters of a [`FEVMData`]
+//!   using the model or a custom prior.
+//! - [`FEVM::fevm_initialize_params_only`] / [`FEVM::fevm_initialize_states_only`]
 //!   These two functions only initialize the model parameters or the model states respectively.
-//! - [`FEVM::fevm_simulate`]: Generates the model outputs for a given [`ScObsSeries`].
-//! - [`FEVM::fevm_simulate_diagnostics`]: Computes and returns the internal coordinates,
+//! - [`FEVM::fevm_simulate`] Generates the model outputs for a given [`ScObsSeries`].
+//! - [`FEVM::fevm_simulate_diagnostics`] Computes and returns the internal coordinates,
 //!   and basis vectors for a given [`ScObsSeries`]. This function exists primarily for
 //!   diagnostic purposes.
 //!
+//! #### Noise
 //!
+//! Any [`FEVM`] can make use of an additive noise model via the [`FEVMNoise`] type. The currently available
+//! additive noise generators are:
+//! - [`FEVMNoise::Gaussian`] Gaussian noise with a given standard deviation σ.
+//! - [`FEVMNoise::Multivariate`] Multivariate normal noise with a given covariance matrix Σ.
+//!
+//! ## Implemented Models
+//!
+//! #### Magnetic Flux Rope
+//!
+//! - [`CCLFFModel`](`models::CCLFFModel`) A linear force-free cylindrical flux rope model.
+//! - [`CCUTModel`](`models::CCUTModel`) A uniform twist force-free cylindrical flux rope model.
+//! - [`ECHModel`](`models::ECHModel`) An elliptic-cylindrical hybrid (lff + ut) flux rope model.
+//!
+//! #### Solar Wind
+//!
+//! - [`WSAModel`](`models::WSAModel`) A standard implementation of the Wang-Sheeley-Arge solar wind model.
+//!
+//! # Particle Filters
 
 pub mod filters;
 mod fisher;

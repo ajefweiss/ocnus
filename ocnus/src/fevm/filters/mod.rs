@@ -10,6 +10,7 @@ use crate::{
     fevm::{FEVM, FEVMData, FEVMError, FEVMNoise},
     obser::{ObserVec, ScObsSeries},
     stats::PDFUnivariates,
+    t_from,
 };
 use derive_builder::Builder;
 use itertools::Itertools;
@@ -42,14 +43,14 @@ where
     T: Copy + FromPrimitive + RealField + Scalar,
 {
     /// Percentange of effective samples required for each iteration.
-    #[builder(default = T::from_f64(0.175).unwrap())]
+    #[builder(default = t_from!(0.175))]
     pub effective_sample_size_threshold_factor: T,
 
     /// Multiplier for the transition kernel (covariance matrix),
     /// a higher value leads to a better exploration of the parameter
     /// space but slower convergence. The "optimal" value is 2.0
     /// (see Filippi et al. 2013).
-    #[builder(default = T::from_f64(2.0).unwrap())]
+    #[builder(default = t_from!(2.0))]
     pub exploration_factor: T,
 
     /// Iteration counter,
@@ -64,7 +65,7 @@ where
     pub rseed: u64,
 
     /// Time limit (in seconds).
-    #[builder(default = T::from_f64(5.0).unwrap())]
+    #[builder(default = t_from!(5.0))]
     pub simulation_time_limit: T,
 
     /// Total simulation runs counter,
@@ -72,7 +73,7 @@ where
     pub truns: usize,
 
     /// Quantile evaluations.
-    #[builder(default = [T::from_f64(0.25).unwrap(),T::from_f64(0.5).unwrap(),T::from_f64(0.75).unwrap()])]
+    #[builder(default = [t_from!(0.25),t_from!(0.5),t_from!(0.75)])]
     pub quantiles: [T; 3],
 }
 
@@ -261,12 +262,10 @@ where
 
             iteration += 1;
 
-            if T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap()
-                > settings.simulation_time_limit
-            {
+            if t_from!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+                        elapsed: t_from!(start.elapsed().as_millis() as f64 / 1e3),
                         limit: settings.simulation_time_limit,
                     },
                 ));
@@ -297,9 +296,8 @@ where
                 eps_1,
                 eps_2,
                 eps_3,
-                T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
-                    .unwrap(),
-                T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+                t_from!((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6),
+                t_from!(start.elapsed().as_millis() as f64 / 1e3),
             );
 
             settings.rseed += 1;
@@ -316,9 +314,8 @@ where
             info!(
                 "pf_initialize_data\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
                 0.0,
-                T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
-                    .unwrap(),
-                T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+                t_from!((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6),
+                t_from!(start.elapsed().as_millis() as f64 / 1e3),
             );
 
             settings.rseed += 1;

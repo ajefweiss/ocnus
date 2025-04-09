@@ -22,17 +22,17 @@
 //!
 //! There are currently three implemented generic probability density functions
 //! that are used extensively throughout the crate:
-//! - [`PDFParticles`]: A PDF composed of an ensemble of particles with individual
+//! - [`PDFParticles`] A PDF composed of an ensemble of particles with individual
 //!   weights.
-//! - [`PDFMultivariate`]: A multivariate normal PDF described by a [`CovMatrix`].
-//! - [`PDFUnivariates`]: A PDF composed of a set of [`PDFUnivariate`] PDFs.
+//! - [`PDFMultivariate`] A multivariate normal PDF described by a [`CovMatrix`].
+//! - [`PDFUnivariates`] A PDF composed of a set of [`PDFUnivariate`] PDFs.
 //!
 //! There are five 1-dimensional [`PDFUnivariate`] PDFs that can be used to describe a [`PDFUnivariates`] PDF:
-//! - [`PDFConstant`]: A constant PDF that is used for fixed values.
-//! - [`PDFCosine`]: A PDF with a cosine shape distribution defined within the range `[-π/2, π/2]`.
-//! - [`PDFNormal`]: A normal distribution with a given mean and standard deviation.
-//! - [`PDFReciprocal`]: A reciprocal PDF defined for positive definite numbers.
-//! - [`PDFUniform`]: A uniformly distributed PDF.
+//! - [`PDFConstant`] A constant PDF that is used for fixed values.
+//! - [`PDFCosine`] A PDF with a cosine shape distribution defined within the range `[-π/2, π/2]`.
+//! - [`PDFNormal`] A normal distribution with a given mean and standard deviation.
+//! - [`PDFReciprocal`] A reciprocal PDF defined for positive definite numbers.
+//! - [`PDFUniform`] A uniformly distributed PDF.
 //!
 //! It is recommended to use a [`PDFUnivariates`] as prior for any model as one can easily
 //! independantly fine tune parameters:
