@@ -1,8 +1,8 @@
 use crate::{
     fevm::{FEVM, FEVMData, FEVMError},
+    math::T,
     obser::{ObserVec, ScObsSeries},
-    stats::CovMatrix,
-    t_from,
+    prodef::CovMatrix,
 };
 use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SMatrix, Scalar, VecStorage};
 use num_traits::{Float, FromPrimitive};
@@ -101,7 +101,7 @@ where
                                             &pos_col[rdx] - &neg_col[rdx]
                                         } else {
                                             (&pos_col[rdx] - &neg_col[rdx])
-                                                * (t_from!(0.5) / step_sizes[rdx])
+                                                * (T!(0.5) / step_sizes[rdx])
                                         }
                                     })
                                     .collect::<Vec<ObserVec<T, N>>>();
@@ -114,7 +114,7 @@ where
                                             &pos_col[rdx] - &neg_col[rdx]
                                         } else {
                                             (&pos_col[cdx] - &neg_col[cdx])
-                                                * (t_from!(0.5) / step_sizes[cdx])
+                                                * (T!(0.5) / step_sizes[cdx])
                                         }
                                     })
                                     .collect::<Vec<ObserVec<T, N>>>();
@@ -171,7 +171,7 @@ where
                                             Some((0..valid_indices.len()).zip(series).filter_map(
                                                 |(j, scobs_j)| {
                                                     if valid_indices[j] {
-                                                        Some(acfunc(Float::abs(
+                                                        Some(acfunc(abs!(
                                                             *scobs_i.timestamp()
                                                                 - *scobs_j.timestamp(),
                                                         )))

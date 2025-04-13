@@ -1,25 +1,21 @@
-//! Implementation of [`CovMatrix`] and covariance functions.
-
-use crate::{stats::StatsError, t_from};
+use crate::{
+    fXX,
+    math::{MathError, T, ln, powi, sqrt},
+};
 use derive_more::Deref;
 use itertools::{Itertools, zip_eq};
 use log::error;
-use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView, RealField, Scalar};
-use num_traits::FromPrimitive;
+use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView};
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::Display,
-    iter::Sum,
-    ops::{Mul, MulAssign},
-};
+use std::ops::{Mul, MulAssign};
 
 /// A dynamically sized covariance matrix.
 #[derive(Clone, Debug, Deref, Deserialize, Serialize)]
 pub struct CovMatrix<T>
 where
-    T: Copy + Scalar,
+    T: fXX,
 {
-    /// The  lower triangular matrix from the Cholesky decomposition.
+    /// The lower triangular matrix from the Cholesky decomposition.
     cholesky_ltm: DMatrix<T>,
 
     /// The inverse of the covariance matrix.
@@ -35,10 +31,10 @@ where
 
 impl<T> CovMatrix<T>
 where
-    T: Copy + RealField + Scalar,
+    T: fXX,
 {
     /// Create a [`CovMatrix`] from a semi positive definite square matrix.
-    pub fn from_matrix(matrix: &DMatrixView<T>) -> Result<Self, StatsError<T>> {
+    pub fn from_matrix(matrix: &DMatrixView<T>) -> Result<Self, MathError<T>> {
         let matrix_owned = matrix.into_owned();
 
         let (cholesky_ltm, pseudo_determinant) = match matrix.cholesky() {
@@ -48,7 +44,7 @@ where
                     "CovMatrix::from_matrix: failed to perform the cholesky decomposition: {}",
                     matrix
                 );
-                return Err(StatsError::InvalidMatrix {
+                return Err(MathError::InvalidMatrix {
                     msg: "failed to perform the cholesky decomposition",
                     matrix: matrix.into_owned(),
                 });
@@ -62,7 +58,7 @@ where
                     "CovMatrix::from_matrix input matrix is singular: {}",
                     matrix
                 );
-                return Err(StatsError::InvalidMatrix {
+                return Err(MathError::InvalidMatrix {
                     msg: "input matrix is singular",
                     matrix: matrix.into_owned(),
                 });
@@ -81,10 +77,7 @@ where
     pub fn from_particles<const N: usize>(
         vectors: &MatrixView<T, Const<N>, Dyn>,
         opt_weights: Option<&[T]>,
-    ) -> Result<Self, StatsError<T>>
-    where
-        T: Sum<T> + for<'x> Sum<&'x T>,
-    {
+    ) -> Result<Self, MathError<T>> {
         let mut matrix = DMatrix::from_iterator(
             N,
             N,
@@ -161,9 +154,8 @@ where
             panic!("iterator length must be a multiple of the covariance matrix dimension")
         }
 
-        let mut lh = -(self.pseudo_determinant.ln()
-            + T::from_usize(ndim).unwrap() * (t_from!(2.0) * T::pi()))
-            / t_from!(2.0);
+        let mut lh = -(ln!(self.pseudo_determinant) + T::from_usize(ndim).unwrap() * (T::two_pi()))
+            / T!(2.0);
 
         for idx in 0..ndim {
             let view = delta.rows_with_step(idx, self.ndim(), ndim - 1);
@@ -173,7 +165,7 @@ where
                     .inverse_matrix
                     .view((0, 0), (view.nrows(), view.nrows()))
                 * view)[(0, 0)]
-                / t_from!(2.0);
+                / T!(2.0);
         }
 
         lh
@@ -207,9 +199,9 @@ where
 
 impl<T> TryFrom<&[T]> for CovMatrix<T>
 where
-    T: Copy + Display + RealField + Scalar,
+    T: fXX,
 {
-    type Error = StatsError<T>;
+    type Error = MathError<T>;
 
     fn try_from(value: &[T]) -> Result<Self, Self::Error> {
         Self::from_matrix(
@@ -221,9 +213,9 @@ where
 
 impl<'a, T> TryFrom<&DMatrixView<'a, T>> for CovMatrix<T>
 where
-    T: Copy + Display + RealField + Scalar,
+    T: fXX,
 {
-    type Error = StatsError<T>;
+    type Error = MathError<T>;
 
     fn try_from(value: &DMatrixView<'a, T>) -> Result<Self, Self::Error> {
         Self::from_matrix(value)
@@ -232,7 +224,7 @@ where
 
 impl<T> Mul<T> for CovMatrix<T>
 where
-    T: Copy + Display + RealField + Scalar,
+    T: fXX,
 {
     type Output = CovMatrix<T>;
 
@@ -240,53 +232,25 @@ where
         let dim = self.matrix.ncols() as i32;
 
         Self::Output {
-            cholesky_ltm: self.cholesky_ltm * rhs.sqrt(),
+            cholesky_ltm: self.cholesky_ltm * sqrt!(rhs),
             inverse_matrix: self.inverse_matrix / rhs,
             matrix: self.matrix * rhs,
-            pseudo_determinant: self.pseudo_determinant * rhs.powi(dim),
-        }
-    }
-}
-
-impl Mul<CovMatrix<f32>> for f32 {
-    type Output = CovMatrix<f32>;
-    fn mul(self, rhs: CovMatrix<f32>) -> Self::Output {
-        let dim = rhs.matrix.ncols() as i32;
-
-        Self::Output {
-            cholesky_ltm: rhs.cholesky_ltm * self.sqrt(),
-            inverse_matrix: rhs.inverse_matrix / self,
-            matrix: rhs.matrix * self,
-            pseudo_determinant: rhs.pseudo_determinant * self.powi(dim),
-        }
-    }
-}
-
-impl Mul<CovMatrix<f64>> for f64 {
-    type Output = CovMatrix<f64>;
-    fn mul(self, rhs: CovMatrix<f64>) -> Self::Output {
-        let dim = rhs.matrix.ncols() as i32;
-
-        Self::Output {
-            cholesky_ltm: rhs.cholesky_ltm * self.sqrt(),
-            inverse_matrix: rhs.inverse_matrix / self,
-            matrix: rhs.matrix * self,
-            pseudo_determinant: rhs.pseudo_determinant * self.powi(dim),
+            pseudo_determinant: self.pseudo_determinant * powi!(rhs, dim),
         }
     }
 }
 
 impl<T> MulAssign<T> for CovMatrix<T>
 where
-    T: Copy + Display + RealField + Scalar,
+    T: fXX,
 {
     fn mul_assign(&mut self, rhs: T) {
         let dim = self.matrix.ncols() as i32;
 
-        self.cholesky_ltm *= rhs.sqrt();
+        self.cholesky_ltm *= sqrt!(rhs);
         self.inverse_matrix /= rhs;
         self.matrix *= rhs;
-        self.pseudo_determinant *= rhs.powi(dim);
+        self.pseudo_determinant *= powi!(rhs, dim);
     }
 }
 
@@ -295,7 +259,7 @@ where
 /// The length of both iterators must be equal (panic).
 pub fn covariance<'a, T, I>(x: I, y: I) -> T
 where
-    T: Copy + Display + FromPrimitive + RealField + Scalar + Sum<T> + for<'x> Sum<&'x T>,
+    T: fXX,
     I: IntoIterator<Item = &'a T>,
     <I as IntoIterator>::IntoIter: Clone,
 {
@@ -318,7 +282,7 @@ where
 /// The length of all three iterators must be equal (panic).
 pub fn covariance_with_weights<'a, T, IV, IW>(x: IV, y: IV, w: IW) -> T
 where
-    T: Copy + Display + RealField + Scalar + Sum<T> + for<'x> Sum<&'x T>,
+    T: fXX,
     IV: IntoIterator<Item = &'a T>,
     IW: IntoIterator<Item = &'a T>,
     <IV as IntoIterator>::IntoIter: Clone,
@@ -329,7 +293,7 @@ where
     let w_iter = w.into_iter();
 
     let wsum = w_iter.clone().sum::<T>();
-    let wsumsq = w_iter.clone().map(|val_w| val_w.powi(2)).sum::<T>();
+    let wsumsq = w_iter.clone().map(|val_w| powi!(*val_w, 2)).sum::<T>();
 
     let wfac = wsum - wsumsq / wsum;
 

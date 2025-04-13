@@ -2,7 +2,7 @@ use nalgebra::{Scalar, SimdRealField, Unit, UnitQuaternion, Vector3};
 use num_traits::Float;
 
 /// Generate unit quaternion from three successive rotations around the z, y and x-axis.
-pub fn quaternion_xyz<T>(z_angle: T, y_angle: T, x_angle: T) -> UnitQuaternion<T>
+pub fn quaternion_rot<T>(z_angle: T, y_angle: T, x_angle: T) -> UnitQuaternion<T>
 where
     T: 'static + Float + Scalar + SimdRealField,
     <T as nalgebra::SimdValue>::Element: nalgebra::RealField,
@@ -32,20 +32,20 @@ mod tests {
 
     #[test]
     fn test_quaternions() {
-        assert!(quaternion_xyz(0.0, 0.0, 0.0) == UnitQuaternion::identity());
+        assert!(quaternion_rot(0.0, 0.0, 0.0) == UnitQuaternion::identity());
 
         let rad90 = 90.0_f64.to_radians();
 
         assert!(
-            quaternion_xyz(rad90, 0.0, 0.0)
+            quaternion_rot(rad90, 0.0, 0.0)
                 == UnitQuaternion::new(Vector3::new(0.0, 0.0, 1.0) * rad90)
         );
         assert!(
-            quaternion_xyz(0.0, rad90, 0.0)
+            quaternion_rot(0.0, rad90, 0.0)
                 == UnitQuaternion::new(Vector3::new(0.0, -1.0, 0.0) * rad90)
         );
         assert!(
-            quaternion_xyz(0.0, 0.0, rad90)
+            quaternion_rot(0.0, 0.0, rad90)
                 == UnitQuaternion::new(Vector3::new(1.0, 0.0, 0.0) * rad90)
         );
     }

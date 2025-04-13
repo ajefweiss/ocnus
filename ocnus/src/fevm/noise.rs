@@ -1,6 +1,6 @@
 use crate::{
     obser::{ObserVec, ScObsSeries},
-    stats::CovMatrix,
+    prodef::CovMatrix,
 };
 use nalgebra::{DMatrix, DVector, DVectorView, RealField, Scalar};
 use num_traits::Float;

@@ -1,12 +1,11 @@
 use crate::{
-    stats::{PDF, StatsError},
-    t_from,
+    OcnusError, fXX,
+    math::{MathError, T, exp, ln, powi},
+    prodef::OcnusProDeF,
 };
 use core::panic;
 use log::warn;
-use nalgebra::{
-    Const, Dyn, Matrix, MatrixView, RealField, SVector, SVectorView, Scalar, ViewStorage,
-};
+use nalgebra::{Const, Dyn, Matrix, MatrixView, RealField, SVector, SVectorView, ViewStorage};
 use num_traits::Float;
 use rand::Rng;
 use rand_distr::{Distribution, Normal, StandardNormal, Uniform, uniform::SampleUniform};
@@ -17,18 +16,18 @@ use std::{
     ops::{Mul, MulAssign},
 };
 
-use super::PDFMultivariate;
+use super::{MultivariateND, ProDeFError};
 
-/// A PDF defined by references to an ensemble of particles.
+/// A PDF defined by an ensemble of particles.
 #[derive(Debug)]
-pub struct PDFParticles<'a, T, const P: usize>
+pub struct ParticlesND<'a, T, const P: usize>
 where
-    T: Copy + Scalar,
+    T: fXX,
 {
-    /// A [`PDFMultivariate`] that describes an estimate of the underlying PDF.
-    mvpdf: PDFMultivariate<T, P>,
+    /// A [`MultivariateND`] that describes an estimate of the underlying PDF.
+    mvpdf: MultivariateND<T, P>,
 
-    /// The particle ensemble that describes the underlying PDF.
+    /// The particle ensemble that approximates the underlying PDF.
     particles: MatrixView<'a, T, Const<P>, Dyn>,
 
     /// Valid parameter range.
@@ -38,18 +37,18 @@ where
     weights: Vec<T>,
 }
 
-impl<'a, T, const P: usize> PDFParticles<'a, T, P>
+impl<'a, T, const P: usize> ParticlesND<'a, T, P>
 where
-    T: Copy + Float + RealField + SampleUniform + Scalar + Sum<T> + for<'x> Sum<&'x T>,
+    T: fXX + SampleUniform,
 {
-    /// Create a new [`PDFParticles`] from a particle matrix view.
+    /// Create a new [`ParticlesND`] from a particle matrix view.
     pub fn from_particles(
         particles: MatrixView<'a, T, Const<P>, Dyn>,
         range: [(T, T); P],
         weights: Vec<T>,
-    ) -> Result<Self, StatsError<T>> {
+    ) -> Result<Self, MathError<T>> {
         let mvpdf =
-            PDFMultivariate::from_particles(&particles.as_view(), range, Some(weights.as_slice()))?;
+            MultivariateND::from_particles(&particles.as_view(), range, Some(weights.as_slice()))?;
 
         Ok(Self {
             mvpdf,
@@ -59,16 +58,16 @@ where
         })
     }
 
-    /// Create a new [`PDFParticles`] with importance weights for a set of particles assuming a transition from `ptpdf_from`.
+    /// Create a new [`ParticlesND`] with importance weights for a set of particles assuming a transition from `ptpdf_from`.
     /// NOTE: This implementation is slower than previous versions for some reason (factor 2?!?).
     pub fn from_particles_and_ptpdf<D>(
         particles: Matrix<T, Const<P>, Dyn, ViewStorage<'a, T, Const<P>, Dyn, Const<1>, Const<P>>>,
-        ptpdf_from: &PDFParticles<T, P>,
+        ptpdf_from: &ParticlesND<T, P>,
         prior: &D,
-    ) -> Result<PDFParticles<'a, T, P>, StatsError<T>>
+    ) -> Result<ParticlesND<'a, T, P>, MathError<T>>
     where
         T: Copy + Float + RealField + SampleUniform + Sum<T> + for<'x> Sum<&'x T>,
-        D: PDF<T, P>,
+        D: OcnusProDeF<T, P>,
     {
         let covmat_inv = ptpdf_from.mvpdf.ref_inverse_matrix();
 
@@ -82,14 +81,11 @@ where
                     .map(|(params_old, weight_old)| {
                         let delta = params_new - params_old;
 
-                        Float::exp(
-                            Float::ln(*weight_old)
-                                - (delta.transpose() * covmat_inv * delta)[(0, 0)],
-                        )
+                        exp!(ln!(*weight_old) - (delta.transpose() * covmat_inv * delta)[(0, 0)])
                     })
                     .sum::<T>();
 
-                (T::one() / value) * prior.relative_density(&params_new)
+                (T::one() / value) * prior.density_rel(&params_new)
             })
             .collect::<Vec<T>>();
 
@@ -99,7 +95,7 @@ where
             .iter_mut()
             .for_each(|weight| *weight /= weights_total);
 
-        PDFParticles::from_particles(particles, ptpdf_from.range, weights)
+        ParticlesND::from_particles(particles, ptpdf_from.range, weights)
     }
 
     /// Returns `true`` if the ensemble contains no elements.
@@ -107,10 +103,12 @@ where
         self.particles.is_empty()
     }
 
-    /// Estimates the Kullback-Leibler divergence between two [`PDFParticles`]
-    /// assuming the underlying PDF is multivariate (i.e. a [`PDFMultivariate`](crate::stats::PDFMultivariate)).
-    pub fn kullback_leibler_divergence_mvpdf_estimate(&self, other: &PDFParticles<T, P>) -> T
-where {
+    /// Estimates the Kullback-Leibler divergence between two [`ParticlesND`]
+    /// assuming the underlying PDF is multivariate (i.e. a [`MultivariateND`]).
+    pub fn kullback_leibler_divergence_mvpdf_estimate(&self, other: &ParticlesND<T, P>) -> T
+    where
+        T: RealField,
+    {
         let l_0 = self.mvpdf.ref_cholesky_ltm();
         let mu_0 = self.particles.column_mean();
 
@@ -146,7 +144,7 @@ where {
         });
 
         let m_sum = m.iter().map(|value| *value * *value).sum::<T>();
-        let ln_sum = t_from!(2.0)
+        let ln_sum = T!(2.0)
             * l_1
                 .diagonal()
                 .iter()
@@ -155,14 +153,14 @@ where {
                     if (a.partial_cmp(&T::zero()).unwrap() == Ordering::Greater)
                         && (b.partial_cmp(&T::zero()).unwrap() == Ordering::Greater)
                     {
-                        Float::ln(*a / *b)
+                        ln!(*a / *b)
                     } else {
                         T::zero()
                     }
                 })
                 .sum::<T>();
 
-        t_from!(0.5) * (m_sum - k + Float::powi(y.norm(), 2) + ln_sum)
+        T!(0.5) * (m_sum - k + powi!(y.norm(), 2) + ln_sum)
     }
 
     /// Returns the number of particles in the ensemble.
@@ -176,7 +174,7 @@ where {
     }
 
     /// Resample from existing particles.
-    pub fn resample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
+    pub fn resample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, OcnusError<T>> {
         let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
         let offset = {
@@ -214,16 +212,16 @@ where {
     }
 }
 
-impl<T, const P: usize> PDF<T, P> for &PDFParticles<'_, T, P>
+impl<T, const P: usize> OcnusProDeF<T, P> for &ParticlesND<'_, T, P>
 where
-    T: Float + RealField + SampleUniform + Scalar + Sum<T> + for<'x> Sum<&'x T>,
+    T: fXX + SampleUniform,
     StandardNormal: Distribution<T>,
 {
-    fn relative_density(&self, _x: &SVectorView<T, P>) -> T {
+    fn density_rel(&self, _x: &SVectorView<T, P>) -> T {
         unimplemented!()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, ProDeFError<T>> {
         let normal = Normal::new(T::zero(), T::one()).unwrap();
         let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
@@ -269,7 +267,7 @@ where
 
             if (attempts > 5000) && (attempts % 5000 == 0) {
                 warn!(
-                    "PDFParticles::draw_sample has failed to draw a valid sample after {} tries",
+                    "ParticlesND::draw_sample has failed to draw a valid sample after {} tries",
                     attempts,
                 );
 
@@ -280,16 +278,16 @@ where
         Ok(proposal)
     }
 
-    fn valid_range(&self) -> [(T, T); P] {
+    fn get_valid_range(&self) -> [(T, T); P] {
         self.range
     }
 }
 
-impl<'a, T, const P: usize> Mul<T> for PDFParticles<'a, T, P>
+impl<'a, T, const P: usize> Mul<T> for ParticlesND<'a, T, P>
 where
-    T: Copy + RealField + Scalar,
+    T: fXX,
 {
-    type Output = PDFParticles<'a, T, P>;
+    type Output = ParticlesND<'a, T, P>;
 
     fn mul(self, rhs: T) -> Self::Output {
         Self {
@@ -301,35 +299,9 @@ where
     }
 }
 
-impl<'a, const P: usize> Mul<PDFParticles<'a, f32, P>> for f32 {
-    type Output = PDFParticles<'a, f32, P>;
-
-    fn mul(self, rhs: PDFParticles<'a, f32, P>) -> Self::Output {
-        Self::Output {
-            mvpdf: self * rhs.mvpdf,
-            particles: rhs.particles,
-            range: rhs.range,
-            weights: rhs.weights,
-        }
-    }
-}
-
-impl<'a, const P: usize> Mul<PDFParticles<'a, f64, P>> for f64 {
-    type Output = PDFParticles<'a, f64, P>;
-
-    fn mul(self, rhs: PDFParticles<'a, f64, P>) -> Self::Output {
-        Self::Output {
-            mvpdf: self * rhs.mvpdf,
-            particles: rhs.particles,
-            range: rhs.range,
-            weights: rhs.weights,
-        }
-    }
-}
-
-impl<T, const P: usize> MulAssign<T> for PDFParticles<'_, T, P>
+impl<T, const P: usize> MulAssign<T> for ParticlesND<'_, T, P>
 where
-    T: Copy + RealField,
+    T: fXX,
 {
     fn mul_assign(&mut self, rhs: T) {
         self.mvpdf *= rhs;

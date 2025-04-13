@@ -1,4 +1,5 @@
 use crate::{
+    T,
     fevm::{
         FEVMData, FEVMError,
         filters::{
@@ -6,8 +7,7 @@ use crate::{
         },
     },
     obser::{ObserVec, ScObsSeries},
-    stats::{PDF, PDFParticles},
-    t_from,
+    prodef::{OcnusProDeF, ParticlesND},
 };
 use itertools::Itertools;
 use log::{debug, info};
@@ -61,10 +61,10 @@ where
         let mut interim_data = FEVMData::<T, P, FS, GS>::new(sim_ensemble_size);
         let mut interim_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
-        // Create a Particle PDF from input and multiply by the exploration factor.
-        let density_old = PDFParticles::from_particles(
+        // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
+        let density_old = ParticlesND::from_particles(
             fevmd.params.as_view(),
-            self.model_prior().valid_range(),
+            self.model_prior().get_valid_range(),
             fevmd.weights.clone(),
         )? * settings.exploration_factor;
 
@@ -112,10 +112,10 @@ where
 
             iteration += 1;
 
-            if t_from!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
+            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: t_from!(start.elapsed().as_millis() as f64 / 1e3),
+                        elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
                         limit: settings.simulation_time_limit,
                     },
                 ));
@@ -141,22 +141,22 @@ where
 
         let mut weights = likelihoods
             .iter()
-            .map(|lh| Float::exp(*lh - lh_max))
+            .map(|lh| exp!(*lh - lh_max))
             .collect::<Vec<T>>();
 
         weights
             .par_iter_mut()
             .zip(temp_data.params.par_column_iter())
-            .for_each(|(weight, params)| *weight *= self.model_prior().relative_density(&params));
+            .for_each(|(weight, params)| *weight *= self.model_prior().density_rel(&params));
 
         let weights_total = weights.iter().sum::<T>();
 
         weights.iter_mut().for_each(|w| *w /= weights_total);
 
-        // Create a Particle PDF from the temporary simulations.
-        let density_new = PDFParticles::from_particles(
+        // Create a Particle OcnusProDeF from the temporary simulations.
+        let density_new = ParticlesND::from_particles(
             interim_data.params.as_view(),
-            self.model_prior().valid_range(),
+            self.model_prior().get_valid_range(),
             weights,
         )?;
 
@@ -166,7 +166,7 @@ where
             / density_new
                 .weights()
                 .iter()
-                .map(|v| Float::powi(*v, 2))
+                .map(|v| powi!(*v, 2))
                 .sum::<T>();
 
         self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;

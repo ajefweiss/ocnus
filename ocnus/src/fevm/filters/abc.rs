@@ -1,11 +1,11 @@
 use crate::{
+    T,
     fevm::{
         FEVMData, FEVMError, ParticleFilterError,
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
     },
     obser::{ObserVec, ScObsSeries},
-    stats::{PDF, PDFParticles},
-    t_from,
+    prodef::{OcnusProDeF, ParticlesND},
 };
 use itertools::Itertools;
 use log::{debug, info};
@@ -71,10 +71,10 @@ where
         let mut temp_data = FEVMData::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
-        // Create a Particle PDF from input and multiply by the exploration factor.
-        let mut density_old = PDFParticles::from_particles(
+        // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
+        let mut density_old = ParticlesND::from_particles(
             fevmd.params.as_view(),
-            self.model_prior().valid_range(),
+            self.model_prior().get_valid_range(),
             fevmd.weights.clone(),
         )? * settings.exploration_factor;
 
@@ -95,7 +95,7 @@ where
 
             let filter_values = match mode {
                 ABCParticleFilterMode::AcceptanceRate((filter, accrate)) => {
-                    if !(t_from!(0.001)..t_from!(0.5)).contains(&accrate) {
+                    if !(T!(0.001)..T!(0.5)).contains(&accrate) {
                         return Err(FEVMError::InvalidParameter {
                             name: "acceptance rate",
                             value: accrate,
@@ -203,10 +203,10 @@ where
 
             iteration += 1;
 
-            if t_from!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
+            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
                 return Err(FEVMError::ParticleFilter(
                     ParticleFilterError::TimeLimitExceeded {
-                        elapsed: t_from!(start.elapsed().as_millis() as f64 / 1e3),
+                        elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
                         limit: settings.simulation_time_limit,
                     },
                 ));
@@ -214,7 +214,7 @@ where
         }
 
         // Create new density using importance weights.
-        let density_new = PDFParticles::from_particles_and_ptpdf(
+        let density_new = ParticlesND::from_particles_and_ptpdf(
             target_data.params.as_view(),
             &density_old,
             &self.model_prior(),
@@ -230,7 +230,7 @@ where
             / density_new
                 .weights()
                 .iter()
-                .map(|value| Float::powi(*value, 2))
+                .map(|value| powi!(*value, 2))
                 .sum::<T>();
 
         if effective_sample_size

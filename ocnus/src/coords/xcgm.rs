@@ -1,0 +1,425 @@
+use crate::{
+    coords::{CoordsError, OcnusCoords},
+    fXX,
+    math::{T, atan2, cos, powi, quaternion_rot, sin, sqrt},
+};
+use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3};
+use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, marker::PhantomData};
+
+/// Coordinate state type for cylindrical models with arbitrary cross-section shapes.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct XCState<T>
+where
+    T: fXX,
+{
+    /// Offset along the time axis.
+    pub t: T,
+
+    /// Offset along the x-axis.
+    pub x: T,
+
+    /// Offset along the z-axis.
+    pub z: T,
+
+    /// Quaternion for orientation.
+    pub q: UnitQuaternion<T>,
+}
+
+/// The circular-cylindric contravariant basis vectors.
+#[allow(clippy::extra_unused_type_parameters)]
+pub fn cc_basis<T, const P: usize, M, GS, CStride: Dim>(
+    (_r, phi, _z): (T, T, T),
+    _params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> [Vector3<T>; 3]
+where
+    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+{
+    let dr = Vector3::from([cos!(phi), T::zero(), sin!(phi)]);
+    let dphi = Vector3::from([-sin!(phi), T::zero(), cos!(phi)]);
+    let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
+
+    [dr, dphi, dz]
+}
+
+/// The elliptic-cylindric contravariant basis vectors.
+#[allow(clippy::extra_unused_type_parameters)]
+pub fn ec_basis<T, const P: usize, M, GS, CStride: Dim>(
+    (mu, nu, _s): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> [Vector3<T>; 3]
+where
+    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+{
+    let y_offset = M::param_value("y", params).unwrap();
+    let delta = M::param_value("delta", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    let omega = T::two_pi() * nu;
+    let com = cos!(omega);
+    let som = sin!(omega);
+
+    let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+
+    let phi_nom = T::from_usize(2).unwrap() * T::pi() * delta * mu * radius_linearized;
+
+    let dmu = Vector3::from([
+        delta * radius_linearized * com / denom,
+        T::zero(),
+        delta * radius_linearized * som / denom,
+    ]);
+
+    let dnu = Vector3::from([
+        -phi_nom * powi!(delta, 2) * som / powi!(denom, 3),
+        T::zero(),
+        phi_nom * com / powi!(denom, 3),
+    ]);
+
+    let ds = Vector3::from([T::zero(), T::one(), T::zero()]);
+
+    [dmu, dnu, ds]
+}
+
+/// The circular-cylindric coordinate transformation (ecs -> ics).
+pub fn cc_ecs_to_ics<T, const P: usize, M, GS, CStride: Dim>(
+    (x, y, z): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> Vector3<T>
+where
+    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+{
+    let radius = M::param_value("radius", params).unwrap();
+    let y_offset = M::param_value("y", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    // Compute polar coordinates (r, phi).
+    let r = sqrt!(powi!(x, 2) + powi!(z, 2)) / radius_linearized;
+    let phi = atan2!(z, x);
+
+    Vector3::new(r, phi, y)
+}
+
+/// The elliptic-cylindric coordinate transformation (ecs -> ics).
+pub fn ec_ecs_to_ics<T, const P: usize, M, GS, CStride: Dim>(
+    (x, y, z): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> Vector3<T>
+where
+    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+{
+    let y_offset = M::param_value("y", params).unwrap();
+    let delta = M::param_value("delta", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    // Compute internal coordinates (mu, nu).
+    let r = sqrt!(powi!(x, 2) + powi!(z, 2));
+    let mu = r * sqrt!(powi!(x, 2) + powi!(z, 2) * powi!(delta, 2)) / r / delta / radius_linearized;
+    let nu = atan2!(z, x) / T!(2.0) / T::pi();
+
+    Vector3::new(mu, nu, y)
+}
+
+/// The circular-cylindric coordinate transformation (ics -> ecs).
+pub fn cc_ics_to_ecs<T, const P: usize, M, GS, CStride: Dim>(
+    (r, phi, y): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> Vector3<T>
+where
+    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+{
+    let radius = M::param_value("radius", params).unwrap();
+    let y_offset = M::param_value("y", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    // Compute cartesian coordinates (x, y, z).
+    let x = cos!(phi) * r * radius_linearized;
+    let z = sin!(phi) * r * radius_linearized;
+
+    Vector3::new(x, y, z)
+}
+
+/// The elliptic-cylindric coordinate transformation (ics -> ecs).
+pub fn ec_ics_to_ecs<T, const P: usize, M, GS, CStride: Dim>(
+    (mu, nu, s): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> Vector3<T>
+where
+    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+{
+    let y_offset = M::param_value("y", params).unwrap();
+    let delta = M::param_value("delta", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    let omega = T::from_usize(2).unwrap() * T::pi() * nu;
+
+    let df = mu * delta * radius_linearized
+        / sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+
+    // Compute cartesian coordinates (x, y, z).
+    let x = cos!(omega) * df;
+    let y = sin!(omega) * df;
+
+    Vector3::new(x, s, y)
+}
+
+macro_rules! impl_xcgm_geom {
+    ($model: ident, $params: expr, $fn_basis: tt, $fn_ics: tt, $fn_ecs: tt, $docs: literal) => {
+        #[doc=$docs]
+        #[allow(non_camel_case_types)]
+        #[derive(Debug)]
+        pub struct $model<T>(PhantomData<T>)
+        where
+            T: fXX;
+
+        impl<T> Default for $model<T>
+        where
+            T: fXX,
+        {
+            fn default() -> Self {
+                Self(PhantomData::<T>)
+            }
+        }
+
+        impl<T> OcnusCoords<T, { $params.len() }, XCState<T>> for $model<T>
+        where
+            T: fXX,
+        {
+            const COORD_PARAMS: [&'static str; { $params.len() }] = $params;
+
+            fn contravariant_basis<CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
+                state: &XCState<T>,
+            ) -> Result<[Vector3<T>; 3], CoordsError> {
+                Ok(
+                    $fn_basis::<T, { $params.len() }, Self, XCState<T>, CStride>(
+                        (ics[0], ics[1], ics[2]),
+                        params,
+                        state,
+                    ),
+                )
+            }
+
+            fn transform_ics_to_ecs<CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
+                state: &XCState<T>,
+            ) -> Result<Vector3<T>, CoordsError> {
+                let quaternion = state.q;
+
+                let ecs_norot = $fn_ecs::<T, { $params.len() }, Self, XCState<T>, CStride>(
+                    (ics[0], ics[1], ics[2]),
+                    params,
+                    state,
+                );
+
+                Ok(quaternion.transform_vector(&ecs_norot)
+                    + Vector3::new(state.x, T::zero(), state.z))
+            }
+
+            fn transform_ecs_to_ics<CStride: Dim>(
+                ecs: &VectorView3<T>,
+                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
+                state: &XCState<T>,
+            ) -> Result<Vector3<T>, CoordsError> {
+                let quaternion = state.q;
+
+                let ecs_norot = quaternion
+                    .conjugate()
+                    .transform_vector(&(ecs - Vector3::new(state.x, T::zero(), state.z)));
+
+                Ok($fn_ics::<T, { $params.len() }, Self, XCState<T>, CStride>(
+                    (ecs_norot[0], ecs_norot[1], ecs_norot[2]),
+                    params,
+                    state,
+                ))
+            }
+
+            fn initialize_cst<CStride: Dim>(
+                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
+                state: &mut XCState<T>,
+            ) {
+                let phi = Self::param_value("phi", params).unwrap();
+                let theta = Self::param_value("theta", params).unwrap();
+                let psi = Self::param_value("psi", params).unwrap_or(T::zero());
+                let radius = Self::param_value("radius", params).unwrap();
+                let x_init = Self::param_value("x_0", params).unwrap();
+                let y = Self::param_value("y", params).unwrap();
+
+                state.t = T::zero();
+                state.x = x_init;
+                state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
+                    / cos!(phi)
+                    / cos!(theta);
+
+                state.q = quaternion_rot(phi, psi, theta);
+            }
+        }
+    };
+}
+
+// Implementation of the circular-cylindrical geometry.
+impl_xcgm_geom!(
+    CCGeometry,
+    ["phi", "theta", "y", "radius", "x_0"],
+    cc_basis,
+    cc_ecs_to_ics,
+    cc_ics_to_ecs,
+    "Circular-cylindric flux rope geometry."
+);
+
+// Implementation of the elliptic-cylindrical geometry.
+impl_xcgm_geom!(
+    ECGeometry,
+    ["phi", "theta", "psi", "y", "delta", "radius", "x_0"],
+    ec_basis,
+    ec_ecs_to_ics,
+    ec_ics_to_ecs,
+    "Elliptic-cylindric flux rope geometry."
+);
+
+#[cfg(test)]
+mod tests {
+    use crate::coords::{CCGeometry, ECGeometry, OcnusCoords, XCState};
+    use nalgebra::{SVector, Vector3};
+
+    #[test]
+    fn test_cc_coords() {
+        let params =
+            SVector::<f64, 5>::from([5.0_f64.to_radians(), -3.0_f64.to_radians(), 0.01, 0.2, 0.0]);
+
+        let mut state = XCState::default();
+
+        CCGeometry::initialize_cst(&params.fixed_rows::<5>(0), &mut state);
+
+        let ics_ref = Vector3::new(0.6, 0.11, 0.5);
+
+        let ecs = CCGeometry::transform_ics_to_ecs(
+            &ics_ref.as_view(),
+            &params.fixed_rows::<5>(0),
+            &state,
+        )
+        .unwrap();
+
+        let ics_rec =
+            CCGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<5>(0), &state)
+                .unwrap();
+
+        assert!((ics_rec - ics_ref).norm() < 1e-4);
+    }
+
+    #[test]
+    fn test_ec_basis() {
+        let params = SVector::<f64, 7>::from([
+            5.0_f64.to_radians(),
+            -3.0_f64.to_radians(),
+            5.0_f64.to_radians(),
+            0.01,
+            1.0,
+            0.2,
+            0.0,
+        ]);
+
+        let mut state = XCState::default();
+
+        ECGeometry::initialize_cst(&params.fixed_rows::<7>(0), &mut state);
+
+        let ics = Vector3::new(0.56, 0.17, 0.45);
+
+        let ics_1p = Vector3::new(0.56001, 0.17, 0.45);
+        let ics_1m = Vector3::new(0.55999, 0.17, 0.45);
+
+        let ics_2p = Vector3::new(0.56, 0.17001, 0.45);
+        let ics_2m = Vector3::new(0.56, 0.16999, 0.45);
+
+        let ics_3p = Vector3::new(0.56, 0.17, 0.45001);
+        let ics_3m = Vector3::new(0.56, 0.17, 0.4499);
+
+        let basis =
+            ECGeometry::contravariant_basis(&ics.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        let ecs_1p =
+            ECGeometry::transform_ics_to_ecs(&ics_1p.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        let ecs_1m =
+            ECGeometry::transform_ics_to_ecs(&ics_1m.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        let ecs_2p =
+            ECGeometry::transform_ics_to_ecs(&ics_2p.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        let ecs_2m =
+            ECGeometry::transform_ics_to_ecs(&ics_2m.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        let ecs_3p =
+            ECGeometry::transform_ics_to_ecs(&ics_3p.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        let ecs_3m =
+            ECGeometry::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        dbg!(basis[0]);
+        dbg!(&(ecs_1p - ecs_1m) / 0.001);
+
+        assert!((basis[0] - (ecs_1p - ecs_1m) / 0.001).norm() < 1e-4);
+        assert!((basis[1] - (ecs_2p - ecs_2m) / 0.001).norm() < 1e-4);
+        assert!((basis[2] - (ecs_3p - ecs_3m) / 0.001).norm() < 1e-4);
+    }
+
+    #[test]
+    fn test_ec_coords() {
+        let params = SVector::<f64, 7>::from([
+            5.0_f64.to_radians(),
+            -3.0_f64.to_radians(),
+            5.0_f64.to_radians(),
+            0.01,
+            1.0,
+            0.2,
+            0.0,
+        ]);
+
+        let mut state = XCState::default();
+
+        ECGeometry::initialize_cst(&params.fixed_rows::<7>(0), &mut state);
+
+        let ics_ref = Vector3::new(0.6, 0.11, 0.5);
+
+        let ecs = ECGeometry::transform_ics_to_ecs(
+            &ics_ref.as_view(),
+            &params.fixed_rows::<7>(0),
+            &state,
+        )
+        .unwrap();
+
+        let ics_rec =
+            ECGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<7>(0), &state)
+                .unwrap();
+
+        assert!((ics_rec - ics_ref).norm() < 1e-4);
+    }
+}

@@ -7,7 +7,7 @@
 //! for models that are forward simulations and are numerically cheap enough to run
 //! in large ensembles. It further assumes that the model output can be interpreted
 //! as a N-dimensional vector observable (i.e. [`ObserVec`]). A [`FEVM`] must be built
-//! ontop of a geometry model (a type that implements [`OcnusGeometry`]), and also make
+//! ontop of a geometry model (a type that implements [`OcnusCoords`]), and also make
 //! use an additional state type to handle  time-dependence on top of the geometry state.
 //!
 //! The basic type within this module is [`FEVMData`], which describes an ensemble, with a
@@ -55,7 +55,7 @@ pub use fisher::*;
 pub use noise::*;
 
 /// The trait that must be implemented for any FEVM (forward ensemble vector model) with an N-dimensional vector observable.
-pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusGeometry<T, P, GS>
+pub trait FEVM<T, const P: usize, const N: usize, FS, GS>: OcnusCoords<T, P, GS>
 where
     T: Copy + Float + RealField + SampleUniform + Scalar,
     FS: Send,
@@ -86,7 +86,7 @@ where
         rseed: u64,
     ) -> Result<(), FEVMError<T>>
     where
-        for<'a> &'a D: PDF<T, P>,
+        for<'a> &'a D: OcnusProDeF<T, P>,
     {
         let start = Instant::now();
 
@@ -129,12 +129,12 @@ where
     }
 
     /// Initialize parameters and states for a FEVM ensemble by
-    /// resampling from a [`PDFParticles`].
+    /// resampling from a [`ParticlesND`].
     fn fevm_initialize_resample(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
         fevmd: &mut FEVMData<T, P, FS, GS>,
-        pdf: &PDFParticles<T, P>,
+        pdf: &ParticlesND<T, P>,
         rseed: u64,
     ) -> Result<(), FEVMError<T>>
     where
@@ -182,7 +182,7 @@ where
     fn fevm_initialize_params_only(
         &self,
         fevmd: &mut FEVMData<T, P, FS, GS>,
-        opt_pdf: Option<impl PDF<T, P>>,
+        opt_pdf: Option<impl OcnusProDeF<T, P>>,
         rseed: u64,
     ) -> Result<(), FEVMError<T>> {
         let start = Instant::now();
@@ -263,7 +263,7 @@ where
         geom_state: &GS,
     ) -> Result<ObserVec<T, N>, FEVMError<T>>;
 
-    /// Return intrinsic coordinates of the observation.
+    /// Return internal coordinates of the observation.
     fn fevm_observe_diagnostics(
         &self,
         scobs: &ScObs<T, ObserVec<T, N>>,
@@ -273,7 +273,7 @@ where
     ) -> Result<ObserVec<T, 12>, FEVMError<T>>;
 
     /// Perform an ensemble forward simulation and generate synthetic vector observables
-    /// for the given spacecraft observers. Returns indices of runs that are valid w.r.t.
+    /// for the given spacecraft observers. Returns indices of runs that are valid w.r.T.
     /// to the spacecraft observation series.
     fn fevm_simulate(
         &self,
@@ -445,13 +445,13 @@ where
     fn fevm_step_sizes(&self) -> [T; P];
 
     /// Returns a reference to the underlying model prior.
-    fn model_prior(&self) -> impl PDF<T, P>;
+    fn model_prior(&self) -> impl OcnusProDeF<T, P>;
 }
 
 use crate::{
-    geom::OcnusGeometry,
+    geom::OcnusCoords,
     obser::{ObserVec, OcnusObser, ScObs, ScObsSeries},
-    stats::{PDF, PDFParticles, StatsError},
+    prodef::{OcnusProDeF, ParticlesND, ProDeFError},
 };
 use filters::ParticleFilterError;
 use itertools::zip_eq;
@@ -540,7 +540,7 @@ pub enum FEVMError<T> {
     #[error("particle filter error")]
     ParticleFilter(#[from] ParticleFilterError<T>),
     #[error("stats error")]
-    Stats(#[from] StatsError<T>),
+    Stats(#[from] ProDeFError<T>),
 }
 
 /// An empty FEVM state.

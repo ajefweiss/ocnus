@@ -3,11 +3,11 @@ use crate::{
         FEVM, FEVMError, FEVMNullState, FisherInformation,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
     },
-    geom::{CCGeometry, ECGeometry, OcnusGeometry, XCState},
+    geom::{CCGeometry, ECGeometry, OcnusCoords, XCState},
     math::bessel_jn,
     obser::ObserVec,
     obser::{ScObs, ScObsConf, ScObsSeries},
-    stats::PDF,
+    prodef::OcnusProDeF,
 };
 use nalgebra::{
     Const, Dim, RealField, SVectorView, Scalar, SimdRealField, U1, Vector3, VectorView, VectorView3,
@@ -25,13 +25,13 @@ pub fn cc_lff_obs<T, const P: usize, M, GS>(
 ) -> Option<Vector3<T>>
 where
     T: 'static + Clone + Float + FromPrimitive + TotalOrder,
-    M: OcnusGeometry<T, P, GS>,
+    M: OcnusCoords<T, P, GS>,
 {
     // Extract parameters using their identifiers.
-    let b = M::param_value("B", params);
-    let y_offset = M::param_value("y", params);
-    let alpha_signed = M::param_value("alpha", params);
-    let radius = M::param_value("radius", params);
+    let b = M::param_value("B", params).unwrap();
+    let y_offset = M::param_value("y", params).unwrap();
+    let alpha_signed = M::param_value("alpha", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
 
     let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
@@ -70,13 +70,13 @@ pub fn cc_ut_obs<T, const P: usize, M, GS>(
 ) -> Option<Vector3<T>>
 where
     T: Clone + Float + FromPrimitive + TotalOrder,
-    M: OcnusGeometry<T, P, GS>,
+    M: OcnusCoords<T, P, GS>,
 {
     // Extract parameters using their identifiers.
-    let b = M::param_value("B", params);
-    let y_offset = M::param_value("y", params);
-    let tau = M::param_value("tau", params);
-    let radius = M::param_value("radius", params);
+    let b = M::param_value("B", params).unwrap();
+    let y_offset = M::param_value("y", params).unwrap();
+    let tau = M::param_value("tau", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
 
     let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
@@ -105,17 +105,17 @@ pub fn ec_hybrid_obs<T, const P: usize, M, GS>(
 ) -> Option<Vector3<T>>
 where
     T: 'static + Clone + Float + FromPrimitive + TotalOrder,
-    M: OcnusGeometry<T, P, GS>,
+    M: OcnusCoords<T, P, GS>,
 {
     // Extract parameters using their identifiers.
-    let y_offset = M::param_value("y", params);
-    let psi = M::param_value("psi", params);
-    let delta = M::param_value("delta", params);
-    let radius = M::param_value("radius", params);
-    let b = M::param_value("B", params);
-    let lambda = M::param_value("lambda", params);
-    let alpha_signed = M::param_value("alpha", params);
-    let tau = M::param_value("tau", params);
+    let y_offset = M::param_value("y", params).unwrap();
+    let psi = M::param_value("psi", params).unwrap();
+    let delta = M::param_value("delta", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+    let b = M::param_value("B", params).unwrap();
+    let lambda = M::param_value("lambda", params).unwrap();
+    let alpha_signed = M::param_value("alpha", params).unwrap();
+    let tau = M::param_value("tau", params).unwrap();
 
     let (alpha, sign) = match alpha_signed.partial_cmp(&T::zero()) {
         Some(ord) => match ord {
@@ -133,15 +133,15 @@ where
             _ => {
                 let b_linearized = b / (T::one() - y_offset.powi(2));
                 let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-                let omega = t_from!(2.0) * T::pi() * (nu - psi);
+                let omega = T::two_pi() * (nu - psi);
 
                 // We remove one radius_lineralized everywhere as it cancels out.
                 // See Eqs. 7-9 in Weiss 2024 et al.
-                let sqrtg = t_from!(2.0) * T::pi() * delta.powi(2) * mu * radius_linearized
+                let sqrtg = T::two_pi() * delta.powi(2) * mu * radius_linearized
                     / (omega.cos().powi(2) + delta.powi(2) * omega.sin().powi(2));
 
                 // LFF terms.
-                let b_s_lff = t_from!(2.0)
+                let b_s_lff = T!(2.0)
                     * T::pi()
                     * mu
                     * radius_linearized
@@ -152,7 +152,7 @@ where
                     b_linearized * sign * bessel_jn(alpha * mu * radius_linearized, 1) / sqrtg;
 
                 // UT terms.
-                let b_s_ut = t_from!(2.0) * T::pi() * mu * radius_linearized * b_linearized
+                let b_s_ut = T::two_pi() * mu * radius_linearized * b_linearized
                     / (T::one() + tau.powi(2) * (mu * radius_linearized).powi(2))
                     / sqrtg;
                 let b_nu_ut = mu * radius_linearized * b_linearized * tau
@@ -200,12 +200,12 @@ macro_rules! impl_cylm_fevm {
         pub struct $model<T, D>(pub D, PhantomData<T>)
         where
             T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>;
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
             T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -213,12 +213,12 @@ macro_rules! impl_cylm_fevm {
             }
         }
 
-        // Re-implement the OcnusGeometry trait because we have no inheritance.
-        impl<T, D> OcnusGeometry<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>
+        // Re-implement the OcnusCoords trait because we have no inheritance.
+        impl<T, D> OcnusCoords<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>
             for $model<T, D>
         where
             T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
             const PARAMS: [&'static str; { $parent::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($parent::<f64>::PARAMS, $params);
@@ -240,7 +240,7 @@ macro_rules! impl_cylm_fevm {
                 )
             }
 
-            fn coords_ics_to_xyz<CStride: Dim>(
+            fn coords_ics_to_ecs<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
@@ -250,15 +250,15 @@ macro_rules! impl_cylm_fevm {
                 >,
                 state: &XCState<T>,
             ) -> Vector3<T> {
-                $parent::coords_ics_to_xyz(
+                $parent::coords_ics_to_ecs(
                     ics,
                     &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
 
-            fn coords_xyz_to_ics<CStride: Dim>(
-                xyz: &VectorView3<T>,
+            fn coords_ecs_to_ics<CStride: Dim>(
+                ecs: &VectorView3<T>,
                 params: &VectorView<
                     T,
                     Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
@@ -267,14 +267,14 @@ macro_rules! impl_cylm_fevm {
                 >,
                 state: &XCState<T>,
             ) -> Vector3<T> {
-                $parent::coords_xyz_to_ics(
-                    xyz,
+                $parent::coords_ecs_to_ics(
+                    ecs,
                     &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
 
-            fn create_xyz_vector<CStride: Dim>(
+            fn create_ecs_vector<CStride: Dim>(
                 ics: &VectorView3<T>,
                 vec: &VectorView3<T>,
                 params: &VectorView<
@@ -285,7 +285,7 @@ macro_rules! impl_cylm_fevm {
                 >,
                 state: &XCState<T>,
             ) -> Vector3<T> {
-                $parent::create_xyz_vector(
+                $parent::create_ecs_vector(
                     ics,
                     vec,
                     &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
@@ -316,8 +316,8 @@ macro_rules! impl_cylm_fevm {
             T: Copy + Float + RealField + SampleUniform + Scalar + TotalOrder,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
-            Self: OcnusGeometry<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            Self: OcnusCoords<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
         {
             const RCS: usize = 128;
 
@@ -334,8 +334,8 @@ macro_rules! impl_cylm_fevm {
                 geom_state: &mut XCState<T>,
             ) -> Result<(), FEVMError<T>> {
                 // Extract parameters using their identifiers.
-                let vel = Self::param_value("v", params) / t_from!(1.496e8).unwrap();
-                geom_state.t += time_step;
+                let vel = Self::param_value("v", params) / T!(1.496e8).unwrap();
+                geom_state.T += time_step;
                 geom_state.x += vel * time_step as T;
 
                 Ok(())
@@ -358,7 +358,7 @@ macro_rules! impl_cylm_fevm {
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::coords_xyz_to_ics(&sc_pos.as_view(), params, geom_state);
+                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, geom_state);
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
@@ -371,7 +371,7 @@ macro_rules! impl_cylm_fevm {
 
                 match obs {
                     Some(b_q) => {
-                        let b_s = Self::create_xyz_vector(
+                        let b_s = Self::create_ecs_vector(
                             &q.as_view(),
                             &b_q.as_view(),
                             params,
@@ -401,7 +401,7 @@ macro_rules! impl_cylm_fevm {
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::coords_xyz_to_ics(&sc_pos.as_view(), params, geom_state);
+                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, geom_state);
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
@@ -430,15 +430,17 @@ macro_rules! impl_cylm_fevm {
 
             fn fevm_step_sizes(&self) -> [T; { $parent::<f64>::PARAMS.len() + $params.len() }] {
                 (&self.0)
-                    .valid_range()
+                    .get_valid_range()
                     .iter()
-                    .map(|(min, max)| (*max - *min) * t_from!(128.0).unwrap() * T::epsilon())
+                    .map(|(min, max)| (*max - *min) * T!(128.0).unwrap() * T::epsilon())
                     .collect::<Vec<T>>()
                     .try_into()
                     .unwrap()
             }
 
-            fn model_prior(&self) -> impl PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }> {
+            fn model_prior(
+                &self,
+            ) -> impl OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
@@ -463,7 +465,7 @@ macro_rules! impl_cylm_fevm {
                 + Serialize,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -490,7 +492,7 @@ macro_rules! impl_cylm_fevm {
                 + for<'x> Sum<&'x T>,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -517,7 +519,7 @@ macro_rules! impl_cylm_fevm {
                 + for<'x> Sum<&'x T>,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -544,7 +546,7 @@ macro_rules! impl_cylm_fevm {
                 + Sum<T>,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: PDF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
     };
