@@ -7,7 +7,7 @@ use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3}
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
-/// Coordinate state type for a tapered torus geometry with arbitrary cross-section shapes.
+/// coordinate system state type for a tapered torus geometry with arbitrary cross-section shapes.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TTState<T>
 where
@@ -23,7 +23,7 @@ where
     pub q: UnitQuaternion<T>,
 }
 
-/// Tapered torus geometry.
+/// Tapered torus flux rope geometry.
 pub struct TTGeometry<T>(PhantomData<T>)
 where
     T: fXX;
@@ -59,6 +59,8 @@ where
         let minor_radius = state.minor_radius;
         let delta = Self::param_value("delta", params).unwrap();
 
+        let quaternion = state.q;
+
         let mu = ics[0];
         let nu = ics[1];
 
@@ -71,14 +73,10 @@ where
         let som = sin!(omega);
 
         let radius_eff = minor_radius * powi!(sin!(psi_half), 2);
-
         let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
 
-        let dmu = Vector3::from([
-            radius_eff * delta / denom * cos!(psi) * com,
-            radius_eff * delta / denom * sin!(psi) * com,
-            radius_eff * delta / denom * som,
-        ]);
+        let dmu =
+            Vector3::from([-cos!(psi) * com, sin!(psi) * com, som]) * radius_eff * delta / denom;
 
         let cos_factor = (-T!(sqrt!(8.0)) * powi!(delta, 2) * T::two_pi() * sin!(T::two_pi() * nu))
             / powf!(
@@ -94,29 +92,30 @@ where
                 T!(1.5)
             );
 
-        let dnu = Vector3::from([
-            mu * radius_eff * delta * powi!(sin!(psi_half), 2) * cos!(psi) * cos_factor,
-            mu * radius_eff * delta * powi!(sin!(psi_half), 2) * sin!(psi) * cos_factor,
-            mu * radius_eff * delta * powi!(sin!(psi_half), 2) * sin_factor,
-        ]);
+        let dnu = Vector3::from([-cos!(psi) * cos_factor, sin!(psi) * cos_factor, sin_factor])
+            * mu
+            * radius_eff
+            * delta;
 
         let ds = Vector3::from([
-            T::two_pi() * major_radius * sin!(psi)
-                + mu * radius_eff * delta / denom
-                    * T::two_pi()
-                    * (sin!(psi_half) * cos!(psi_half) * cos!(psi)
-                        - powi!(sin!(psi_half), 2) * sin!(psi))
-                    * com,
-            T::two_pi() * major_radius * cos!(psi)
-                + mu * radius_eff * delta / denom
-                    * T::two_pi()
-                    * (sin!(psi_half) * cos!(psi_half) * sin!(psi)
-                        + powi!(sin!(psi_half), 2) * cos!(psi))
-                    * som,
-            T::two_pi() * mu * radius_eff * delta / denom * sin!(psi_half) * cos!(psi_half) * som,
+            -T::two_pi() * mu * minor_radius * delta / denom
+                * (sin!(psi_half) * cos!(psi_half) * cos!(psi)
+                    - powi!(sin!(psi_half), 2) * sin!(psi))
+                * com
+                + T::two_pi() * major_radius * sin!(psi),
+            T::two_pi() * mu * minor_radius * delta / denom
+                * (sin!(psi_half) * cos!(psi_half) * sin!(psi)
+                    + powi!(sin!(psi_half), 2) * cos!(psi))
+                * com
+                + T::two_pi() * major_radius * cos!(psi),
+            T::two_pi() * mu * minor_radius * delta / denom * sin!(psi_half) * cos!(psi_half) * som,
         ]);
 
-        Ok([dmu, dnu, ds])
+        Ok([
+            quaternion.transform_vector(&dmu),
+            quaternion.transform_vector(&dnu),
+            quaternion.transform_vector(&ds),
+        ])
     }
 
     fn transform_ics_to_ecs<CStride: Dim>(
@@ -126,9 +125,9 @@ where
     ) -> Result<Vector3<T>, CoordsError> {
         let major_radius = state.major_radius;
         let minor_radius = state.minor_radius;
-        let quaternion = state.q;
-
         let delta = Self::param_value("delta", params).unwrap();
+
+        let quaternion = state.q;
 
         let mu = ics[0];
         let nu = ics[1];
@@ -142,7 +141,6 @@ where
         let som = sin!(omega);
 
         let radius_eff = minor_radius * powi!(sin!(psi_half), 2);
-
         let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
         let mu_offset = mu * radius_eff * delta / denom;
 
@@ -220,72 +218,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::coords::OcnusCoords;
-
-    use super::{TTGeometry, TTState};
+    use crate::coords::{OcnusCoords, TTGeometry, TTState};
     use nalgebra::{SVector, Vector3};
-
-    #[test]
-    fn test_tt_basis() {
-        let params = SVector::<f64, 6>::from([
-            5.0_f64.to_radians(),
-            -3.0_f64.to_radians(),
-            7.0_f64.to_radians(),
-            0.5,
-            0.1,
-            0.9,
-        ]);
-
-        let mut state = TTState::default();
-
-        TTGeometry::initialize_cst(&params.fixed_rows::<6>(0), &mut state);
-
-        let ics = Vector3::new(0.56, 0.17, 0.45);
-
-        let ics_1p = Vector3::new(0.56001, 0.17, 0.45);
-        let ics_1m = Vector3::new(0.55999, 0.17, 0.45);
-
-        let ics_2p = Vector3::new(0.56, 0.17001, 0.45);
-        let ics_2m = Vector3::new(0.56, 0.16999, 0.45);
-
-        let ics_3p = Vector3::new(0.56, 0.17, 0.45001);
-        let ics_3m = Vector3::new(0.56, 0.17, 0.4499);
-
-        let basis =
-            TTGeometry::contravariant_basis(&ics.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        let ecs_1p =
-            TTGeometry::transform_ics_to_ecs(&ics_1p.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        let ecs_1m =
-            TTGeometry::transform_ics_to_ecs(&ics_1m.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        let ecs_2p =
-            TTGeometry::transform_ics_to_ecs(&ics_2p.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        let ecs_2m =
-            TTGeometry::transform_ics_to_ecs(&ics_2m.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        let ecs_3p =
-            TTGeometry::transform_ics_to_ecs(&ics_3p.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        let ecs_3m =
-            TTGeometry::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<6>(0), &state)
-                .unwrap();
-
-        dbg!(basis[0]);
-        dbg!(&(ecs_1p - ecs_1m) / 0.001);
-
-        assert!((basis[0] - (ecs_1p - ecs_1m) / 0.001).norm() < 1e-4);
-        assert!((basis[1] - (ecs_2p - ecs_2m) / 0.001).norm() < 1e-4);
-        assert!((basis[2] - (ecs_3p - ecs_3m) / 0.001).norm() < 1e-4);
-    }
 
     #[test]
     fn test_tt_coords() {
@@ -316,5 +250,7 @@ mod tests {
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);
+
+        TTGeometry::test_contravariant_basis(&ics_ref.as_view(), &params.fixed_rows::<6>(0), 1e-5);
     }
 }

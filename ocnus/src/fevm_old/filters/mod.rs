@@ -8,7 +8,7 @@ pub use sir::*;
 
 use crate::{
     T,
-    fevm::{FEVM, FEVMData, FEVMError, FEVMNoise},
+    fevm::{FEVM, FEVMEnsbl, FEVMError, FEVMNoise},
     obser::{ObserVec, ScObsSeries},
     prodef::UnivariateND,
 };
@@ -89,12 +89,12 @@ where
     T: Clone + Float + Scalar,
 {
     /// Default result holding the particles and output.
-    Default(FEVMData<T, P, FS, GS>, DMatrix<ObserVec<T, N>>),
+    Default(FEVMEnsbl<T, P, FS, GS>, DMatrix<ObserVec<T, N>>),
     /// Result holding additional likelihood values.
-    ByLikelihood(FEVMData<T, P, FS, GS>, DMatrix<ObserVec<T, N>>, Vec<T>),
+    ByLikelihood(FEVMEnsbl<T, P, FS, GS>, DMatrix<ObserVec<T, N>>, Vec<T>),
     /// Result holding additional error values and quantile statistics.
     ByMetric(
-        FEVMData<T, P, FS, GS>,
+        FEVMEnsbl<T, P, FS, GS>,
         DMatrix<ObserVec<T, N>>,
         Vec<T>,
         [T; 3],
@@ -124,8 +124,8 @@ where
         }
     }
 
-    /// Access the underlying [`FEVMData`].
-    pub fn get_fevmd(&self) -> &FEVMData<T, P, FS, GS> {
+    /// Access the underlying [`FEVMEnsbl`].
+    pub fn get_fevmd(&self) -> &FEVMEnsbl<T, P, FS, GS> {
         match self {
             ParticleFilterResults::Default(fevmd, ..) => fevmd,
             ParticleFilterResults::ByLikelihood(fevmd, ..) => fevmd,
@@ -163,7 +163,7 @@ where
     GS: Clone + Default + Serialize + Send,
     StandardNormal: Distribution<T>,
 {
-    /// Creates a new [`FEVMData`], optionally using filter (recommended).
+    /// Creates a new [`FEVMEnsbl`], optionally using filter (recommended).
     ///
     /// This function is intended to be used.as_()he initialization step in any particle filtering algorithm.
     fn pf_initialize_ensemble<E>(
@@ -184,11 +184,11 @@ where
         let mut counter = 0;
         let mut iteration = 0;
 
-        let mut target = FEVMData::new(ensemble_size);
+        let mut target = FEVMEnsbl::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
         let mut target_filter_values = Vec::<T>::with_capacity(ensemble_size);
 
-        let mut temp_data = FEVMData::new(sim_ensemble_size);
+        let mut temp_data = FEVMEnsbl::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         while counter != target.size() {

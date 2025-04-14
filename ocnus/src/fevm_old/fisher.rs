@@ -1,5 +1,5 @@
 use crate::{
-    fevm::{FEVM, FEVMData, FEVMError},
+    fevm::{FEVM, FEVMEnsbl, FEVMError},
     math::T,
     obser::{ObserVec, ScObsSeries},
     prodef::CovMatrix,
@@ -35,7 +35,7 @@ where
     fn fischer_information_matrix<C>(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &FEVMData<T, P, FS, GS>,
+        fevmd: &FEVMEnsbl<T, P, FS, GS>,
         acfunc: &C,
     ) -> Result<Vec<SMatrix<T, P, P>>, FEVMError<T>>
     where
@@ -52,7 +52,7 @@ where
             .chunks(Self::RCS / 4)
             .try_for_each(|mut chunks| {
                 chunks.iter_mut().try_for_each(|(params_ref, fim)| {
-                    let mut pos = FEVMData {
+                    let mut pos = FEVMEnsbl {
                         params:
                             Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(
                                 &[*params_ref; P],
@@ -62,7 +62,7 @@ where
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
-                    let mut neg = FEVMData {
+                    let mut neg = FEVMEnsbl {
                         params:
                             Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(
                                 &[*params_ref; P],

@@ -1,12 +1,13 @@
 #![doc = include_str!("../../README.md")]
 #![deny(missing_docs)]
 
-// pub mod fevm;
 pub mod coords;
+pub mod forward;
 pub mod math;
 pub mod obser;
 pub mod prodef;
 
+use forward::FSMError;
 use math::MathError;
 use nalgebra::{RealField, Scalar};
 use num_traits::{Float, FromPrimitive, float::TotalOrder};
@@ -21,6 +22,8 @@ use thiserror::Error;
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
 pub enum OcnusError<T> {
+    #[error("fsm error")]
+    FSM(#[from] FSMError<T>),
     #[error("math error")]
     Math(#[from] MathError<T>),
     #[error("stats error")]
@@ -34,6 +37,7 @@ pub trait fXX:
     'static
     + Copy
     + Debug
+    + Default
     + Display
     + Float
     + FromPrimitive

@@ -10,13 +10,13 @@
 //! ontop of a geometry model (a type that implements [`OcnusCoords`]), and also make
 //! use an additional state type to handle  time-dependence on top of the geometry state.
 //!
-//! The basic type within this module is [`FEVMData`], which describes an ensemble, with a
+//! The basic type within this module is [`FEVMEnsbl`], which describes an ensemble, with a
 //! matrix describing the model parameters, and two vectors
 //! for the geometry and fevm states. Each ensemble member must also be assigned a
 //! weight according to the importance within the ensemble.
 //!
 //! The [`FEVM`] trait provides, among others, the following important methods:
-//! - [`FEVM::fevm_initialize`] Initializes the model parameters of a [`FEVMData`]
+//! - [`FEVM::fevm_initialize`] Initializes the model parameters of a [`FEVMEnsbl`]
 //!   using the model or a custom prior.
 //! - [`FEVM::fevm_initialize_params_only`] / [`FEVM::fevm_initialize_states_only`]
 //!   These two functions only initialize the model parameters or the model states respectively.
@@ -81,7 +81,7 @@ where
     fn fevm_initialize<D>(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
+        fevmd: &mut FEVMEnsbl<T, P, FS, GS>,
         opt_pdf: Option<&D>,
         rseed: u64,
     ) -> Result<(), FEVMError<T>>
@@ -133,7 +133,7 @@ where
     fn fevm_initialize_resample(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
+        fevmd: &mut FEVMEnsbl<T, P, FS, GS>,
         pdf: &ParticlesND<T, P>,
         rseed: u64,
     ) -> Result<(), FEVMError<T>>
@@ -181,7 +181,7 @@ where
     /// If no pdf is given, the underlying model prior is used instead.
     fn fevm_initialize_params_only(
         &self,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
+        fevmd: &mut FEVMEnsbl<T, P, FS, GS>,
         opt_pdf: Option<impl OcnusProDeF<T, P>>,
         rseed: u64,
     ) -> Result<(), FEVMError<T>> {
@@ -218,11 +218,11 @@ where
         Ok(())
     }
 
-    /// Initialize the model states within a [`FEVMData`] object.
+    /// Initialize the model states within a [`FEVMEnsbl`] object.
     fn fevm_initialize_states_only(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
+        fevmd: &mut FEVMEnsbl<T, P, FS, GS>,
     ) -> Result<(), FEVMError<T>> {
         let start = Instant::now();
 
@@ -278,7 +278,7 @@ where
     fn fevm_simulate(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
+        fevmd: &mut FEVMEnsbl<T, P, FS, GS>,
         output: &mut DMatrix<ObserVec<T, N>>,
         opt_noise: Option<&mut FEVMNoise<T>>,
     ) -> Result<Vec<bool>, FEVMError<T>>
@@ -378,7 +378,7 @@ where
     fn fevm_simulate_diagnostics(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &mut FEVMData<T, P, FS, GS>,
+        fevmd: &mut FEVMEnsbl<T, P, FS, GS>,
         output: &mut DMatrix<ObserVec<T, 12>>,
     ) -> Result<(), FEVMError<T>>
     where
@@ -469,7 +469,7 @@ use thiserror::Error;
 
 /// A data structure that stores the parameters, states and random seed for a FEVM.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FEVMData<T, const P: usize, FS, GS>
+pub struct FEVMEnsbl<T, const P: usize, FS, GS>
 where
     T: Clone + Scalar,
 {
@@ -486,14 +486,14 @@ where
     pub weights: Vec<T>,
 }
 
-impl<T, const P: usize, FS, GS> FEVMData<T, P, FS, GS>
+impl<T, const P: usize, FS, GS> FEVMEnsbl<T, P, FS, GS>
 where
     T: Clone + RealField + Scalar,
     FS: Clone + Default,
     GS: Clone + Default,
     Self: Serialize,
 {
-    /// Create a new [`FEVMData`] filled with zeros.
+    /// Create a new [`FEVMEnsbl`] filled with zeros.
     pub fn new(size: usize) -> Self {
         Self {
             params: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::zeros(size),

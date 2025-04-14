@@ -7,7 +7,7 @@ use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3}
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
-/// Coordinate state type for cylindrical models with arbitrary cross-section shapes.
+/// coordinate system state type for cylindrical models with arbitrary cross-section shapes.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct XCState<T>
 where
@@ -29,16 +29,21 @@ where
 /// The circular-cylindric contravariant basis vectors.
 #[allow(clippy::extra_unused_type_parameters)]
 pub fn cc_basis<T, const P: usize, M, GS, CStride: Dim>(
-    (_r, phi, _z): (T, T, T),
-    _params: &VectorView<T, Const<P>, U1, CStride>,
+    (r, phi, _z): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
     M: OcnusCoords<T, P, GS>,
     T: fXX,
 {
-    let dr = Vector3::from([cos!(phi), T::zero(), sin!(phi)]);
-    let dphi = Vector3::from([-sin!(phi), T::zero(), cos!(phi)]);
+    let y_offset = M::param_value("y", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    let dr = Vector3::from([cos!(phi), T::zero(), sin!(phi)]) * radius_linearized;
+    let dphi = Vector3::from([-sin!(phi), T::zero(), cos!(phi)]) * r * radius_linearized;
     let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
 
     [dr, dphi, dz]
@@ -211,13 +216,19 @@ macro_rules! impl_xcgm_geom {
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
                 state: &XCState<T>,
             ) -> Result<[Vector3<T>; 3], CoordsError> {
-                Ok(
-                    $fn_basis::<T, { $params.len() }, Self, XCState<T>, CStride>(
-                        (ics[0], ics[1], ics[2]),
-                        params,
-                        state,
-                    ),
-                )
+                let quaternion = state.q;
+
+                let [dmu, dnu, ds] = $fn_basis::<T, { $params.len() }, Self, XCState<T>, CStride>(
+                    (ics[0], ics[1], ics[2]),
+                    params,
+                    state,
+                );
+
+                Ok([
+                    quaternion.transform_vector(&dmu),
+                    quaternion.transform_vector(&dnu),
+                    quaternion.transform_vector(&ds),
+                ])
             }
 
             fn transform_ics_to_ecs<CStride: Dim>(
@@ -326,69 +337,8 @@ mod tests {
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);
-    }
 
-    #[test]
-    fn test_ec_basis() {
-        let params = SVector::<f64, 7>::from([
-            5.0_f64.to_radians(),
-            -3.0_f64.to_radians(),
-            5.0_f64.to_radians(),
-            0.01,
-            1.0,
-            0.2,
-            0.0,
-        ]);
-
-        let mut state = XCState::default();
-
-        ECGeometry::initialize_cst(&params.fixed_rows::<7>(0), &mut state);
-
-        let ics = Vector3::new(0.56, 0.17, 0.45);
-
-        let ics_1p = Vector3::new(0.56001, 0.17, 0.45);
-        let ics_1m = Vector3::new(0.55999, 0.17, 0.45);
-
-        let ics_2p = Vector3::new(0.56, 0.17001, 0.45);
-        let ics_2m = Vector3::new(0.56, 0.16999, 0.45);
-
-        let ics_3p = Vector3::new(0.56, 0.17, 0.45001);
-        let ics_3m = Vector3::new(0.56, 0.17, 0.4499);
-
-        let basis =
-            ECGeometry::contravariant_basis(&ics.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        let ecs_1p =
-            ECGeometry::transform_ics_to_ecs(&ics_1p.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        let ecs_1m =
-            ECGeometry::transform_ics_to_ecs(&ics_1m.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        let ecs_2p =
-            ECGeometry::transform_ics_to_ecs(&ics_2p.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        let ecs_2m =
-            ECGeometry::transform_ics_to_ecs(&ics_2m.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        let ecs_3p =
-            ECGeometry::transform_ics_to_ecs(&ics_3p.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        let ecs_3m =
-            ECGeometry::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<7>(0), &state)
-                .unwrap();
-
-        dbg!(basis[0]);
-        dbg!(&(ecs_1p - ecs_1m) / 0.001);
-
-        assert!((basis[0] - (ecs_1p - ecs_1m) / 0.001).norm() < 1e-4);
-        assert!((basis[1] - (ecs_2p - ecs_2m) / 0.001).norm() < 1e-4);
-        assert!((basis[2] - (ecs_3p - ecs_3m) / 0.001).norm() < 1e-4);
+        CCGeometry::test_contravariant_basis(&ics_ref.as_view(), &params.fixed_rows::<5>(0), 1e-5);
     }
 
     #[test]
@@ -421,5 +371,7 @@ mod tests {
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);
+
+        ECGeometry::test_contravariant_basis(&ics_ref.as_view(), &params.fixed_rows::<7>(0), 1e-5);
     }
 }

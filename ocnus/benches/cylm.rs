@@ -2,7 +2,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
     coords::XCState,
-    // fevm::{FEVM, FEVMData, FEVMNullState, models::CCLFFModel},
+    // fevm::{FEVM, FEVMEnsbl, FEVMNullState, models::CCLFFModel},
     obser::ObserVec,
     obser::{ScObs, ScObsConf, ScObsSeries},
     prodef::{Constant1D, Uniform1D, UnivariateND},
@@ -50,7 +50,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     // let mut group = c.benchmark_group("cylm_lff_bench");
 
     // // Create temporary simulation data and out arrays, if necessary.
-    // let mut data = FEVMData {
+    // let mut data = FEVMEnsbl {
     //     params: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(ENSEMBLE_SIZE),
     //     fevm_states: vec![FEVMNullState::default(); ENSEMBLE_SIZE],
     //     geom_states: vec![XCState::default(); ENSEMBLE_SIZE],

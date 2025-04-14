@@ -52,7 +52,7 @@ pub enum ProDeFError<T> {
 pub trait OcnusProDeF<T, const P: usize>: Debug
 where
     T: PartialOrd,
-    Self: Sync,
+    Self: Send + Sync,
 {
     /// Estimates the relative (not-normalized) density  at a specific position `x`.
     fn density_rel(&self, x: &SVectorView<T, P>) -> T;

@@ -8,7 +8,7 @@
 // use ocnus::{
 //     coords::XCState,
 //     fevm::{
-//         FEVM, FEVMData, FEVMError, FEVMNoise, FEVMNullState, FisherInformation,
+//         FEVM, FEVMEnsbl, FEVMError, FEVMNoise, FEVMNullState, FisherInformation,
 //         filters::{
 //             ABCParticleFilter, ABCParticleFilterMode, ParticleFilter, ParticleFilterError,
 //             ParticleFilterSettingsBuilder, SIRParticleFilter, root_mean_square_filter,
@@ -55,7 +55,7 @@
 //         (0..20).map(|i| ScObs::new(i as f64 * 1.0 * 3600.0, ScObsConf::Distance(1.0), None)),
 //     );
 
-//     let mut fevmd_0 = FEVMData {
+//     let mut fevmd_0 = FEVMEnsbl {
 //         params: Matrix::<f64, _, Dyn, VecStorage<f64, Const<12>, Dyn>>::from_iterator(
 //             1,
 //             [

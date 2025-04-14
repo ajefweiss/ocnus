@@ -1,20 +1,17 @@
-//! Mathematical functions and routines.
+//! Mathematical data types, functions and routines.
 //!
 //! # Covariance Matrices
 //!
-//! A [`CovMatrix`] can be created directly from a semi positive definite matrix or
-//! an ensemble of N-dimensional particles.
+//! A [`CovMatrix`] can be created directly from a semi positive definite matrix or an ensemble
+//! of N-dimensional vectors.
 //!
-//! This type can handle dimensions without any variance. These dimensions
-//! are zero'd out in the resulting matrix, inverse matrix, Cholesky decomposition and are
-//! ignored for the calculation of the pseudo determinant. They are also ignored in the
-//! likelihood calculations.
+//! [`CovMatrix`] can handle dimensions without any variance. These dimensions are zero'd out
+//! in the resulting matrix, inverse matrix and the Cholesky decomposition. Also therefore, only
+//! the pseudo-determinant is calculated and provided. Likelihood calculations also ignore these
+//! dimensions.
 //!
-//! Also stores the inverse covariance matrix ([`CovMatrix::ref_inverse_matrix`]), the lower
-//! triangular matrix from the Cholesky decomposition ([`CovMatrix::ref_cholesky_ltm`]) and the
-//! pseudo determinant ([`CovMatrix::pseudo_determinant`]).
-//!
-//! # Probability Density Functions (PDFs)
+//! This type directly stores the inverse covariance matrix, the lower triangular matrix from the
+//! Cholesky decomposition and the pseudo determinant to avoid unnecessary calculations.
 
 mod bessel;
 mod covariance;

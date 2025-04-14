@@ -581,7 +581,7 @@ impl_cylm_fevm!(
 mod tests {
     use super::*;
     use crate::{
-        fevm::FEVMData,
+        fevm::FEVMEnsbl,
         prodef::{Constant1D, Uniform1D, UnivariateND},
     };
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
@@ -609,7 +609,7 @@ mod tests {
             )
         }));
 
-        let mut data = FEVMData {
+        let mut data = FEVMEnsbl {
             params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
@@ -668,7 +668,7 @@ mod tests {
             )
         }));
 
-        let mut data = FEVMData {
+        let mut data = FEVMEnsbl {
             params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],
@@ -732,7 +732,7 @@ mod tests {
             )
         }));
 
-        let mut data = FEVMData {
+        let mut data = FEVMEnsbl {
             params: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
             fevm_states: vec![FEVMNullState::default(); 1],
             geom_states: vec![XCState::default(); 1],

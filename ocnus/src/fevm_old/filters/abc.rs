@@ -1,7 +1,7 @@
 use crate::{
     T,
     fevm::{
-        FEVMData, FEVMError, ParticleFilterError,
+        FEVMEnsbl, FEVMError, ParticleFilterError,
         filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
     },
     obser::{ObserVec, ScObsSeries},
@@ -50,7 +50,7 @@ where
     fn abcpf_run<E>(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &FEVMData<T, P, FS, GS>,
+        fevmd: &FEVMEnsbl<T, P, FS, GS>,
         ensemble_size: usize,
         sim_ensemble_size: usize,
         mode: ABCParticleFilterMode<T, E, N>,
@@ -64,11 +64,11 @@ where
         let mut counter = 0;
         let mut iteration = 0;
 
-        let mut target_data = FEVMData::new(ensemble_size);
+        let mut target_data = FEVMEnsbl::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
         let mut target_filter_values = Vec::<T>::with_capacity(ensemble_size);
 
-        let mut temp_data = FEVMData::new(sim_ensemble_size);
+        let mut temp_data = FEVMEnsbl::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
