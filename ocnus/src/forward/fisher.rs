@@ -1,82 +1,71 @@
 use crate::{
-    fevm::{FEVM, FEVMEnsbl, FEVMError},
-    math::T,
-    obser::{ObserVec, ScObsSeries},
-    prodef::CovMatrix,
+    OcnusError, fXX,
+    forward::{FSMEnsbl, OcnusFSM},
+    math::{CovMatrix, T, abs},
+    obser::{ObserVec, ObserVecNoise, ScObsSeries},
 };
-use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SMatrix, Scalar, VecStorage};
-use num_traits::{Float, FromPrimitive};
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use nalgebra::{Const, DMatrix, Dyn, Matrix, SMatrix, VecStorage};
+use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::{iter::Sum, ops::AddAssign};
 
-/// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`FEVM`].
+/// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`OcnusFSM`]
+/// with a [`ObserVec`] as observable type.
 pub trait FisherInformation<T, const P: usize, const N: usize, FS, GS>:
-    FEVM<T, P, N, FS, GS>
+    OcnusFSM<T, ObserVec<T, N>, P, FS, GS>
 where
-    T: for<'x> AddAssign<&'x T>
-        + Copy
-        + Default
-        + for<'x> Deserialize<'x>
-        + Float
-        + FromPrimitive
-        + RealField
-        + SampleUniform
-        + Serialize
-        + Scalar
-        + Sum<T>,
+    T: fXX,
     FS: Clone + Default + Send,
     GS: Clone + Default + Send,
     Self: Sync,
     StandardNormal: Distribution<T>,
 {
-    /// Compute the Fisher information matrix (FIM) for an array of model parameters using an auto-correlation function `acfunc`.
+    /// Compute the Fisher information matrix (FIM) for an array of model parameters using a
+    /// time and distance based auto-correlation function `acfunc`.
     fn fischer_information_matrix<C>(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &FEVMEnsbl<T, P, FS, GS>,
+        ensbl: &FSMEnsbl<T, P, FS, GS>,
         acfunc: &C,
-    ) -> Result<Vec<SMatrix<T, P, P>>, FEVMError<T>>
+    ) -> Result<Vec<SMatrix<T, P, P>>, OcnusError<T>>
     where
-        C: Fn(T) -> T + Sync,
+        C: Fn(T, T) -> T + Sync,
     {
-        let step_sizes = self.fevm_step_sizes();
+        let step_sizes = self.param_step_sizes();
 
-        let mut results = vec![SMatrix::<T, P, P>::zeros(); fevmd.params.ncols()];
+        let mut results = vec![SMatrix::<T, P, P>::zeros(); ensbl.len()];
 
-        fevmd
-            .params
+        ensbl
+            .params_array
             .par_column_iter()
             .zip(results.par_iter_mut())
             .chunks(Self::RCS / 4)
             .try_for_each(|mut chunks| {
                 chunks.iter_mut().try_for_each(|(params_ref, fim)| {
-                    let mut pos = FEVMEnsbl {
-                        params:
+                    let mut pos = FSMEnsbl {
+                        params_array:
                             Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(
                                 &[*params_ref; P],
                             ),
-                        fevm_states: vec![FS::default(); P],
-                        geom_states: vec![GS::default(); P],
+                        fm_states: vec![FS::default(); P],
+                        cs_states: vec![GS::default(); P],
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
-                    let mut neg = FEVMEnsbl {
-                        params:
+                    let mut neg = FSMEnsbl {
+                        params_array:
                             Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(
                                 &[*params_ref; P],
                             ),
-                        fevm_states: vec![FS::default(); P],
-                        geom_states: vec![GS::default(); P],
+                        fm_states: vec![FS::default(); P],
+                        cs_states: vec![GS::default(); P],
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
-                    pos.params
+                    pos.params_array
                         .column_iter_mut()
                         .enumerate()
                         .for_each(|(pdx, mut params)| params[pdx] += step_sizes[pdx]);
-                    neg.params
+                    neg.params_array
                         .column_iter_mut()
                         .enumerate()
                         .for_each(|(pdx, mut params)| params[pdx] -= step_sizes[pdx]);
@@ -84,11 +73,21 @@ where
                     let mut pos_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), P);
                     let mut neg_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), P);
 
-                    self.fevm_initialize_states_only(series, &mut pos)?;
-                    self.fevm_initialize_states_only(series, &mut neg)?;
+                    self.fsm_initialize_states_ensbl(series, &mut pos)?;
+                    self.fsm_initialize_states_ensbl(series, &mut neg)?;
 
-                    self.fevm_simulate(series, &mut pos, &mut pos_output, None)?;
-                    self.fevm_simulate(series, &mut neg, &mut neg_output, None)?;
+                    self.fsm_simulate_ensbl(
+                        series,
+                        &mut pos,
+                        &mut pos_output.as_view_mut(),
+                        None::<&mut ObserVecNoise<T, N>>,
+                    )?;
+                    self.fsm_simulate_ensbl(
+                        series,
+                        &mut neg,
+                        &mut neg_output.as_view_mut(),
+                        None::<&mut ObserVecNoise<T, N>>,
+                    )?;
 
                     fim.row_iter_mut().enumerate().for_each(|(rdx, mut row)| {
                         row.iter_mut().enumerate().for_each(|(cdx, value)| {
@@ -126,11 +125,6 @@ where
                                 let obs_norm_b =
                                     dmu_b.iter().fold(0, |acc, x| acc + !x.any_nan() as usize);
 
-                                if obs_norm_b == 0 {
-                                    println!("{},{},\n\n{:?}", cdx, rdx, &dmu_a);
-                                    println!("\n{:?}", &dmu_b);
-                                }
-
                                 let valid_indices =
                                     dmu_a.iter().map(|x| !x.any_nan()).collect::<Vec<bool>>();
 
@@ -141,7 +135,7 @@ where
                                         .iter()
                                         .filter_map(|obsvec| {
                                             if !obsvec.any_nan() {
-                                                Some(obsvec.0.iter().copied())
+                                                Some(obsvec.into_iter().copied())
                                             } else {
                                                 None
                                             }
@@ -156,7 +150,7 @@ where
                                         .iter()
                                         .filter_map(|obsvec| {
                                             if !obsvec.any_nan() {
-                                                Some(obsvec.0.iter().copied())
+                                                Some(obsvec.into_iter().copied())
                                             } else {
                                                 None
                                             }
@@ -171,10 +165,13 @@ where
                                             Some((0..valid_indices.len()).zip(series).filter_map(
                                                 |(j, scobs_j)| {
                                                     if valid_indices[j] {
-                                                        Some(acfunc(abs!(
-                                                            *scobs_i.timestamp()
-                                                                - *scobs_j.timestamp(),
-                                                        )))
+                                                        Some(acfunc(
+                                                            abs!(
+                                                                *scobs_i.timestamp()
+                                                                    - *scobs_j.timestamp()
+                                                            ),
+                                                            scobs_i.distance(&scobs_j),
+                                                        ))
                                                     } else {
                                                         None
                                                     }
@@ -205,10 +202,10 @@ where
 
                     **fim += fim.transpose() - SMatrix::<T, P, P>::from_diagonal(&fim.diagonal());
 
-                    Ok::<(), FEVMError<T>>(())
+                    Ok::<(), OcnusError<T>>(())
                 })?;
 
-                Ok::<(), FEVMError<T>>(())
+                Ok::<(), OcnusError<T>>(())
             })?;
 
         Ok(results)

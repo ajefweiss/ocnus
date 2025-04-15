@@ -1,87 +1,79 @@
 use crate::{
-    T,
-    fevm::{
-        FEVMEnsbl, FEVMError,
+    OcnusError, fXX,
+    forward::{
+        FSMEnsbl,
         filters::{
             ParticleFilter, ParticleFilterError, ParticleFilterResults, ParticleFilterSettings,
         },
     },
-    obser::{ObserVec, ScObsSeries},
+    math::{T, exp, powi},
+    obser::{ObserVec, ObserVecNoise, ScObsSeries},
     prodef::{OcnusProDeF, ParticlesND},
 };
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{DMatrix, RealField, Scalar};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::DMatrix;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use serde::Serialize;
-use std::{cmp::Ordering, iter::Sum, ops::AddAssign, time::Instant};
+use std::{cmp::Ordering, time::Instant};
 
 /// A trait that enables the use of a sequential importance resampling (SIR) particle filter method
-/// for a [`FEVM`](crate::fevm::FEVM).
-pub trait SIRParticleFilter<T, const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<T, P, N, FS, GS>
+/// for a [`OcnusFSM`](crate::forward::OcnusFSM) with a [`ObserVec`] observable.
+pub trait SIRParticleFilter<T, const P: usize, const N: usize, FMST, CSST>:
+    ParticleFilter<T, ObserVec<T, N>, P, FMST, CSST>
 where
-    T: for<'x> AddAssign<&'x T>
-        + AsPrimitive<usize>
-        + Copy
-        + Default
-        + Float
-        + RealField
-        + SampleUniform
-        + Scalar
-        + Serialize
-        + Sum<T>
-        + for<'x> Sum<&'x T>,
-    FS: Clone + Default + Serialize + Send,
-    GS: Clone + Default + Serialize + Send,
+    T: fXX + SampleUniform,
+    FMST: Default + Clone + Send,
+    CSST: Default + Clone + Send,
     StandardNormal: Distribution<T>,
+    Self: Sync,
 {
     /// Basic SIR filter (single iteration) with multivariate likelihood.
-    fn sirpf_run(
+    fn pf_sir_iter(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &FEVMEnsbl<T, P, FS, GS>,
-        ensemble_size: usize,
-        sim_ensemble_size: usize,
-        settings: &mut ParticleFilterSettings<T, N>,
-    ) -> Result<ParticleFilterResults<T, P, N, FS, GS>, FEVMError<T>> {
+        ensbl: &FSMEnsbl<T, P, FMST, CSST>,
+        ensemble_sizes: (usize, usize),
+        settings: &mut ParticleFilterSettings<T>,
+        noise: &mut ObserVecNoise<T, N>,
+    ) -> Result<ParticleFilterResults<T, ObserVec<T, N>, P, FMST, CSST>, OcnusError<T>> {
         let start = Instant::now();
+
+        let (ensemble_size, sim_ensemble_size) = ensemble_sizes;
 
         let mut counter = 0;
         let mut iteration = 0;
 
-        let mut target_data = FEVMEnsbl::new(ensemble_size);
+        let mut target_ensbl = FSMEnsbl::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
 
-        let mut temp_data = FEVMEnsbl::new(sim_ensemble_size);
+        let mut temp_ensbl = FSMEnsbl::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
-        let mut interim_data = FEVMEnsbl::<T, P, FS, GS>::new(sim_ensemble_size);
+        let mut interim_ensbl = FSMEnsbl::<T, P, FMST, CSST>::new(sim_ensemble_size);
         let mut interim_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
         let density_old = ParticlesND::from_particles(
-            fevmd.params.as_view(),
+            ensbl.params_array.as_view(),
             self.model_prior().get_valid_range(),
-            fevmd.weights.clone(),
-        )? * settings.exploration_factor;
+            ensbl.weights.clone(),
+        )? * settings.expl_factor;
 
         while counter != sim_ensemble_size {
-            self.fevm_initialize(
+            self.fsm_initialize_ensbl(
                 series,
-                &mut temp_data,
+                &mut temp_ensbl,
                 Some(&density_old),
                 settings.rseed + 27 * iteration as u64,
             )?;
 
             let mut indices_valid = self
-                .fevm_simulate(
+                .fsm_simulate_ensbl(
                     series,
-                    &mut temp_data,
-                    &mut temp_output,
-                    Some(&mut settings.noise),
+                    &mut temp_ensbl,
+                    &mut temp_output.as_view_mut(),
+                    None::<&mut ObserVecNoise<T, N>>,
                 )?
                 .into_iter()
                 .enumerate()
@@ -91,19 +83,19 @@ where
             debug!("valid: {}", indices_valid.len());
 
             // Remove excessive ensemble members.
-            if counter + indices_valid.len() > temp_data.size() {
+            if counter + indices_valid.len() > temp_ensbl.len() {
                 debug!(
                     "removing excessive ensemble members simulations n={}",
-                    counter + indices_valid.len() - interim_data.size()
+                    counter + indices_valid.len() - interim_ensbl.len()
                 );
-                indices_valid.drain((interim_data.size() - counter)..indices_valid.len());
+                indices_valid.drain((interim_ensbl.len() - counter)..indices_valid.len());
             }
 
             // Copy over results.
             indices_valid.iter().enumerate().for_each(|(edx, idx)| {
-                interim_data
-                    .params
-                    .set_column(counter + edx, &temp_data.params.column(*idx));
+                interim_ensbl
+                    .params_array
+                    .set_column(counter + edx, &temp_ensbl.params_array.column(*idx));
 
                 interim_output.set_column(counter + edx, &temp_output.column(*idx));
             });
@@ -112,13 +104,12 @@ where
 
             iteration += 1;
 
-            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
-                return Err(FEVMError::ParticleFilter(
-                    ParticleFilterError::TimeLimitExceeded {
-                        elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
-                        limit: settings.simulation_time_limit,
-                    },
-                ));
+            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.sim_time_limit {
+                return Err(ParticleFilterError::TimeLimitExceeded {
+                    elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
+                    limit: settings.sim_time_limit,
+                }
+                .into());
             }
         }
 
@@ -128,7 +119,7 @@ where
             .map(|mut chunks| {
                 chunks
                     .iter_mut()
-                    .map(|out| settings.noise.multivariate_likelihood(out, series))
+                    .map(|out| noise.multivariate_likelihood(out, series))
                     .collect::<Vec<T>>()
             })
             .flatten()
@@ -146,7 +137,7 @@ where
 
         weights
             .par_iter_mut()
-            .zip(temp_data.params.par_column_iter())
+            .zip(temp_ensbl.params_array.par_column_iter())
             .for_each(|(weight, params)| *weight *= self.model_prior().density_rel(&params));
 
         let weights_total = weights.iter().sum::<T>();
@@ -155,7 +146,7 @@ where
 
         // Create a Particle OcnusProDeF from the temporary simulations.
         let density_new = ParticlesND::from_particles(
-            interim_data.params.as_view(),
+            interim_ensbl.params_array.as_view(),
             self.model_prior().get_valid_range(),
             weights,
         )?;
@@ -169,10 +160,10 @@ where
                 .map(|v| powi!(*v, 2))
                 .sum::<T>();
 
-        self.fevm_initialize_resample(series, &mut target_data, &density_new, settings.rseed + 21)?;
+        self.fsm_resample_ensbl(series, &mut target_ensbl, &density_new, settings.rseed + 21)?;
 
-        let uniques = target_data
-            .params
+        let uniques = target_ensbl
+            .params_array
             .row(0)
             .iter()
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
@@ -181,12 +172,18 @@ where
             .collect::<Vec<T>>()
             .len();
 
-        self.fevm_simulate(series, &mut target_data, &mut target_output, None)?;
+        self.fsm_simulate_ensbl(
+            series,
+            &mut target_ensbl,
+            &mut target_output.as_view_mut(),
+            None::<&mut ObserVecNoise<T, N>>,
+        )?;
 
-        target_data.weights = vec![T::one() / T::from_usize(ensemble_size).unwrap(); ensemble_size];
+        target_ensbl.weights =
+            vec![T::one() / T::from_usize(ensemble_size).unwrap(); ensemble_size];
 
         info!(
-            "sirpf_run\n\tKL delta: {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}\n\tunique samples = {}",
+            "pf_sir_iter\n\tKL delta: {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}\n\tunique samples = {}",
             kld,
             (series.len() * sim_ensemble_size) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3,
@@ -197,8 +194,8 @@ where
 
         settings.rseed += 1;
 
-        Ok(ParticleFilterResults::ByLikelihood(
-            target_data,
+        Ok(ParticleFilterResults::Values(
+            target_ensbl,
             target_output,
             likelihoods,
         ))

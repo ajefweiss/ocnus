@@ -1,7 +1,8 @@
-use crate::obser::OcnusObser;
+use crate::{fXX, math::abs, obser::OcnusObser};
 use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
+use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{Ordering, max},
@@ -29,6 +30,23 @@ impl<T, O> ScObs<T, O> {
     /// Access the configuration field.
     pub fn configuration(&self) -> &ScObsConf<T> {
         &self.configuration
+    }
+
+    /// Compute distance betweeo two [`ScObs`]
+    pub fn distance(&self, other: &Self) -> T
+    where
+        T: fXX,
+    {
+        let conf_0 = &self.configuration;
+        let conf_1 = &other.configuration;
+
+        match (conf_0, conf_1) {
+            (ScObsConf::Distance(x_0), ScObsConf::Distance(x_1)) => abs!(*x_1 - *x_0),
+            (ScObsConf::Position(r_0), ScObsConf::Position(r_1)) => {
+                (Vector3::from(*r_1) - Vector3::from(*r_0)).norm()
+            }
+            _ => panic!("scobs configurations do not match"),
+        }
     }
 
     /// Create a new [`ScObs`], with an optional observation.

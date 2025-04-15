@@ -1,31 +1,28 @@
 use crate::{
-    fevm::{
-        FEVM, FEVMError, FEVMNullState, FisherInformation,
+    OcnusError,
+    coords::{CCGeometry, CoordsError, ECGeometry, OcnusCoords, XCState},
+    fXX,
+    forward::{
+        FSMError, FisherInformation, OcnusFSM,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
     },
-    geom::{CCGeometry, ECGeometry, OcnusCoords, XCState},
-    math::{T, bessel_jn},
-    obser::ObserVec,
-    obser::{ScObs, ScObsConf, ScObsSeries},
+    math::{T, bessel_jn, cos, powi, sin, sqrt},
+    obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
     prodef::OcnusProDeF,
 };
-use nalgebra::{
-    Const, Dim, RealField, SVectorView, Scalar, SimdRealField, U1, Vector3, VectorView, VectorView3,
-};
-use num_traits::{AsPrimitive, Float, FromPrimitive, Zero, float::TotalOrder};
+use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
-use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, iter::Sum, marker::PhantomData, ops::AddAssign};
+use std::{cmp::Ordering, marker::PhantomData};
 
 /// Linear force-free magnetic field observable.
-pub fn cc_lff_obs<T, const P: usize, M, GS>(
+pub fn cc_lff_obs<T, const P: usize, M, CSST>(
     (r, _phi, _z): (T, T, T),
     params: &SVectorView<T, P>,
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
 where
-    T: 'static + Clone + Float + FromPrimitive + RealField + Scalar + TotalOrder + Zero,
-    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+    M: OcnusCoords<T, P, CSST>,
 {
     // Extract parameters using their identifiers.
     let b = M::param_value("B", params).unwrap();
@@ -55,7 +52,8 @@ where
                 let b_s = b_linearized * bessel_jn(alpha * r * radius_linearized, 0);
                 let b_phi = b_linearized * sign * bessel_jn(alpha * r * radius_linearized, 1);
 
-                Some(Vector3::new(T::zero(), b_phi, b_s))
+                // Account for non-normal basis vectors
+                Some(Vector3::new(T::zero(), b_phi / r / radius_linearized, b_s))
             }
         },
         None => None,
@@ -63,14 +61,14 @@ where
 }
 
 /// Uniform twist magnetic field observable.
-pub fn cc_ut_obs<T, const P: usize, M, GS>(
+pub fn cc_ut_obs<T, const P: usize, M, CSST>(
     (r, _phi, _z): (T, T, T),
     params: &SVectorView<T, P>,
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
 where
-    T: Clone + Float + FromPrimitive + RealField + Scalar + TotalOrder + Zero,
-    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+    M: OcnusCoords<T, P, CSST>,
 {
     // Extract parameters using their identifiers.
     let b = M::param_value("B", params).unwrap();
@@ -91,7 +89,7 @@ where
                 let b_phi = r * radius_linearized * b_linearized * tau
                     / (T::one() + powi!(tau, 2) * powi!(r * radius_linearized, 2));
 
-                Some(Vector3::new(T::zero(), b_phi, b_s))
+                Some(Vector3::new(T::zero(), b_phi / r / radius_linearized, b_s))
             }
         },
         None => None,
@@ -99,14 +97,14 @@ where
 }
 
 /// Magnetic field configuration as is used in Nieves-Chinchilla et al. (2018).
-pub fn ec_hybrid_obs<T, const P: usize, M, GS>(
+pub fn ec_hybrid_obs<T, const P: usize, M, CSST>(
     (mu, nu, _s): (T, T, T),
     params: &SVectorView<T, P>,
     _state: &XCState<T>,
 ) -> Option<Vector3<T>>
 where
-    T: 'static + Clone + Float + FromPrimitive + RealField + Scalar + TotalOrder + Zero,
-    M: OcnusCoords<T, P, GS>,
+    T: fXX,
+    M: OcnusCoords<T, P, CSST>,
 {
     // Extract parameters using their identifiers.
     let y_offset = M::param_value("y", params).unwrap();
@@ -194,19 +192,19 @@ macro_rules! concat_arrays {
     }};
 }
 
-macro_rules! impl_cylm_fevm {
-    ($model: ident, $parent: ident, $params: expr, $fn_obs: tt, $docs: literal) => {
+macro_rules! impl_cylm_forward_model {
+    ($model: ident, $coords: ident, $params: expr, $fn_obs: tt, $docs: literal) => {
         #[doc=$docs]
         #[derive(Debug)]
-        pub struct $model<T, D>(pub D, PhantomData<T>)
+        pub struct $model<T, D>(D, PhantomData<T>)
         where
-            T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>;
+            T: fXX,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
-            T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            T: fXX,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -215,169 +213,174 @@ macro_rules! impl_cylm_fevm {
         }
 
         // Re-implement the OcnusCoords trait because we have no inheritance.
-        impl<T, D> OcnusCoords<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>
+        // Here we make use of the fact that the parameters for the coordinates are at the front
+        // and we pass on smaller fixed views of each parameter vector.
+        impl<T, D> OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, XCState<T>>
             for $model<T, D>
         where
-            T: Float + PartialOrd + RealField + SimdRealField,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            T: fXX,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
-            const PARAMS: [&'static str; { $parent::<f64>::PARAMS.len() + $params.len() }] =
-                concat_arrays!($parent::<f64>::PARAMS, $params);
+            const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
+                concat_arrays!($coords::<f64>::PARAMS, $params);
 
-            fn basis_vectors<CStride: Dim>(
+            fn contravariant_basis<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState<T>,
-            ) -> [Vector3<T>; 3] {
-                $parent::basis_vectors(
+            ) -> Result<[Vector3<T>; 3], CoordsError> {
+                $coords::contravariant_basis(
                     ics,
-                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
 
-            fn coords_ics_to_ecs<CStride: Dim>(
+            fn transform_ics_to_ecs<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState<T>,
-            ) -> Vector3<T> {
-                $parent::coords_ics_to_ecs(
+            ) -> Result<Vector3<T>, CoordsError> {
+                $coords::transform_ics_to_ecs(
                     ics,
-                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
 
-            fn coords_ecs_to_ics<CStride: Dim>(
+            fn transform_ecs_to_ics<CStride: Dim>(
                 ecs: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
                 state: &XCState<T>,
-            ) -> Vector3<T> {
-                $parent::coords_ecs_to_ics(
+            ) -> Result<Vector3<T>, CoordsError> {
+                $coords::transform_ecs_to_ics(
                     ecs,
-                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                     state,
                 )
             }
 
-            fn create_ecs_vector<CStride: Dim>(
-                ics: &VectorView3<T>,
-                vec: &VectorView3<T>,
+            fn initialize_cs<CStride: Dim>(
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
-                state: &XCState<T>,
-            ) -> Vector3<T> {
-                $parent::create_ecs_vector(
-                    ics,
-                    vec,
-                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
+                state: &mut XCState<T>,
+            ) -> Result<(), CoordsError> {
+                $coords::initialize_cs(
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                     state,
-                )
-            }
-
-            fn geom_state<CStride: Dim>(
-                params: &VectorView<
-                    T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                geom_state: &mut XCState<T>,
-            ) {
-                $parent::geom_state(
-                    &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
-                    geom_state,
                 )
             }
         }
 
         impl<T, D>
-            FEVM<T, { $parent::<f64>::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState<T>>
-            for $model<T, D>
+            OcnusFSM<
+                T,
+                ObserVec<T, 3>,
+                { $coords::<f64>::PARAMS.len() + $params.len() },
+                (),
+                XCState<T>,
+            > for $model<T, D>
         where
-            T: Copy + Float + RealField + SampleUniform + Scalar + TotalOrder,
+            T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
-            Self: OcnusCoords<T, { $parent::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
         {
             const RCS: usize = 128;
 
-            fn fevm_forward(
+            fn fsm_forward(
                 &self,
                 time_step: T,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &mut FEVMNullState,
-                geom_state: &mut XCState<T>,
-            ) -> Result<(), FEVMError<T>> {
+                _fm_state: &mut (),
+                cs_state: &mut XCState<T>,
+            ) -> Result<(), FSMError<T>> {
                 // Extract parameters using their identifiers.
-                let vel = Self::param_value("v", params) / T!(1.496e8);
-                geom_state.t += time_step;
-                geom_state.x += vel * time_step as T;
+                let vel = Self::param_value("v", params).unwrap() / T!(1.496e8);
+
+                cs_state.t += time_step;
+                cs_state.x += vel * time_step as T;
 
                 Ok(())
             }
 
-            fn fevm_observe(
+            fn fsm_initialize_states(
+                _series: &ScObsSeries<T, ObserVec<T, 3>>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                    U1,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                >,
+                _fm_state: &mut (),
+                cs_state: &mut XCState<T>,
+            ) -> Result<(), OcnusError<T>> {
+                Self::initialize_cs(params, cs_state)?;
+
+                Ok(())
+            }
+
+            fn fsm_observe(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &FEVMNullState,
-                geom_state: &XCState<T>,
-            ) -> Result<ObserVec<T, 3>, FEVMError<T>> {
+                _fm_state: &(),
+                cs_state: &XCState<T>,
+            ) -> Result<ObserVec<T, 3>, OcnusError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
                     ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, geom_state);
+                let q = Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state)?;
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
                 let obs = $fn_obs::<
                     T,
-                    { $parent::<f64>::PARAMS.len() + $params.len() },
+                    { $coords::<f64>::PARAMS.len() + $params.len() },
                     Self,
                     XCState<T>,
-                >((mu, nu, s), params, geom_state);
+                >((mu, nu, s), params, cs_state);
 
                 match obs {
                     Some(b_q) => {
-                        let b_s = Self::create_ecs_vector(
+                        let b_s = Self::contravariant_vector(
                             &q.as_view(),
                             &b_q.as_view(),
                             params,
-                            geom_state,
-                        );
+                            cs_state,
+                        )?;
 
                         Ok(ObserVec::<T, 3>::from(b_s))
                     }
@@ -385,51 +388,39 @@ macro_rules! impl_cylm_fevm {
                 }
             }
 
-            fn fevm_observe_diagnostics(
+            fn fsm_observe_ics_plus_basis(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &FEVMNullState,
-                geom_state: &XCState<T>,
-            ) -> Result<ObserVec<T, 12>, FEVMError<T>> {
+                _fm_state: &(),
+                cs_state: &XCState<T>,
+            ) -> Result<ObserVec<T, 12>, OcnusError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
                     ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, geom_state);
+                let q = Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state)?;
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
-                let [e1, e2, e3] =
-                    Self::basis_vectors(&Vector3::from([mu, nu, s]).as_view(), params, geom_state);
+                let [e1, e2, e3] = Self::contravariant_basis(
+                    &Vector3::from([mu, nu, s]).as_view(),
+                    params,
+                    cs_state,
+                )?;
 
                 Ok(ObserVec::<T, 12>::from([
                     mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
                 ]))
             }
 
-            fn fevm_state(
-                &self,
-                _series: &ScObsSeries<T, ObserVec<T, 3>>,
-                _params: &VectorView<
-                    T,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
-                >,
-                _fevm_state: &mut FEVMNullState,
-                _geom_state: &mut XCState<T>,
-            ) -> Result<(), FEVMError<T>> {
-                Ok(())
-            }
-
-            fn fevm_step_sizes(&self) -> [T; { $parent::<f64>::PARAMS.len() + $params.len() }] {
+            fn param_step_sizes(&self) -> [T; { $coords::<f64>::PARAMS.len() + $params.len() }] {
                 (&self.0)
                     .get_valid_range()
                     .iter()
@@ -441,7 +432,7 @@ macro_rules! impl_cylm_fevm {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
@@ -449,111 +440,70 @@ macro_rules! impl_cylm_fevm {
         impl<T, D>
             ParticleFilter<
                 T,
-                { $parent::<f64>::PARAMS.len() + $params.len() },
-                3,
-                FEVMNullState,
+                ObserVec<T, 3>,
+                { $coords::<f64>::PARAMS.len() + $params.len() },
+                (),
                 XCState<T>,
             > for $model<T, D>
         where
-            T: AsPrimitive<usize>
-                + Default
-                + Copy
-                + Float
-                + RealField
-                + TotalOrder
-                + SampleUniform
-                + Scalar
-                + Serialize,
+            T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
         impl<T, D>
             ABCParticleFilter<
                 T,
-                { $parent::<f64>::PARAMS.len() + $params.len() },
-                3,
-                FEVMNullState,
+                ObserVec<T, 3>,
+                { $coords::<f64>::PARAMS.len() + $params.len() },
+                (),
                 XCState<T>,
             > for $model<T, D>
         where
-            T: for<'x> AddAssign<&'x T>
-                + AsPrimitive<usize>
-                + Copy
-                + Default
-                + Float
-                + RealField
-                + TotalOrder
-                + SampleUniform
-                + Scalar
-                + Serialize
-                + Sum<T>
-                + for<'x> Sum<&'x T>,
+            T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
         impl<T, D>
             SIRParticleFilter<
                 T,
-                { $parent::<f64>::PARAMS.len() + $params.len() },
+                { $coords::<f64>::PARAMS.len() + $params.len() },
                 3,
-                FEVMNullState,
+                (),
                 XCState<T>,
             > for $model<T, D>
         where
-            T: for<'x> AddAssign<&'x T>
-                + AsPrimitive<usize>
-                + Copy
-                + Default
-                + Float
-                + RealField
-                + TotalOrder
-                + SampleUniform
-                + Scalar
-                + Serialize
-                + Sum<T>
-                + for<'x> Sum<&'x T>,
+            T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
         impl<T, D>
             FisherInformation<
                 T,
-                { $parent::<f64>::PARAMS.len() + $params.len() },
+                { $coords::<f64>::PARAMS.len() + $params.len() },
                 3,
-                FEVMNullState,
+                (),
                 XCState<T>,
             > for $model<T, D>
         where
-            T: for<'x> AddAssign<&'x T>
-                + Copy
-                + Default
-                + for<'x> Deserialize<'x>
-                + Float
-                + FromPrimitive
-                + RealField
-                + TotalOrder
-                + SampleUniform
-                + Serialize
-                + Scalar
-                + Sum<T>,
+            T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $parent::<f64>::PARAMS.len() + $params.len() }>,
+            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
     };
 }
 
-impl_cylm_fevm!(
+impl_cylm_forward_model!(
     CCLFFModel,
     CCGeometry,
     ["v", "B", "alpha"],
@@ -561,7 +511,7 @@ impl_cylm_fevm!(
     "Circular-cylindrical linear force-free magnetic flux rope model."
 );
 
-impl_cylm_fevm!(
+impl_cylm_forward_model!(
     CCUTModel,
     CCGeometry,
     ["v", "B", "tau"],
@@ -569,7 +519,7 @@ impl_cylm_fevm!(
     "Circular-cylindrical uniform twist magnetic flux rope model."
 );
 
-impl_cylm_fevm!(
+impl_cylm_forward_model!(
     ECHModel,
     ECGeometry,
     ["v", "B", "lambda", "alpha", "tau"],
@@ -581,7 +531,8 @@ impl_cylm_fevm!(
 mod tests {
     use super::*;
     use crate::{
-        fevm::FEVMEnsbl,
+        forward::FSMEnsbl,
+        obser::NoNoise,
         prodef::{Constant1D, Uniform1D, UnivariateND},
     };
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
@@ -599,7 +550,7 @@ mod tests {
             Uniform1D::new((0.0, 1.0)).unwrap(),
         ]);
 
-        let model = CCLFFModel(prior, PhantomData::<f64>);
+        let model = CCLFFModel::new(prior);
 
         let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
             ScObs::new(
@@ -609,16 +560,16 @@ mod tests {
             )
         }));
 
-        let mut data = FEVMEnsbl {
-            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-            fevm_states: vec![FEVMNullState::default(); 1],
-            geom_states: vec![XCState::default(); 1],
+        let mut ensbl = FSMEnsbl {
+            params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
+            fm_states: vec![(); 1],
+            cs_states: vec![XCState::<f64>::default(); 1],
             weights: vec![1.0; 1],
         };
 
         let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-        data.params.set_column(
+        ensbl.params_array.set_column(
             0,
             &SVector::<f64, 8>::from([
                 5.0_f64.to_radians(),
@@ -633,16 +584,21 @@ mod tests {
         );
 
         model
-            .fevm_initialize_states_only(&sc, &mut data)
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
+            .fsm_simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &mut output.as_view_mut(),
+                None::<&mut NoNoise<f64>>,
+            )
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
         assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
     }
 
     #[test]
@@ -658,7 +614,7 @@ mod tests {
             Uniform1D::new((-10.0, 10.0)).unwrap(),
         ]);
 
-        let model = CCUTModel(prior, PhantomData::<f64>);
+        let model = CCUTModel::new(prior);
 
         let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
             ScObs::new(
@@ -668,16 +624,16 @@ mod tests {
             )
         }));
 
-        let mut data = FEVMEnsbl {
-            params: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-            fevm_states: vec![FEVMNullState::default(); 1],
-            geom_states: vec![XCState::default(); 1],
+        let mut ensbl = FSMEnsbl {
+            params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
+            fm_states: vec![(); 1],
+            cs_states: vec![XCState::default(); 1],
             weights: vec![1.0; 1],
         };
 
         let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-        data.params.set_column(
+        ensbl.params_array.set_column(
             0,
             &SVector::<f64, 8>::from([
                 5.0_f64.to_radians(),
@@ -692,17 +648,22 @@ mod tests {
         );
 
         model
-            .fevm_initialize_states_only(&sc, &mut data)
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
+            .fsm_simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &mut output.as_view_mut(),
+                None::<&mut NoNoise<f64>>,
+            )
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
         assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
     }
 
     #[test]
@@ -732,16 +693,16 @@ mod tests {
             )
         }));
 
-        let mut data = FEVMEnsbl {
-            params: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
-            fevm_states: vec![FEVMNullState::default(); 1],
-            geom_states: vec![XCState::default(); 1],
+        let mut ensbl = FSMEnsbl {
+            params_array: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
+            fm_states: vec![(); 1],
+            cs_states: vec![XCState::default(); 1],
             weights: vec![1.0; 1],
         };
 
         let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-        data.params.set_column(
+        ensbl.params_array.set_column(
             0,
             &SVector::<f64, 12>::from([
                 5.0_f64.to_radians(),
@@ -760,11 +721,16 @@ mod tests {
         );
 
         model
-            .fevm_initialize_states_only(&sc, &mut data)
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
+            .fsm_simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &mut output.as_view_mut(),
+                None::<&mut NoNoise<f64>>,
+            )
             .expect("simulation failed");
 
         println!("oo: {}", &output[(0, 0)]);
@@ -774,9 +740,9 @@ mod tests {
         assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
         assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
 
-        data.params.set_column(
+        ensbl.params_array.set_column(
             0,
             &SVector::<f64, 12>::from([
                 5.0_f64.to_radians(),
@@ -795,16 +761,21 @@ mod tests {
         );
 
         model
-            .fevm_initialize_states_only(&sc, &mut data)
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fevm_simulate(&sc, &mut data, &mut output, None)
+            .fsm_simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &mut output.as_view_mut(),
+                None::<&mut NoNoise<f64>>,
+            )
             .expect("simulation failed");
 
         assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
         assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
-        assert!((data.geom_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
     }
 }

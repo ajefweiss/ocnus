@@ -41,7 +41,7 @@ impl<T> OcnusCoords<T, 6, TTState<T>> for TTGeometry<T>
 where
     T: fXX,
 {
-    const COORD_PARAMS: [&'static str; 6] = [
+    const PARAMS: [&'static str; 6] = [
         "longitude",
         "latitude",
         "inclination",
@@ -201,10 +201,10 @@ where
         Ok(Vector3::new(mu, nu, psi / T::two_pi()))
     }
 
-    fn initialize_cst<CStride: Dim>(
+    fn initialize_cs<CStride: Dim>(
         params: &VectorView<T, Const<6>, U1, CStride>,
         state: &mut TTState<T>,
-    ) {
+    ) -> Result<(), CoordsError> {
         let longitude = Self::param_value("longitude", params).unwrap();
         let latitude = Self::param_value("latitude", params).unwrap();
         let inclination = Self::param_value("inclination", params).unwrap();
@@ -213,6 +213,8 @@ where
         state.minor_radius = Self::param_value("minor_radius_0", params).unwrap();
 
         state.q = quaternion_rot(longitude, latitude, inclination);
+
+        Ok(())
     }
 }
 
@@ -234,7 +236,7 @@ mod tests {
 
         let mut state = TTState::default();
 
-        TTGeometry::initialize_cst(&params.fixed_rows::<6>(0), &mut state);
+        TTGeometry::initialize_cs(&params.fixed_rows::<6>(0), &mut state).unwrap();
 
         let ics_ref = Vector3::new(0.56, 0.17, 0.45);
 

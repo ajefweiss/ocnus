@@ -31,8 +31,59 @@
 mod scobs;
 mod vector;
 
-pub use scobs::*;
-pub use vector::ObserVec;
+use num_traits::Zero;
+pub use scobs::{ScObs, ScObsConf, ScObsSeries};
+pub use vector::{ObserVec, ObserVecNoise};
+
+use nalgebra::{DVector, Scalar};
+use rand::{Rng, SeedableRng};
+use rand_xoshiro::Xoshiro256PlusPlus;
+use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
+
+use crate::fXX;
+
+/// A trait that must be implemented for any model observable noise type.
+pub trait OcnusNoise<T, O>: Clone
+where
+    O: OcnusObser + Scalar,
+{
+    /// Generate a random noise time-series.
+    fn generate_noise(&self, series: &ScObsSeries<T, O>, rng: &mut impl Rng) -> DVector<O>;
+
+    /// Get randon number seed.
+    fn get_random_seed(&self) -> u64;
+
+    /// Increment randon number seed.
+    fn increment_random_seed(&mut self);
+
+    /// Initialize a new random number generator using the base seed.
+    fn initialize_rng(&self, multiplier: u64, offset: u64) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(self.get_random_seed() * multiplier + offset)
+    }
+}
+
+/// A noise type that does nothing.
+#[derive(Clone, Deserialize, Serialize)]
+pub struct NoNoise<T> {
+    _data: PhantomData<T>,
+}
+
+impl<T, O> OcnusNoise<T, O> for NoNoise<T>
+where
+    T: fXX,
+    O: OcnusObser + Scalar + Zero,
+{
+    fn generate_noise(&self, series: &ScObsSeries<T, O>, _rng: &mut impl Rng) -> DVector<O> {
+        DVector::zeros(series.len())
+    }
+
+    fn get_random_seed(&self) -> u64 {
+        0
+    }
+
+    fn increment_random_seed(&mut self) {}
+}
 
 /// A trait that must be implemented for any type that acts as a model observable.
 pub trait OcnusObser: Clone + Default + Send + Sync {

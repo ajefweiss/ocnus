@@ -22,7 +22,7 @@
 //!
 //! Each geometry is associated with a coordinate system state type that allows for the defintion
 //! of time-varying coordatinate systems. The coordinate system state types must be initialized
-//! from the coordinate parameters using an implementation of [`OcnusCoords::initialize_cst`].
+//! from the coordinate parameters using an implementation of [`OcnusCoords::initialize_cs`].
 //!
 //! Implemented coordinate system state types:
 //! - [`XCState`] A generic coordinate system state type for cylindrical geometries with arbitrary
@@ -59,7 +59,7 @@ where
     T: fXX,
 {
     /// Static coordinate parameter names.
-    const COORD_PARAMS: [&'static str; P];
+    const PARAMS: [&'static str; P];
 
     /// Computes the local contravariant basis vectors.
     fn contravariant_basis<CStride: Dim>(
@@ -108,16 +108,14 @@ where
     ) -> Result<Vector3<T>, CoordsError>;
 
     /// Initialize the coordinate state.
-    fn initialize_cst<CStride: Dim>(
+    fn initialize_cs<CStride: Dim>(
         params: &VectorView<T, Const<P>, U1, CStride>,
         state: &mut CSST,
-    );
+    ) -> Result<(), CoordsError>;
 
     /// Retrieve a model parameter index by name.
     fn param_index(name: &str) -> Option<usize> {
-        Self::COORD_PARAMS
-            .into_iter()
-            .position(|param| param == name)
+        Self::PARAMS.into_iter().position(|param| param == name)
     }
 
     /// Retrieve a model parameter value by name.
@@ -150,7 +148,7 @@ where
 
         let mut state = CSST::default();
 
-        Self::initialize_cst(&params.fixed_rows::<P>(0), &mut state);
+        Self::initialize_cs(&params.fixed_rows::<P>(0), &mut state).unwrap();
 
         let ics_1p = ics + Vector3::<T>::x_axis().into_inner() * delta_h / T!(2.0);
         let ics_1m = ics - Vector3::<T>::x_axis().into_inner() * delta_h / T!(2.0);

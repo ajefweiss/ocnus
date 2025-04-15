@@ -26,9 +26,11 @@ mod multivariate;
 mod particles;
 mod univariate;
 
-pub use multivariate::*;
-pub use particles::*;
-pub use univariate::*;
+pub use multivariate::MultivariateND;
+pub use particles::ParticlesND;
+pub use univariate::{
+    Constant1D, Cosine1D, Normal1D, Reciprocal1D, Uniform1D, Univariate1D, UnivariateND,
+};
 
 use itertools::zip_eq;
 use nalgebra::{SVector, SVectorView};

@@ -209,7 +209,7 @@ macro_rules! impl_xcgm_geom {
         where
             T: fXX,
         {
-            const COORD_PARAMS: [&'static str; { $params.len() }] = $params;
+            const PARAMS: [&'static str; { $params.len() }] = $params;
 
             fn contravariant_basis<CStride: Dim>(
                 ics: &VectorView3<T>,
@@ -266,10 +266,10 @@ macro_rules! impl_xcgm_geom {
                 ))
             }
 
-            fn initialize_cst<CStride: Dim>(
+            fn initialize_cs<CStride: Dim>(
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
                 state: &mut XCState<T>,
-            ) {
+            ) -> Result<(), CoordsError> {
                 let phi = Self::param_value("phi", params).unwrap();
                 let theta = Self::param_value("theta", params).unwrap();
                 let psi = Self::param_value("psi", params).unwrap_or(T::zero());
@@ -284,6 +284,8 @@ macro_rules! impl_xcgm_geom {
                     / cos!(theta);
 
                 state.q = quaternion_rot(phi, psi, theta);
+
+                Ok(())
             }
         }
     };
@@ -321,7 +323,7 @@ mod tests {
 
         let mut state = XCState::default();
 
-        CCGeometry::initialize_cst(&params.fixed_rows::<5>(0), &mut state);
+        CCGeometry::initialize_cs(&params.fixed_rows::<5>(0), &mut state).unwrap();
 
         let ics_ref = Vector3::new(0.6, 0.11, 0.5);
 
@@ -355,7 +357,7 @@ mod tests {
 
         let mut state = XCState::default();
 
-        ECGeometry::initialize_cst(&params.fixed_rows::<7>(0), &mut state);
+        ECGeometry::initialize_cs(&params.fixed_rows::<7>(0), &mut state).unwrap();
 
         let ics_ref = Vector3::new(0.6, 0.11, 0.5);
 

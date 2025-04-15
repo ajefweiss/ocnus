@@ -7,10 +7,11 @@ pub mod math;
 pub mod obser;
 pub mod prodef;
 
-use forward::FSMError;
+use coords::CoordsError;
+use forward::{FSMError, filters::ParticleFilterError};
 use math::MathError;
 use nalgebra::{RealField, Scalar};
-use num_traits::{Float, FromPrimitive, float::TotalOrder};
+use num_traits::{AsPrimitive, Float, FromPrimitive, float::TotalOrder};
 use prodef::ProDeFError;
 use std::{
     fmt::{Debug, Display},
@@ -22,10 +23,14 @@ use thiserror::Error;
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
 pub enum OcnusError<T> {
-    #[error("fsm error")]
+    #[error("forward error")]
+    Coords(#[from] CoordsError),
+    #[error("forward error")]
     FSM(#[from] FSMError<T>),
     #[error("math error")]
     Math(#[from] MathError<T>),
+    #[error("particle filter error")]
+    ParticleFilter(#[from] ParticleFilterError<T>),
     #[error("stats error")]
     ProDeF(#[from] ProDeFError<T>),
 }
@@ -35,6 +40,7 @@ pub enum OcnusError<T> {
 #[allow(non_camel_case_types)]
 pub trait fXX:
     'static
+    + AsPrimitive<usize>
     + Copy
     + Debug
     + Default

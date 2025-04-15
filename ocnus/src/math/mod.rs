@@ -18,10 +18,10 @@ mod covariance;
 mod factorial;
 mod quaternions;
 
-pub use bessel::*;
-pub use covariance::*;
-pub use factorial::*;
-pub use quaternions::*;
+pub use bessel::bessel_jn;
+pub use covariance::{CovMatrix, covariance, covariance_with_weights};
+pub use factorial::factorial;
+pub use quaternions::quaternion_rot;
 
 use nalgebra::DMatrix;
 use thiserror::Error;

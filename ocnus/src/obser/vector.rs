@@ -1,16 +1,22 @@
 //! Implementation of a `N`-dimensional vector observable.
 
-use crate::obser::OcnusObser;
+use crate::{
+    fXX,
+    math::{CovMatrix, powi},
+    obser::OcnusObser,
+};
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use nalgebra::SVector;
-use num_traits::{Float, FromPrimitive, Zero};
+use nalgebra::{DMatrix, DVector, DVectorView, SVector};
+use num_traits::{Float, Zero};
+use rand_distr::{Distribution, Normal, StandardNormal};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Debug, Display, Formatter},
-    iter::Sum,
     ops::{Add, AddAssign, Mul, Sub, SubAssign},
 };
+
+use super::{OcnusNoise, ScObsSeries};
 
 /// Generic N-dimensional observation vector.
 #[derive(Clone, Debug, Deref, Deserialize, From, Index, IndexMut, IntoIterator, Serialize)]
@@ -18,12 +24,12 @@ pub struct ObserVec<T, const N: usize>(
     #[into_iterator(owned, ref, ref_mut)]
     #[serde(with = "serde_arrays")]
     #[serde(bound = "T: for<'x> Deserialize<'x> + Serialize")]
-    pub [T; N],
+    [T; N],
 );
 
 impl<T, const N: usize> ObserVec<T, N>
 where
-    T: Float + FromPrimitive,
+    T: fXX,
 {
     /// Returns true if any entry within the observation vector is `NaN`.
     pub fn any_nan(&self) -> bool {
@@ -41,7 +47,6 @@ where
     /// If only one of the two observations is considered valid, returns `NaN`.
     pub fn mean_square_error(&self, other: &Self) -> T
     where
-        T: 'static + Copy + Debug + Sum,
         Self: OcnusObser,
     {
         if self.is_valid() & other.is_valid() {
@@ -54,11 +59,8 @@ where
     }
 
     /// Calculate the sum of squares over the entries within the observation vector.
-    pub fn sum_of_squares(&self) -> T
-    where
-        T: Sum,
-    {
-        self.iter().map(|value| value.powi(2)).sum::<T>()
+    pub fn sum_of_squares(&self) -> T {
+        self.iter().map(|value| powi!(*value, 2)).sum::<T>()
     }
 
     /// Return a new observation vector filled with zeros.
@@ -69,7 +71,7 @@ where
 
 impl<T, const N: usize> Add for ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     type Output = ObserVec<T, N>;
 
@@ -86,7 +88,7 @@ where
 
 impl<'a, T, const N: usize> Add<&'a ObserVec<T, N>> for &'a ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     type Output = ObserVec<T, N>;
 
@@ -103,16 +105,25 @@ where
 
 impl<T, const N: usize> AddAssign for ObserVec<T, N>
 where
-    T: for<'x> AddAssign<&'x T> + Float,
+    T: fXX,
 {
     fn add_assign(&mut self, rhs: Self) {
-        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += rhs);
+        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += *rhs);
+    }
+}
+
+impl<'a, T, const N: usize> AddAssign<&'a ObserVec<T, N>> for ObserVec<T, N>
+where
+    T: fXX,
+{
+    fn add_assign(&mut self, rhs: &'a Self) {
+        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += *rhs);
     }
 }
 
 impl<T, const N: usize> Default for ObserVec<T, N>
 where
-    T: Float,
+    T: fXX,
 {
     fn default() -> Self {
         ObserVec([T::nan(); N])
@@ -121,7 +132,7 @@ where
 
 impl<T> Display for ObserVec<T, 3>
 where
-    T: Display + Float,
+    T: fXX,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{:.2} | {:.2} | {:.2}]", self[0], self[1], self[2])
@@ -130,7 +141,7 @@ where
 
 impl<T> Display for ObserVec<T, 4>
 where
-    T: Display + Float,
+    T: fXX,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -143,7 +154,7 @@ where
 
 impl<T, const N: usize> From<SVector<T, N>> for ObserVec<T, N>
 where
-    T: Float,
+    T: fXX,
 {
     fn from(value: SVector<T, N>) -> Self {
         ObserVec::from(value.data.0[0])
@@ -152,7 +163,7 @@ where
 
 impl<T, const N: usize> Mul<T> for ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     type Output = ObserVec<T, N>;
 
@@ -169,7 +180,7 @@ where
 
 impl<T, const N: usize> Mul<T> for &ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     type Output = ObserVec<T, N>;
 
@@ -242,7 +253,7 @@ impl<'a, const N: usize> Mul<&'a ObserVec<f64, N>> for f64 {
 
 impl<T, const N: usize> OcnusObser for ObserVec<T, N>
 where
-    T: Copy + Default + Float + FromPrimitive + Send + Sync,
+    T: fXX,
 {
     fn is_valid(&self) -> bool {
         !self.any_nan()
@@ -263,7 +274,7 @@ where
 
 impl<T, const N: usize> Sub for ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     type Output = ObserVec<T, N>;
 
@@ -280,16 +291,25 @@ where
 
 impl<T, const N: usize> SubAssign for ObserVec<T, N>
 where
-    T: Float + for<'x> SubAssign<&'x T>,
+    T: fXX,
 {
     fn sub_assign(&mut self, rhs: Self) {
-        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= rhs);
+        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= *rhs);
+    }
+}
+
+impl<'a, T, const N: usize> SubAssign<&'a ObserVec<T, N>> for ObserVec<T, N>
+where
+    T: fXX,
+{
+    fn sub_assign(&mut self, rhs: &'a Self) {
+        zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= *rhs);
     }
 }
 
 impl<'a, T, const N: usize> Sub<&'a ObserVec<T, N>> for &'a ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     type Output = ObserVec<T, N>;
 
@@ -306,7 +326,7 @@ where
 
 impl<T, const N: usize> Zero for ObserVec<T, N>
 where
-    T: Debug + Float,
+    T: fXX,
 {
     fn is_zero(&self) -> bool {
         self.0.iter().all(|value| value == &T::zero())
@@ -318,6 +338,124 @@ where
 
     fn zero() -> Self {
         Self([T::zero(); N])
+    }
+}
+
+/// Generic N-dimensional observation vector noise
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[allow(missing_docs)]
+pub enum ObserVecNoise<T, const N: usize>
+where
+    T: fXX,
+{
+    Gaussian(T, u64),
+    Multivariate(CovMatrix<T>, u64),
+}
+
+impl<T, const N: usize> ObserVecNoise<T, N>
+where
+    T: fXX,
+{
+    /// Compute the likelihood for an observation `x` with expected mean `mu`.
+    pub fn multivariate_likelihood(
+        &self,
+        x: &DVectorView<ObserVec<T, N>>,
+        mu: &ScObsSeries<T, ObserVec<T, N>>,
+    ) -> T {
+        let mut x_flat = x
+            .iter()
+            .flat_map(|x_obs| x_obs.iter().cloned().collect::<Vec<T>>())
+            .collect::<Vec<T>>();
+
+        let mut mu_flat = mu
+            .into_iter()
+            .flat_map(|mu_scobs| mu_scobs.observation().iter().cloned().collect::<Vec<T>>())
+            .collect::<Vec<T>>();
+
+        // Correct matching NaN's
+        x_flat
+            .iter_mut()
+            .zip(mu_flat.iter_mut())
+            .for_each(|(xv, muv)| {
+                if xv.is_nan() && muv.is_nan() {
+                    *xv = T::zero();
+                    *muv = T::zero();
+                }
+            });
+
+        match self {
+            ObserVecNoise::Gaussian(std_dev, ..) => {
+                let covmat = CovMatrix::from_matrix(
+                    &DMatrix::from_diagonal_element(x.len(), x.len(), *std_dev).as_view(),
+                )
+                .unwrap();
+
+                covmat.multivariate_likelihood(x_flat, mu_flat)
+            }
+            ObserVecNoise::Multivariate(covmat, ..) => {
+                covmat.multivariate_likelihood(x_flat, mu_flat)
+            }
+        }
+    }
+}
+
+impl<T, const N: usize> OcnusNoise<T, ObserVec<T, N>> for ObserVecNoise<T, N>
+where
+    T: fXX,
+    StandardNormal: Distribution<T>,
+{
+    fn generate_noise(
+        &self,
+        series: &super::ScObsSeries<T, ObserVec<T, N>>,
+        rng: &mut impl rand::Rng,
+    ) -> nalgebra::DVector<ObserVec<T, N>> {
+        match self {
+            ObserVecNoise::Gaussian(std_dev, ..) => {
+                let normal = Normal::new(T::zero(), *std_dev).unwrap();
+                let size = series.len();
+
+                DVector::from_iterator(size, (0..size).map(|_| ObserVec([rng.sample(normal); N])))
+            }
+            ObserVecNoise::Multivariate(covmat, ..) => {
+                let normal = Normal::new(T::zero(), T::one()).unwrap();
+                let size = series.len();
+
+                let mut result = DVector::from_iterator(
+                    size,
+                    (0..size).map(|_| ObserVec([rng.sample(normal); N])),
+                );
+
+                for i in 0..N {
+                    let values = covmat.ref_cholesky_ltm()
+                        * DVector::from_iterator(size, (0..size).map(|_| rng.sample(normal)));
+
+                    result
+                        .iter_mut()
+                        .zip(values.row_iter())
+                        .for_each(|(res, val)| res.0[i] = val[(0, 0)]);
+                }
+
+                result
+            }
+        }
+    }
+
+    fn get_random_seed(&self) -> u64 {
+        match self {
+            ObserVecNoise::Gaussian(.., seed) => *seed,
+            ObserVecNoise::Multivariate(.., seed) => *seed,
+        }
+    }
+
+    fn increment_random_seed(&mut self) {
+        match self {
+            ObserVecNoise::Gaussian(.., seed) => {
+                *seed += 1;
+            }
+            ObserVecNoise::Multivariate(.., seed) => {
+                *seed += 1;
+            }
+        }
     }
 }
 

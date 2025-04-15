@@ -1,6 +1,6 @@
 use crate::{
-    fevm::{
-        FEVM, FEVMError, FEVMNullState, FisherInformation,
+    OcnusFEVM::{
+        FEVMError, FEVMNullState, FisherInformation, OcnusFEVM,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
     },
     geom::{CCGeometry, ECGeometry, OcnusCoords, XCState},
@@ -293,25 +293,30 @@ macro_rules! impl_cylm_fevm {
                 )
             }
 
-            fn geom_state<CStride: Dim>(
+            fn cs_state<CStride: Dim>(
                 params: &VectorView<
                     T,
                     Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                     U1,
                     CStride,
                 >,
-                geom_state: &mut XCState<T>,
+                cs_state: &mut XCState<T>,
             ) {
-                $parent::geom_state(
+                $parent::cs_state(
                     &params.fixed_rows::<{ $parent::<f64>::PARAMS.len() }>(0),
-                    geom_state,
+                    cs_state,
                 )
             }
         }
 
         impl<T, D>
-            FEVM<T, { $parent::<f64>::PARAMS.len() + $params.len() }, 3, FEVMNullState, XCState<T>>
-            for $model<T, D>
+            OcnusFEVM<
+                T,
+                { $parent::<f64>::PARAMS.len() + $params.len() },
+                3,
+                FEVMNullState,
+                XCState<T>,
+            > for $model<T, D>
         where
             T: Copy + Float + RealField + SampleUniform + Scalar + TotalOrder,
             D: Sync,
@@ -330,13 +335,13 @@ macro_rules! impl_cylm_fevm {
                     U1,
                     Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &mut FEVMNullState,
-                geom_state: &mut XCState<T>,
+                _fm_state: &mut FEVMNullState,
+                cs_state: &mut XCState<T>,
             ) -> Result<(), FEVMError<T>> {
                 // Extract parameters using their identifiers.
                 let vel = Self::param_value("v", params) / T!(1.496e8).unwrap();
-                geom_state.T += time_step;
-                geom_state.x += vel * time_step as T;
+                cs_state.T += time_step;
+                cs_state.x += vel * time_step as T;
 
                 Ok(())
             }
@@ -350,15 +355,15 @@ macro_rules! impl_cylm_fevm {
                     U1,
                     Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &FEVMNullState,
-                geom_state: &XCState<T>,
+                _fm_state: &FEVMNullState,
+                cs_state: &XCState<T>,
             ) -> Result<ObserVec<T, 3>, FEVMError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
                     ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, geom_state);
+                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, cs_state);
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
@@ -367,16 +372,12 @@ macro_rules! impl_cylm_fevm {
                     { $parent::<f64>::PARAMS.len() + $params.len() },
                     Self,
                     XCState<T>,
-                >((mu, nu, s), params, geom_state);
+                >((mu, nu, s), params, cs_state);
 
                 match obs {
                     Some(b_q) => {
-                        let b_s = Self::create_ecs_vector(
-                            &q.as_view(),
-                            &b_q.as_view(),
-                            params,
-                            geom_state,
-                        );
+                        let b_s =
+                            Self::create_ecs_vector(&q.as_view(), &b_q.as_view(), params, cs_state);
 
                         Ok(ObserVec::<T, 3>::from(b_s))
                     }
@@ -393,27 +394,27 @@ macro_rules! impl_cylm_fevm {
                     U1,
                     Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &FEVMNullState,
-                geom_state: &XCState<T>,
+                _fm_state: &FEVMNullState,
+                cs_state: &XCState<T>,
             ) -> Result<ObserVec<T, 12>, FEVMError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
                     ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, geom_state);
+                let q = Self::coords_ecs_to_ics(&sc_pos.as_view(), params, cs_state);
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
                 let [e1, e2, e3] =
-                    Self::basis_vectors(&Vector3::from([mu, nu, s]).as_view(), params, geom_state);
+                    Self::basis_vectors(&Vector3::from([mu, nu, s]).as_view(), params, cs_state);
 
                 Ok(ObserVec::<T, 12>::from([
                     mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
                 ]))
             }
 
-            fn fevm_state(
+            fn fm_state(
                 &self,
                 _series: &ScObsSeries<T, ObserVec<T, 3>>,
                 _params: &VectorView<
@@ -422,8 +423,8 @@ macro_rules! impl_cylm_fevm {
                     U1,
                     Const<{ $parent::<f64>::PARAMS.len() + $params.len() }>,
                 >,
-                _fevm_state: &mut FEVMNullState,
-                _geom_state: &mut XCState<T>,
+                _fm_state: &mut FEVMNullState,
+                _cs_state: &mut XCState<T>,
             ) -> Result<(), FEVMError<T>> {
                 Ok(())
             }

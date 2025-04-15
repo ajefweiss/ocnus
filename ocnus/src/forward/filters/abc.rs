@@ -1,105 +1,133 @@
 use crate::{
-    T,
-    fevm::{
-        FEVMEnsbl, FEVMError, ParticleFilterError,
-        filters::{ParticleFilter, ParticleFilterResults, ParticleFilterSettings},
+    OcnusError, fXX,
+    forward::{
+        FSMEnsbl,
+        filters::{
+            ParticleFilter, ParticleFilterError, ParticleFilterResults, ParticleFilterSettings,
+        },
     },
-    obser::{ObserVec, ScObsSeries},
+    math::{T, powi},
+    obser::{OcnusNoise, OcnusObser, ScObsSeries},
     prodef::{OcnusProDeF, ParticlesND},
 };
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{DMatrix, DVectorView, Dyn, RealField, Scalar, U1};
-use num_traits::{AsPrimitive, Float};
+use nalgebra::{DMatrix, DVectorView, Dyn, Scalar, U1};
+use num_traits::{Float, Zero};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use serde::Serialize;
-use std::{iter::Sum, ops::AddAssign, time::Instant};
+use std::{
+    ops::{AddAssign, Deref, DerefMut},
+    time::Instant,
+};
 
-/// ABC-SMC algorithm mode.
+/// ABC particle filter algorithm mode.
+///
+/// This data struture determine the error metric and threshold value or type that is used in the
+/// abc particle filter algorithm.
 #[derive(Clone, Debug)]
-pub enum ABCParticleFilterMode<'a, T, E, const N: usize> {
-    /// ABC-SMC runs are filtered by a threshold value.
-    Threshold((&'a E, T)),
+pub enum ABCParticleFilterSettings<'a, T, E>
+where
+    T: fXX,
+{
+    /// ABC runs are filtered by a fixed acceptance rate.
+    AcceptanceRate((ParticleFilterSettings<T>, &'a E, T)),
 
-    /// ABC-SMC runs are filtered by a fixed acceptance rate.
-    AcceptanceRate((&'a E, T)),
+    /// ABC runs are filtered by a threshold value.
+    Threshold((ParticleFilterSettings<T>, &'a E, T)),
+}
+
+impl<'a, T, E> Deref for ABCParticleFilterSettings<'a, T, E>
+where
+    T: fXX,
+{
+    type Target = ParticleFilterSettings<T>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ABCParticleFilterSettings::AcceptanceRate((pf_settings, ..)) => pf_settings,
+            ABCParticleFilterSettings::Threshold((pf_settings, ..)) => pf_settings,
+        }
+    }
+}
+
+impl<'a, T, E> DerefMut for ABCParticleFilterSettings<'a, T, E>
+where
+    T: fXX,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            ABCParticleFilterSettings::AcceptanceRate((pf_settings, ..)) => pf_settings,
+            ABCParticleFilterSettings::Threshold((pf_settings, ..)) => pf_settings,
+        }
+    }
 }
 
 /// A trait that enables the use of approximate Bayesian computation (ABC) particle filter methods
-/// for a [`FEVM`](crate::fevm::FEVM).
-pub trait ABCParticleFilter<T, const P: usize, const N: usize, FS, GS>:
-    ParticleFilter<T, P, N, FS, GS>
+/// for a [`OcnusFSM`](crate::forward::OcnusFSM).
+pub trait ABCParticleFilter<T, O, const P: usize, FMST, CSST>:
+    ParticleFilter<T, O, P, FMST, CSST>
 where
-    T: for<'x> AddAssign<&'x T>
-        + AsPrimitive<usize>
-        + Copy
-        + Default
-        + Float
-        + RealField
-        + SampleUniform
-        + Scalar
-        + Serialize
-        + Sum<T>
-        + for<'x> Sum<&'x T>,
-    FS: Clone + Default + Serialize + Send,
-    GS: Clone + Default + Serialize + Send,
+    T: fXX + SampleUniform,
+    O: AddAssign + OcnusObser + Scalar + Zero,
+    FMST: Default + Clone + Send,
+    CSST: Default + Clone + Send,
     StandardNormal: Distribution<T>,
+    Self: Sync,
 {
-    /// Basic ABC-SMC algorithm (single iteration) with fixed acceptance ratio.
-    fn abcpf_run<E>(
+    /// Single iteration of a basic approximate bayesian computation particle filter algorithm.
+    fn pf_abc_iter<E, N>(
         &self,
-        series: &ScObsSeries<T, ObserVec<T, N>>,
-        fevmd: &FEVMEnsbl<T, P, FS, GS>,
-        ensemble_size: usize,
-        sim_ensemble_size: usize,
-        mode: ABCParticleFilterMode<T, E, N>,
-        settings: &mut ParticleFilterSettings<T, N>,
-    ) -> Result<ParticleFilterResults<T, P, N, FS, GS>, FEVMError<T>>
+        series: &ScObsSeries<T, O>,
+        ensbl: &FSMEnsbl<T, P, FMST, CSST>,
+        ensemble_sizes: (usize, usize),
+        settings: &mut ABCParticleFilterSettings<T, E>,
+        noise: &mut N,
+    ) -> Result<ParticleFilterResults<T, O, P, FMST, CSST>, OcnusError<T>>
     where
-        E: Fn(&DVectorView<ObserVec<T, N>>, &ScObsSeries<T, ObserVec<T, N>>) -> T + Send + Sync,
+        E: Fn(&DVectorView<O>, &ScObsSeries<T, O>) -> T + Send + Sync,
+        N: OcnusNoise<T, O> + Sync,
     {
         let start = Instant::now();
+
+        let (ensemble_size, sim_ensemble_size) = ensemble_sizes;
 
         let mut counter = 0;
         let mut iteration = 0;
 
-        let mut target_data = FEVMEnsbl::new(ensemble_size);
-        let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
+        let mut target_ensbl = FSMEnsbl::new(ensemble_size);
+        let mut target_output = DMatrix::<O>::zeros(series.len(), ensemble_size);
         let mut target_filter_values = Vec::<T>::with_capacity(ensemble_size);
 
-        let mut temp_data = FEVMEnsbl::new(sim_ensemble_size);
-        let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
+        let mut temp_ensbl = FSMEnsbl::new(sim_ensemble_size);
+        let mut temp_output = DMatrix::<O>::zeros(series.len(), sim_ensemble_size);
 
         // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
         let mut density_old = ParticlesND::from_particles(
-            fevmd.params.as_view(),
+            ensbl.params_array.as_view(),
             self.model_prior().get_valid_range(),
-            fevmd.weights.clone(),
-        )? * settings.exploration_factor;
+            ensbl.weights.clone(),
+        )? * settings.expl_factor;
 
         while counter != ensemble_size {
-            self.fevm_initialize(
+            self.fsm_initialize_ensbl(
                 series,
-                &mut temp_data,
+                &mut temp_ensbl,
                 Some(&density_old),
                 settings.rseed + 23 * iteration as u64,
             )?;
 
-            let mut flags = self.fevm_simulate(
+            let mut flags = self.fsm_simulate_ensbl(
                 series,
-                &mut temp_data,
-                &mut temp_output,
-                Some(&mut settings.noise),
+                &mut temp_ensbl,
+                &mut temp_output.as_view_mut(),
+                Some(noise),
             )?;
 
-            let filter_values = match mode {
-                ABCParticleFilterMode::AcceptanceRate((filter, accrate)) => {
+            let filter_values = match settings {
+                ABCParticleFilterSettings::AcceptanceRate((_, metric, accrate)) => {
                     if !(T!(0.001)..T!(0.5)).contains(&accrate) {
-                        return Err(FEVMError::InvalidParameter {
-                            name: "acceptance rate",
-                            value: accrate,
-                        });
+                        panic!("acceptance rate is too low")
                     }
 
                     let values = temp_output
@@ -111,7 +139,7 @@ where
                                 .iter_mut()
                                 .map(|(out, flag)| {
                                     if **flag {
-                                        filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series)
+                                        metric(&out.as_view::<Dyn, U1, U1, Dyn>(), series)
                                     } else {
                                         T::infinity()
                                     }
@@ -128,7 +156,7 @@ where
                         .collect::<Vec<T>>();
 
                     let mut epsilon =
-                        values_sorted[(T::from_usize(sim_ensemble_size).unwrap() * accrate).as_()];
+                        values_sorted[(T!(sim_ensemble_size as f64) * *accrate).as_()];
 
                     if !epsilon.is_finite() {
                         epsilon = Float::max_value();
@@ -148,7 +176,7 @@ where
 
                     values
                 }
-                ABCParticleFilterMode::Threshold((filter, epsilon)) => temp_output
+                ABCParticleFilterSettings::Threshold((.., metric, epsilon)) => temp_output
                     .par_column_iter()
                     .zip(flags.par_iter_mut())
                     .chunks(Self::RCS)
@@ -157,8 +185,8 @@ where
                             .iter_mut()
                             .map(|(out, flag)| {
                                 if **flag {
-                                    let value = filter(&out.as_view::<Dyn, U1, U1, Dyn>(), series);
-                                    **flag = value < epsilon;
+                                    let value = metric(&out.as_view::<Dyn, U1, U1, Dyn>(), series);
+                                    **flag = value < *epsilon;
 
                                     value
                                 } else {
@@ -180,19 +208,19 @@ where
             debug!("valid: {}", indices_valid.len());
 
             // Remove excessive ensemble members.
-            if counter + indices_valid.len() > target_data.size() {
+            if counter + indices_valid.len() > target_ensbl.len() {
                 debug!(
                     "removing excessive ensemble members simulations n={}",
-                    counter + indices_valid.len() - target_data.size()
+                    counter + indices_valid.len() - target_ensbl.len()
                 );
-                indices_valid.drain((target_data.size() - counter)..indices_valid.len());
+                indices_valid.drain((target_ensbl.len() - counter)..indices_valid.len());
             }
 
             // Copy over results.
             indices_valid.iter().enumerate().for_each(|(edx, idx)| {
-                target_data
-                    .params
-                    .set_column(counter + edx, &temp_data.params.column(*idx));
+                target_ensbl
+                    .params_array
+                    .set_column(counter + edx, &temp_ensbl.params_array.column(*idx));
 
                 target_output.set_column(counter + edx, &temp_output.column(*idx));
 
@@ -203,25 +231,24 @@ where
 
             iteration += 1;
 
-            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.simulation_time_limit {
-                return Err(FEVMError::ParticleFilter(
-                    ParticleFilterError::TimeLimitExceeded {
-                        elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
-                        limit: settings.simulation_time_limit,
-                    },
-                ));
+            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.sim_time_limit {
+                return Err(ParticleFilterError::TimeLimitExceeded {
+                    elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
+                    limit: settings.sim_time_limit,
+                }
+                .into());
             }
         }
 
         // Create new density using importance weights.
         let density_new = ParticlesND::from_particles_and_ptpdf(
-            target_data.params.as_view(),
+            target_ensbl.params_array.as_view(),
             &density_old,
             &self.model_prior(),
         )?;
 
         // Reset the covariance matrix in the old density.
-        density_old *= T::one() / settings.exploration_factor;
+        density_old *= T::one() / settings.expl_factor;
 
         let kld = density_new.kullback_leibler_divergence_mvpdf_estimate(&density_old);
 
@@ -233,16 +260,12 @@ where
                 .map(|value| powi!(*value, 2))
                 .sum::<T>();
 
-        if effective_sample_size
-            < T::from_usize(ensemble_size).unwrap()
-                * settings.effective_sample_size_threshold_factor
-        {
-            return Err(FEVMError::ParticleFilter(
-                ParticleFilterError::SmallSampleSize {
-                    effective_sample_size,
-                    ensemble_size,
-                },
-            ));
+        if effective_sample_size < T::from_usize(ensemble_size).unwrap() * settings.ess_factor {
+            return Err(ParticleFilterError::SmallSampleSize {
+                effective_sample_size,
+                ensemble_size,
+            }
+            .into());
         }
 
         let filter_values_sorted = target_filter_values
@@ -252,26 +275,25 @@ where
             .collect::<Vec<T>>();
 
         // Compute quantiles for logging purposes.
-        let eps_1 = filter_values_sorted
-            [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[0]).as_()];
-        let eps_2 = filter_values_sorted
-            [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[1]).as_()];
+        let eps_1 = filter_values_sorted[(T!(ensemble_size as f64) * settings.quantiles[0]).as_()];
+        let eps_2 = filter_values_sorted[(T!(ensemble_size as f64) * settings.quantiles[1]).as_()];
         let eps_3 = if settings.quantiles[2] >= T::one() {
             filter_values_sorted[ensemble_size - 1]
         } else {
-            filter_values_sorted
-                [(T::from_usize(ensemble_size).unwrap() * settings.quantiles[2]).as_()]
+            filter_values_sorted[(T!(ensemble_size as f64) * settings.quantiles[2]).as_()]
         };
 
-        let mode_string = match mode {
-            ABCParticleFilterMode::AcceptanceRate((_, accrate)) => {
+        let mode_string = match settings {
+            ABCParticleFilterSettings::AcceptanceRate((.., accrate)) => {
                 format!("accept rate: {:.3}", accrate)
             }
-            ABCParticleFilterMode::Threshold((_, epsilon)) => format!("epsilon: {:.3}", epsilon),
+            ABCParticleFilterSettings::Threshold((.., epsilon)) => {
+                format!("epsilon: {:.3}", epsilon)
+            }
         };
 
         info!(
-            "abcpf_run ({})\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
+            "pf_abc_iter ({})\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
             mode_string,
             kld,
             eps_1,
@@ -285,8 +307,8 @@ where
 
         settings.rseed += 1;
 
-        Ok(ParticleFilterResults::ByMetric(
-            target_data,
+        Ok(ParticleFilterResults::Quantiles(
+            target_ensbl,
             target_output,
             target_filter_values,
             [eps_1, eps_2, eps_3],

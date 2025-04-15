@@ -7,8 +7,8 @@
 // use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 // use ocnus::{
 //     coords::XCState,
-//     fevm::{
-//         FEVM, FEVMEnsbl, FEVMError, FEVMNoise, FEVMNullState, FisherInformation,
+//     OcnusFEVM::{
+//         OcnusFEVM, FEVMEnsbl, FEVMError, FEVMNoise, FEVMNullState, FisherInformation,
 //         filters::{
 //             ABCParticleFilter, ABCParticleFilterMode, ParticleFilter, ParticleFilterError,
 //             ParticleFilterSettingsBuilder, SIRParticleFilter, root_mean_square_filter,
@@ -73,8 +73,8 @@
 //                 0.0,
 //             ],
 //         ),
-//         fevm_states: vec![FEVMNullState::default(); 1],
-//         geom_states: vec![XCState::default(); 1],
+//         fm_states: vec![FEVMNullState::default(); 1],
+//         cs_states: vec![XCState::default(); 1],
 //         weights: vec![1.0],
 //     };
 

@@ -40,7 +40,7 @@ impl<T> OcnusCoords<T, 4, SPHState<T>> for SPHGeometry<T>
 where
     T: fXX,
 {
-    const COORD_PARAMS: [&'static str; 4] = ["center_x0", "center_y0", "center_z0", "radius_0"];
+    const PARAMS: [&'static str; 4] = ["center_x0", "center_y0", "center_z0", "radius_0"];
 
     fn contravariant_basis<CStride: Dim>(
         ics: &VectorView3<T>,
@@ -106,10 +106,10 @@ where
         ))
     }
 
-    fn initialize_cst<CStride: Dim>(
+    fn initialize_cs<CStride: Dim>(
         params: &VectorView<T, Const<4>, U1, CStride>,
         state: &mut SPHState<T>,
-    ) {
+    ) -> Result<(), CoordsError> {
         let x0 = Self::param_value("center_x0", params).unwrap();
         let y0 = Self::param_value("center_y0", params).unwrap();
         let z0 = Self::param_value("center_z0", params).unwrap();
@@ -117,6 +117,8 @@ where
 
         state.center = Vector3::new(x0, y0, z0);
         state.radius = radius;
+
+        Ok(())
     }
 }
 
@@ -138,7 +140,7 @@ mod tests {
 
         let mut state = SPHState::default();
 
-        SPHGeometry::initialize_cst(&params.fixed_rows::<4>(0), &mut state);
+        SPHGeometry::initialize_cs(&params.fixed_rows::<4>(0), &mut state).unwrap();
 
         let ics_ref = Vector3::new(0.56, 0.17, 0.45);
 
