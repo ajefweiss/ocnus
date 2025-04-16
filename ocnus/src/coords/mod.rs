@@ -1,4 +1,4 @@
-//! Coordinate systems, geometries and state types.
+//! Coordinate systems, geometries and cs_state types.
 //!
 //! The [`OcnusCoords`] trait describes the coordinate systems, or *geometries*, that are used
 //! within the **ocnus** framework to conveniently describe the physical systems of the employed
@@ -20,15 +20,15 @@
 //! - [`SPHGeometry`] A spherical geometry with internal coordiantes (r, ϕ, θ) for solar wind or
 //!   spheromak models.
 //!
-//! Each geometry is associated with a coordinate system state type that allows for the defintion
-//! of time-varying coordatinate systems. The coordinate system state types must be initialized
+//! Each geometry is associated with a coordinate system cs_state type that allows for the defintion
+//! of time-varying coordatinate systems. The coordinate system cs_state types must be initialized
 //! from the coordinate parameters using an implementation of [`OcnusCoords::initialize_cs`].
 //!
-//! Implemented coordinate system state types:
-//! - [`XCState`] A generic coordinate system state type for cylindrical geometries with arbitrary
+//! Implemented coordinate system cs_state types:
+//! - [`XCState`] A generic coordinate system cs_state type for cylindrical geometries with arbitrary
 //!   cross-sections.
-//! - [`TTState`] A coordinate system state type for [`TTGeometry`].
-//! - [`SPHState`] A coordinate system state type for [`SPHGeometry`].
+//! - [`TTState`] A coordinate system cs_state type for [`TTGeometry`].
+//! - [`SPHState`] A coordinate system cs_state type for [`SPHGeometry`].
 
 mod sphgm;
 mod ttgm;
@@ -53,7 +53,7 @@ pub enum CoordsError {
 }
 
 /// A trait that must be implemented for any type that represents a 3D curvilinear coordinate
-/// system with `P` model parameters and a coordinate system state type `CSST`.
+/// system with `P` model parameters and a coordinate system cs_state type `CSST`.
 pub trait OcnusCoords<T, const P: usize, CSST>
 where
     T: fXX,
@@ -65,7 +65,7 @@ where
     fn contravariant_basis<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
-        state: &CSST,
+        cs_state: &CSST,
     ) -> Result<[Vector3<T>; 3], CoordsError>;
 
     /// Computes the local covariant basis vectors.
@@ -82,9 +82,9 @@ where
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
-        state: &CSST,
+        cs_state: &CSST,
     ) -> Result<Vector3<T>, CoordsError> {
-        let basis = Self::contravariant_basis(ics, params, state)?;
+        let basis = Self::contravariant_basis(ics, params, cs_state)?;
 
         Ok(basis
             .iter()
@@ -97,20 +97,20 @@ where
     fn transform_ics_to_ecs<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
-        state: &CSST,
+        cs_state: &CSST,
     ) -> Result<Vector3<T>, CoordsError>;
 
     /// Transform internal coordinates `ics` into cartesian coordinates `ecs`.
     fn transform_ecs_to_ics<CStride: Dim>(
         ecs: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
-        state: &CSST,
+        cs_state: &CSST,
     ) -> Result<Vector3<T>, CoordsError>;
 
-    /// Initialize the coordinate state.
+    /// Initialize the coordinate cs_state.
     fn initialize_cs<CStride: Dim>(
         params: &VectorView<T, Const<P>, U1, CStride>,
-        state: &mut CSST,
+        cs_state: &mut CSST,
     ) -> Result<(), CoordsError>;
 
     /// Retrieve a model parameter index by name.
@@ -146,9 +146,9 @@ where
     {
         use crate::math::T;
 
-        let mut state = CSST::default();
+        let mut cs_state = CSST::default();
 
-        Self::initialize_cs(&params.fixed_rows::<P>(0), &mut state).unwrap();
+        Self::initialize_cs(&params.fixed_rows::<P>(0), &mut cs_state).unwrap();
 
         let ics_1p = ics + Vector3::<T>::x_axis().into_inner() * delta_h / T!(2.0);
         let ics_1m = ics - Vector3::<T>::x_axis().into_inner() * delta_h / T!(2.0);
@@ -160,30 +160,31 @@ where
         let ics_3m = ics - Vector3::<T>::z_axis().into_inner() * delta_h / T!(2.0);
 
         let basis =
-            Self::contravariant_basis(&ics.as_view(), &params.fixed_rows::<P>(0), &state).unwrap();
+            Self::contravariant_basis(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state)
+                .unwrap();
 
         let ecs_1p =
-            Self::transform_ics_to_ecs(&ics_1p.as_view(), &params.fixed_rows::<P>(0), &state)
+            Self::transform_ics_to_ecs(&ics_1p.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
         let ecs_1m =
-            Self::transform_ics_to_ecs(&ics_1m.as_view(), &params.fixed_rows::<P>(0), &state)
+            Self::transform_ics_to_ecs(&ics_1m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
         let ecs_2p =
-            Self::transform_ics_to_ecs(&ics_2p.as_view(), &params.fixed_rows::<P>(0), &state)
+            Self::transform_ics_to_ecs(&ics_2p.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
         let ecs_2m =
-            Self::transform_ics_to_ecs(&ics_2m.as_view(), &params.fixed_rows::<P>(0), &state)
+            Self::transform_ics_to_ecs(&ics_2m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
         let ecs_3p =
-            Self::transform_ics_to_ecs(&ics_3p.as_view(), &params.fixed_rows::<P>(0), &state)
+            Self::transform_ics_to_ecs(&ics_3p.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
         let ecs_3m =
-            Self::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<P>(0), &state)
+            Self::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
         // dbg!(&(basis[0], (ecs_1p - ecs_1m) / delta_h));

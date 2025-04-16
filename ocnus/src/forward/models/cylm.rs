@@ -232,12 +232,12 @@ macro_rules! impl_cylm_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &XCState<T>,
+                cs_state: &XCState<T>,
             ) -> Result<[Vector3<T>; 3], CoordsError> {
                 $coords::contravariant_basis(
                     ics,
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
 
@@ -249,12 +249,12 @@ macro_rules! impl_cylm_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &XCState<T>,
+                cs_state: &XCState<T>,
             ) -> Result<Vector3<T>, CoordsError> {
                 $coords::transform_ics_to_ecs(
                     ics,
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
 
@@ -266,12 +266,12 @@ macro_rules! impl_cylm_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &XCState<T>,
+                cs_state: &XCState<T>,
             ) -> Result<Vector3<T>, CoordsError> {
                 $coords::transform_ecs_to_ics(
                     ecs,
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
 
@@ -282,11 +282,11 @@ macro_rules! impl_cylm_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &mut XCState<T>,
+                cs_state: &mut XCState<T>,
             ) -> Result<(), CoordsError> {
                 $coords::initialize_cs(
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
         }

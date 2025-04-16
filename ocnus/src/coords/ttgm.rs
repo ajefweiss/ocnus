@@ -1,7 +1,7 @@
 use crate::{
     coords::{CoordsError, OcnusCoords},
     fXX,
-    math::{T, acos, atan2, cos, powf, powi, quaternion_rot, sin, sqrt},
+    math::{T, atan2, cos, powf, powi, quaternion_rot, sin, sqrt},
 };
 use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,38 @@ where
 {
     fn default() -> Self {
         Self(PhantomData::<T>)
+    }
+}
+
+impl<T> TTGeometry<T>
+where
+    T: fXX,
+{
+    /// Computes the local contravariant basis vectors and returns the normalized vectors.
+    pub fn contravariant_basis_normalized<CStride: Dim>(
+        ics: &VectorView3<T>,
+        params: &VectorView<T, Const<6>, U1, CStride>,
+        cs_state: &TTState<T>,
+    ) -> Result<[Vector3<T>; 3], CoordsError> {
+        let [dmu, dnu, ds] = Self::contravariant_basis(ics, params, cs_state)?;
+
+        Ok([dmu / dmu.norm(), dnu / dnu.norm(), ds / ds.norm()])
+    }
+
+    /// Create a vector from contravariant components, using the normalized basis vectors.
+    pub fn contravariant_vector_normalized<CStride: Dim>(
+        ics: &VectorView3<T>,
+        components: &VectorView3<T>,
+        params: &VectorView<T, Const<6>, U1, CStride>,
+        cs_state: &TTState<T>,
+    ) -> Result<Vector3<T>, CoordsError> {
+        let basis = Self::contravariant_basis_normalized(ics, params, cs_state)?;
+
+        Ok(basis
+            .iter()
+            .zip(components.iter())
+            .map(|(b, c)| b.clone() * *c)
+            .sum())
     }
 }
 
@@ -185,12 +217,17 @@ where
         );
 
         let axis_delta = ecs_norot - on_axis;
+        let torus_center = Vector3::new(major_radius, T::zero(), T::zero());
 
-        let dl = sqrt!(powi!(axis_delta[0], 2) + powi!(axis_delta[1], 2));
+        let dl = if (ecs_norot - torus_center).norm() >= (on_axis - torus_center).norm() {
+            sqrt!(powi!(axis_delta[0], 2) + powi!(axis_delta[1], 2))
+        } else {
+            -sqrt!(powi!(axis_delta[0], 2) + powi!(axis_delta[1], 2))
+        };
 
         // Compute internal coordinates (mu, nu).
         let r = sqrt!(powi!(dl, 2) + powi!(z, 2));
-        let omega = acos!(dl / r);
+        let omega = atan2!(z, dl);
         let nu = omega / T::two_pi();
 
         let radius_eff = minor_radius * powi!(sin!(psi / T!(2.0)), 2);

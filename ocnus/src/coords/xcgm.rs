@@ -7,7 +7,7 @@ use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3}
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
-/// coordinate system state type for cylindrical models with arbitrary cross-section shapes.
+/// coordinate system cs_state type for cylindrical models with arbitrary cross-section shapes.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct XCState<T>
 where
@@ -211,14 +211,14 @@ macro_rules! impl_xcgm_geom {
             fn contravariant_basis<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
-                state: &XCState<T>,
+                cs_state: &XCState<T>,
             ) -> Result<[Vector3<T>; 3], CoordsError> {
-                let quaternion = state.q;
+                let quaternion = cs_state.q;
 
                 let [dmu, dnu, ds] = $fn_basis::<T, { $params.len() }, Self, XCState<T>, CStride>(
                     (ics[0], ics[1], ics[2]),
                     params,
-                    state,
+                    cs_state,
                 );
 
                 Ok([
@@ -231,41 +231,41 @@ macro_rules! impl_xcgm_geom {
             fn transform_ics_to_ecs<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
-                state: &XCState<T>,
+                cs_state: &XCState<T>,
             ) -> Result<Vector3<T>, CoordsError> {
-                let quaternion = state.q;
+                let quaternion = cs_state.q;
 
                 let ecs_norot = $fn_ecs::<T, { $params.len() }, Self, XCState<T>, CStride>(
                     (ics[0], ics[1], ics[2]),
                     params,
-                    state,
+                    cs_state,
                 );
 
                 Ok(quaternion.transform_vector(&ecs_norot)
-                    + Vector3::new(state.x, T::zero(), state.z))
+                    + Vector3::new(cs_state.x, T::zero(), cs_state.z))
             }
 
             fn transform_ecs_to_ics<CStride: Dim>(
                 ecs: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
-                state: &XCState<T>,
+                cs_state: &XCState<T>,
             ) -> Result<Vector3<T>, CoordsError> {
-                let quaternion = state.q;
+                let quaternion = cs_state.q;
 
                 let ecs_norot = quaternion
                     .conjugate()
-                    .transform_vector(&(ecs - Vector3::new(state.x, T::zero(), state.z)));
+                    .transform_vector(&(ecs - Vector3::new(cs_state.x, T::zero(), cs_state.z)));
 
                 Ok($fn_ics::<T, { $params.len() }, Self, XCState<T>, CStride>(
                     (ecs_norot[0], ecs_norot[1], ecs_norot[2]),
                     params,
-                    state,
+                    cs_state,
                 ))
             }
 
             fn initialize_cs<CStride: Dim>(
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
-                state: &mut XCState<T>,
+                cs_state: &mut XCState<T>,
             ) -> Result<(), CoordsError> {
                 let phi = Self::param_value("phi", params).unwrap();
                 let theta = Self::param_value("theta", params).unwrap();
@@ -274,12 +274,12 @@ macro_rules! impl_xcgm_geom {
                 let x_init = Self::param_value("x_0", params).unwrap();
                 let y = Self::param_value("y", params).unwrap();
 
-                state.x = x_init;
-                state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
+                cs_state.x = x_init;
+                cs_state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
                     / cos!(phi)
                     / cos!(theta);
 
-                state.q = quaternion_rot(phi, psi, theta);
+                cs_state.q = quaternion_rot(phi, psi, theta);
 
                 Ok(())
             }
@@ -317,21 +317,21 @@ mod tests {
         let params =
             SVector::<f64, 5>::from([5.0_f64.to_radians(), -3.0_f64.to_radians(), 0.01, 0.2, 0.0]);
 
-        let mut state = XCState::default();
+        let mut cs_state = XCState::default();
 
-        CCGeometry::initialize_cs(&params.fixed_rows::<5>(0), &mut state).unwrap();
+        CCGeometry::initialize_cs(&params.fixed_rows::<5>(0), &mut cs_state).unwrap();
 
         let ics_ref = Vector3::new(0.6, 0.11, 0.5);
 
         let ecs = CCGeometry::transform_ics_to_ecs(
             &ics_ref.as_view(),
             &params.fixed_rows::<5>(0),
-            &state,
+            &cs_state,
         )
         .unwrap();
 
         let ics_rec =
-            CCGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<5>(0), &state)
+            CCGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<5>(0), &cs_state)
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);
@@ -351,21 +351,21 @@ mod tests {
             0.0,
         ]);
 
-        let mut state = XCState::default();
+        let mut cs_state = XCState::default();
 
-        ECGeometry::initialize_cs(&params.fixed_rows::<7>(0), &mut state).unwrap();
+        ECGeometry::initialize_cs(&params.fixed_rows::<7>(0), &mut cs_state).unwrap();
 
         let ics_ref = Vector3::new(0.6, 0.11, 0.5);
 
         let ecs = ECGeometry::transform_ics_to_ecs(
             &ics_ref.as_view(),
             &params.fixed_rows::<7>(0),
-            &state,
+            &cs_state,
         )
         .unwrap();
 
         let ics_rec =
-            ECGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<7>(0), &state)
+            ECGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<7>(0), &cs_state)
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);

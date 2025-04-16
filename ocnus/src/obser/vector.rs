@@ -152,6 +152,30 @@ where
     }
 }
 
+impl<T> Display for ObserVec<T, 12>
+where
+    T: fXX,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{:.2} | {:.2} | {:.2} - {:.2} | {:.2} | {:.2} - {:.2} | {:.2} | {:.2} - {:.2} | {:.2} | {:.2}]",
+            self[0],
+            self[1],
+            self[2],
+            self[3],
+            self[4],
+            self[5],
+            self[6],
+            self[7],
+            self[8],
+            self[9],
+            self[10],
+            self[11]
+        )
+    }
+}
+
 impl<T, const N: usize> From<SVector<T, N>> for ObserVec<T, N>
 where
     T: fXX,

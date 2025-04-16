@@ -15,7 +15,7 @@ use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, marker::PhantomData};
 
-/// Forward model state type for the CORE models.
+/// Forward model cs_state type for the CORE models.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct COREState<T> {
     pub time: T,
@@ -47,16 +47,14 @@ where
             _ => {
                 let omega = T::two_pi() * nu;
 
-                // We remove one radius_linearized everywhere as it cancels out.
-                // See Eqs. 7-9 in Weiss 2024 et al.
-                let sqrtg = T::two_pi() * powi!(delta, 2) * mu * radius
+                // We only keep the dependency on omega.
+                let sqrtg = powi!(delta, 2)
                     / (powi!(cos!(omega), 2) + powi!(delta, 2) * powi!(sin!(omega), 2));
 
                 // UT terms.
-                let b_s_ut = T::two_pi() * mu * radius * magnetic_field
-                    / (T::one() + powi!(tau, 2) * powi!(mu * radius, 2))
-                    / sqrtg;
-                let b_nu_ut = mu * radius * magnetic_field * tau
+                let b_s_ut =
+                    magnetic_field / (T::one() + powi!(tau, 2) * powi!(mu * radius, 2)) / sqrtg;
+                let b_nu_ut = magnetic_field * tau * mu * radius
                     / (T::one() + powi!(tau, 2) * powi!(mu * radius, 2))
                     / sqrtg;
 
@@ -129,12 +127,12 @@ macro_rules! impl_core_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &TTState<T>,
+                cs_state: &TTState<T>,
             ) -> Result<[Vector3<T>; 3], CoordsError> {
                 $coords::contravariant_basis(
                     ics,
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
 
@@ -146,12 +144,12 @@ macro_rules! impl_core_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &TTState<T>,
+                cs_state: &TTState<T>,
             ) -> Result<Vector3<T>, CoordsError> {
                 $coords::transform_ics_to_ecs(
                     ics,
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
 
@@ -163,12 +161,12 @@ macro_rules! impl_core_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &TTState<T>,
+                cs_state: &TTState<T>,
             ) -> Result<Vector3<T>, CoordsError> {
                 $coords::transform_ecs_to_ics(
                     ecs,
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
 
@@ -179,11 +177,11 @@ macro_rules! impl_core_forward_model {
                     U1,
                     CStride,
                 >,
-                state: &mut TTState<T>,
+                cs_state: &mut TTState<T>,
             ) -> Result<(), CoordsError> {
                 $coords::initialize_cs(
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    state,
+                    cs_state,
                 )
             }
         }
@@ -306,10 +304,10 @@ macro_rules! impl_core_forward_model {
 
                 match obs {
                     Some(b_q) => {
-                        let b_s = Self::contravariant_vector(
+                        let b_s = TTGeometry::contravariant_vector_normalized(
                             &q.as_view(),
                             &b_q.as_view(),
-                            params,
+                            &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                             cs_state,
                         )?;
 
@@ -486,13 +484,14 @@ mod tests {
         };
 
         let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+        let mut output_diag = DMatrix::<ObserVec<f64, 12>>::zeros(sc.len(), 1);
 
         ensbl.params_array.set_column(
             0,
             &SVector::<f64, 11>::from([
-                5.0_f64.to_radians(),
-                -3.0_f64.to_radians(),
-                15.0_f64.to_radians(),
+                0.0_f64.to_radians(),
+                1.0_f64.to_radians(),
+                0.0_f64.to_radians(),
                 20.0,
                 0.15,
                 1.0,
@@ -517,10 +516,16 @@ mod tests {
             )
             .expect("simulation failed");
 
+        model
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .expect("initialization failed");
+
+        model
+            .fsm_simulate_ics_plus_basis_ensbl(&sc, &mut ensbl, &mut output_diag.as_view_mut())
+            .expect("simulation failed");
+
         println!("{}", output);
-        println!("{}", output[(0, 0)]);
-        println!("{}", output[(1, 0)]);
-        println!("{}", output[(2, 0)]);
+        println!("{}", output_diag);
 
         // assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
         // assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);

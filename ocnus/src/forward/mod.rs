@@ -472,13 +472,13 @@ where
 
     /// Perform a forward simulation and return the internal coordinates and basis vectors for
     /// the given spacecraft observers.
-    fn fsm_simulate_ics_plus_basis<RStride: Dim, CStride: Dim>(
+    fn fsm_simulate_ics_plus_basis(
         &self,
         series: &ScObsSeries<T, O>,
         params: &SVectorView<T, P>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
-        out_array: &mut DMatrixViewMut<ObserVec<T, 12>, RStride, CStride>,
+        out_array: &mut DMatrixViewMut<ObserVec<T, 12>>,
     ) -> Result<(), OcnusError<T>> {
         let mut timer = T::zero();
 
@@ -512,11 +512,11 @@ where
 
     /// Perform an ensemble forward simulation and return the internal coordinates and basis
     /// vectors for  the given spacecraft observers.
-    fn fsm_simulate_ics_plus_basis_ensbl<RStride: Dim, CStride: Dim>(
+    fn fsm_simulate_ics_plus_basis_ensbl(
         &self,
         series: &ScObsSeries<T, O>,
         ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
-        out_array: &mut DMatrixViewMut<ObserVec<T, 12>, RStride, CStride>,
+        out_array: &mut DMatrixViewMut<ObserVec<T, 12>>,
     ) -> Result<(), OcnusError<T>>
     where
         O: Scalar,
