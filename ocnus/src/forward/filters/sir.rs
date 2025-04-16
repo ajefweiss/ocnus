@@ -105,6 +105,14 @@ where
             iteration += 1;
 
             if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.sim_time_limit {
+                info!(
+                    "pf_sir_iter aborted, time limit exceeded\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
+                    (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
+                    start.elapsed().as_millis() as f64 / 1e3,
+                    counter,
+                    ensemble_size,
+                );
+
                 return Err(ParticleFilterError::TimeLimitExceeded {
                     elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
                     limit: settings.sim_time_limit,
@@ -183,7 +191,7 @@ where
             vec![T::one() / T::from_usize(ensemble_size).unwrap(); ensemble_size];
 
         info!(
-            "pf_sir_iter\n\tKL delta: {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}\n\tunique samples = {}",
+            "pf_sir_iter success\n\tKL delta: {:.3} \n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}\n\tunique samples = {}",
             kld,
             (series.len() * sim_ensemble_size) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3,
@@ -194,7 +202,7 @@ where
 
         settings.rseed += 1;
 
-        Ok(ParticleFilterResults::Values(
+        Ok(ParticleFilterResults::SIR(
             target_ensbl,
             target_output,
             likelihoods,

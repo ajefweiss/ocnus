@@ -167,8 +167,8 @@ where
                                                     if valid_indices[j] {
                                                         Some(acfunc(
                                                             abs!(
-                                                                *scobs_i.timestamp()
-                                                                    - *scobs_j.timestamp()
+                                                                *scobs_i.get_timestamp()
+                                                                    - *scobs_j.get_timestamp()
                                                             ),
                                                             scobs_i.distance(&scobs_j),
                                                         ))

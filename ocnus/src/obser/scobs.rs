@@ -49,6 +49,16 @@ impl<T, O> ScObs<T, O> {
         }
     }
 
+    /// Access the observation field.
+    pub fn get_observation(&self) -> &O {
+        &self.observation
+    }
+
+    /// Access the timestamp field.
+    pub fn get_timestamp(&self) -> &T {
+        &self.timestamp
+    }
+
     /// Create a new [`ScObs`], with an optional observation.
     pub fn new(timestamp: T, configuration: ScObsConf<T>, opt_observation: Option<O>) -> Self
     where
@@ -61,14 +71,9 @@ impl<T, O> ScObs<T, O> {
         }
     }
 
-    /// Access the observation field.
-    pub fn observation(&self) -> &O {
-        &self.observation
-    }
-
-    /// Access the timestamp field.
-    pub fn timestamp(&self) -> &T {
-        &self.timestamp
+    /// Set the observation field.
+    pub fn set_observation(&mut self, observation: O) {
+        self.observation = observation;
     }
 }
 
@@ -94,7 +99,7 @@ where
         O: OcnusObser,
     {
         self.into_iter()
-            .fold(0, |acc, next| match next.observation().is_valid() {
+            .fold(0, |acc, next| match next.get_observation().is_valid() {
                 true => acc + 1,
                 false => acc,
             })
@@ -106,6 +111,11 @@ where
     /// [`ScObsSeries::sort_by_timestamp`].
     pub fn count_series(&self) -> usize {
         self.sorti.iter().fold(0, |acc, next| max(acc, *next)) + 1
+    }
+
+    /// Returns the first [`ScObs`].
+    pub fn first_scobs(&self) -> Option<&ScObs<T, O>> {
+        self.scobs.first()
     }
 
     /// Create a [`ScObsSeries`] from an iterator over `ScObs`.
@@ -122,6 +132,11 @@ where
     /// Returns `true`` if the observation contains no elements.
     pub fn is_empty(&self) -> bool {
         self.scobs.is_empty()
+    }
+
+    /// Returns last first [`ScObs`].
+    pub fn last_scobs(&self) -> Option<&ScObs<T, O>> {
+        self.scobs.last()
     }
 
     /// Returns the number of elements in the observation.

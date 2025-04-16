@@ -13,9 +13,6 @@ pub struct XCState<T>
 where
     T: fXX,
 {
-    /// Offset along the time axis.
-    pub t: T,
-
     /// Offset along the x-axis.
     pub x: T,
 
@@ -277,7 +274,6 @@ macro_rules! impl_xcgm_geom {
                 let x_init = Self::param_value("x_0", params).unwrap();
                 let y = Self::param_value("y", params).unwrap();
 
-                state.t = T::zero();
                 state.x = x_init;
                 state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
                     / cos!(phi)

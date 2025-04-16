@@ -25,7 +25,7 @@ where
     M: OcnusCoords<T, P, CSST>,
 {
     // Extract parameters using their identifiers.
-    let b = M::param_value("B", params).unwrap();
+    let b = M::param_value("b_scale", params).unwrap();
     let y_offset = M::param_value("y", params).unwrap();
     let alpha_signed = M::param_value("alpha", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
@@ -71,7 +71,7 @@ where
     M: OcnusCoords<T, P, CSST>,
 {
     // Extract parameters using their identifiers.
-    let b = M::param_value("B", params).unwrap();
+    let b = M::param_value("b_scale", params).unwrap();
     let y_offset = M::param_value("y", params).unwrap();
     let tau = M::param_value("tau", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
@@ -111,7 +111,7 @@ where
     let psi = M::param_value("psi", params).unwrap();
     let delta = M::param_value("delta", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
-    let b = M::param_value("B", params).unwrap();
+    let b = M::param_value("b_scale", params).unwrap();
     let lambda = M::param_value("lambda", params).unwrap();
     let alpha_signed = M::param_value("alpha", params).unwrap();
     let tau = M::param_value("tau", params).unwrap();
@@ -321,9 +321,8 @@ macro_rules! impl_cylm_forward_model {
                 cs_state: &mut XCState<T>,
             ) -> Result<(), FSMError<T>> {
                 // Extract parameters using their identifiers.
-                let vel = Self::param_value("v", params).unwrap() / T!(1.496e8);
+                let vel = Self::param_value("velocity", params).unwrap() / T!(1.496e8);
 
-                cs_state.t += time_step;
                 cs_state.x += vel * time_step as T;
 
                 Ok(())
@@ -506,7 +505,7 @@ macro_rules! impl_cylm_forward_model {
 impl_cylm_forward_model!(
     CCLFFModel,
     CCGeometry,
-    ["v", "B", "alpha"],
+    ["velocity", "b_scale", "alpha"],
     cc_lff_obs,
     "Circular-cylindrical linear force-free magnetic flux rope model."
 );
@@ -514,7 +513,7 @@ impl_cylm_forward_model!(
 impl_cylm_forward_model!(
     CCUTModel,
     CCGeometry,
-    ["v", "B", "tau"],
+    ["velocity", "b_scale", "tau"],
     cc_ut_obs,
     "Circular-cylindrical uniform twist magnetic flux rope model."
 );
@@ -522,7 +521,7 @@ impl_cylm_forward_model!(
 impl_cylm_forward_model!(
     ECHModel,
     ECGeometry,
-    ["v", "B", "lambda", "alpha", "tau"],
+    ["velocity", "b_scale", "lambda", "alpha", "tau"],
     ec_hybrid_obs,
     "Elliptic-cylindrical uniform twist magnetic flux rope model."
 );
@@ -538,7 +537,7 @@ mod tests {
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
 
     #[test]
-    fn test_cclffmodel() {
+    fn test_cclff_model() {
         let prior = UnivariateND::new([
             Uniform1D::new((-1.0, 1.0)).unwrap(),
             Uniform1D::new((0.5, 1.0)).unwrap(),
@@ -602,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ccutmodel() {
+    fn test_ccut_model() {
         let prior = UnivariateND::new([
             Uniform1D::new((-1.0, 1.0)).unwrap(),
             Uniform1D::new((0.5, 1.0)).unwrap(),
@@ -667,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn test_echmodel() {
+    fn test_ech_model() {
         let prior = UnivariateND::new([
             Uniform1D::new((-1.0, 1.0)).unwrap(),
             Uniform1D::new((-1.0, 1.0)).unwrap(),

@@ -63,7 +63,7 @@ where
         let start = Instant::now();
 
         let mut counter = 0;
-        let mut iteration = 0;
+        let mut iteration: usize = 0;
 
         let mut target_ensbl = FSMEnsbl::new(ensemble_size);
         let mut target_output = DMatrix::<O>::zeros(series.len(), ensemble_size);
@@ -77,7 +77,7 @@ where
                 series,
                 &mut temp_ensbl,
                 None,
-                settings.rseed + 17 * iteration,
+                settings.rseed + 17 * iteration as u64,
             )?;
 
             let mut flags = self.fsm_simulate_ensbl(
@@ -149,6 +149,14 @@ where
             iteration += 1;
 
             if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.sim_time_limit {
+                info!(
+                    "pf_initialize aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
+                    (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
+                    start.elapsed().as_millis() as f64 / 1e3,
+                    counter,
+                    ensemble_size,
+                );
+
                 return Err(ParticleFilterError::TimeLimitExceeded {
                     elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
                     limit: settings.sim_time_limit,
@@ -193,7 +201,12 @@ where
                 None::<&mut NoNoise<T>>,
             )?;
 
-            Ok(ParticleFilterResults::Basic(target_ensbl, target_output))
+            Ok(ParticleFilterResults::ABC(
+                target_ensbl,
+                target_output,
+                target_filter_values,
+                [eps_1, eps_2, eps_3],
+            ))
         } else {
             info!(
                 "pf_initialize_data\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
@@ -204,7 +217,10 @@ where
 
             settings.rseed += 1;
 
-            Ok(ParticleFilterResults::Basic(target_ensbl, target_output))
+            Ok(ParticleFilterResults::Initialize(
+                target_ensbl,
+                target_output,
+            ))
         }
     }
 }
@@ -222,12 +238,12 @@ where
     T: fXX,
     O: Scalar,
 {
-    /// Basic result with ensemble and observations.
-    Basic(FSMEnsbl<T, P, FMST, CSST>, DMatrix<O>),
+    /// Result from pf_initialize
+    Initialize(FSMEnsbl<T, P, FMST, CSST>, DMatrix<O>),
     /// Advanced with results with additional values.
-    Values(FSMEnsbl<T, P, FMST, CSST>, DMatrix<O>, Vec<T>),
+    SIR(FSMEnsbl<T, P, FMST, CSST>, DMatrix<O>, Vec<T>),
     ///Advanced with results with additional values and respective quantiles
-    Quantiles(FSMEnsbl<T, P, FMST, CSST>, DMatrix<O>, Vec<T>, [T; 3]),
+    ABC(FSMEnsbl<T, P, FMST, CSST>, DMatrix<O>, Vec<T>, [T; 3]),
 }
 
 impl<T, O, const P: usize, FMST, CSST> ParticleFilterResults<T, O, P, FMST, CSST>
@@ -238,18 +254,18 @@ where
     /// Return a reference to the underlying [`FSMEnsbl`].
     pub fn get_ensbl(&self) -> &FSMEnsbl<T, P, FMST, CSST> {
         match self {
-            ParticleFilterResults::Basic(ensbl, ..) => ensbl,
-            ParticleFilterResults::Values(ensbl, ..) => ensbl,
-            ParticleFilterResults::Quantiles(ensbl, ..) => ensbl,
+            ParticleFilterResults::Initialize(ensbl, ..) => ensbl,
+            ParticleFilterResults::SIR(ensbl, ..) => ensbl,
+            ParticleFilterResults::ABC(ensbl, ..) => ensbl,
         }
     }
 
     /// Return a reference to the underlying quantile valies.
     pub fn get_quantiles(&self) -> Option<&[T]> {
         match self {
-            ParticleFilterResults::Basic(..) => None,
-            ParticleFilterResults::Values(..) => None,
-            ParticleFilterResults::Quantiles(.., quantiles) => Some(quantiles),
+            ParticleFilterResults::Initialize(..) => None,
+            ParticleFilterResults::SIR(..) => None,
+            ParticleFilterResults::ABC(.., quantiles) => Some(quantiles),
         }
     }
 
@@ -315,7 +331,7 @@ where
 {
     out.into_iter()
         .zip(series)
-        .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.observation()))
+        .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.get_observation()))
         .sum::<T>()
         / T::from_usize(series.count_observations()).unwrap()
 }
@@ -331,7 +347,7 @@ where
     sqrt!(
         out.into_iter()
             .zip(series)
-            .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.observation()))
+            .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.get_observation()))
             .sum::<T>()
             / T::from_usize(series.count_observations()).unwrap()
     )

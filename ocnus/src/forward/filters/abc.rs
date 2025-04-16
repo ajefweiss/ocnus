@@ -232,6 +232,14 @@ where
             iteration += 1;
 
             if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.sim_time_limit {
+                info!(
+                    "pf_abc_iter aborted, time limit exceeded\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
+                    (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
+                    start.elapsed().as_millis() as f64 / 1e3,
+                    counter,
+                    ensemble_size,
+                );
+
                 return Err(ParticleFilterError::TimeLimitExceeded {
                     elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
                     limit: settings.sim_time_limit,
@@ -260,14 +268,6 @@ where
                 .map(|value| powi!(*value, 2))
                 .sum::<T>();
 
-        if effective_sample_size < T::from_usize(ensemble_size).unwrap() * settings.ess_factor {
-            return Err(ParticleFilterError::SmallSampleSize {
-                effective_sample_size,
-                ensemble_size,
-            }
-            .into());
-        }
-
         let filter_values_sorted = target_filter_values
             .iter()
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
@@ -283,6 +283,26 @@ where
             filter_values_sorted[(T!(ensemble_size as f64) * settings.quantiles[2]).as_()]
         };
 
+        if effective_sample_size < T::from_usize(ensemble_size).unwrap() * settings.ess_factor {
+            info!(
+                "pf_abc_iter aborted, too small sample size\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
+                kld,
+                eps_1,
+                eps_2,
+                eps_3,
+                (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
+                start.elapsed().as_millis() as f64 / 1e3,
+                effective_sample_size,
+                ensemble_size,
+            );
+
+            return Err(ParticleFilterError::SmallSampleSize {
+                effective_sample_size,
+                ensemble_size,
+            }
+            .into());
+        }
+
         let mode_string = match settings {
             ABCParticleFilterSettings::AcceptanceRate((.., accrate)) => {
                 format!("accept rate: {:.3}", accrate)
@@ -293,7 +313,7 @@ where
         };
 
         info!(
-            "pf_abc_iter ({})\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
+            "pf_abc_iter success ({})\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
             mode_string,
             kld,
             eps_1,
@@ -307,7 +327,7 @@ where
 
         settings.rseed += 1;
 
-        Ok(ParticleFilterResults::Quantiles(
+        Ok(ParticleFilterResults::ABC(
             target_ensbl,
             target_output,
             target_filter_values,

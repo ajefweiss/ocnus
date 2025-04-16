@@ -369,7 +369,13 @@ where
 
         let mut mu_flat = mu
             .into_iter()
-            .flat_map(|mu_scobs| mu_scobs.observation().iter().cloned().collect::<Vec<T>>())
+            .flat_map(|mu_scobs| {
+                mu_scobs
+                    .get_observation()
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<T>>()
+            })
             .collect::<Vec<T>>();
 
         // Correct matching NaN's

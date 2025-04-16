@@ -14,7 +14,7 @@ mod fisher;
 mod models;
 
 pub use fisher::FisherInformation;
-pub use models::{CCLFFModel, CCUTModel, ECHModel};
+pub use models::{CCLFFModel, CCUTModel, COREModel, ECHModel};
 
 use crate::{
     OcnusError,
@@ -344,8 +344,8 @@ where
 
         zip_eq(series, out_array.row_iter_mut()).try_for_each(|(scobs, mut out_row)| {
             // Compute time step to next observation.
-            let time_step = *scobs.timestamp() - timer;
-            timer = *scobs.timestamp();
+            let time_step = *scobs.get_timestamp() - timer;
+            timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
                 return Err(FSMError::NegativeTimeStep(time_step).into());
@@ -361,7 +361,7 @@ where
             .into_iter()
             .zip(out_array.column(0).iter())
             .fold(true, |acc, (scobs, obs)| {
-                acc && !(scobs.observation().is_valid() ^ obs.is_valid())
+                acc && !(scobs.get_observation().is_valid() ^ obs.is_valid())
             }))
     }
 
@@ -397,8 +397,8 @@ where
 
         zip_eq(series, out_array.row_iter_mut()).try_for_each(|(scobs, mut out_row)| {
             // Compute time step to next observation.
-            let time_step = *scobs.timestamp() - timer;
-            timer = *scobs.timestamp();
+            let time_step = *scobs.get_timestamp() - timer;
+            timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
                 return Err(FSMError::NegativeTimeStep(time_step).into());
@@ -430,15 +430,12 @@ where
         })?;
 
         if let Some(noise) = opt_noise {
-            let noise_chunky = vec![noise.clone(); out_array.ncols()];
-
             out_array
                 .par_column_iter_mut()
                 .chunks(Self::RCS)
-                .zip(noise_chunky.par_iter())
                 .enumerate()
-                .for_each(|(cdx, (mut chunks, noise_local))| {
-                    let mut rng = noise_local.initialize_rng(29 * cdx as u64, 17);
+                .for_each(|(cdx, mut chunks)| {
+                    let mut rng = noise.initialize_rng(29 * cdx as u64, 17);
 
                     chunks.iter_mut().for_each(|col| {
                         col.iter_mut()
@@ -465,7 +462,7 @@ where
             .for_each(|mut chunks| {
                 chunks.iter_mut().for_each(|(out, flag)| {
                     **flag = zip_eq(out.iter(), series).fold(true, |acc, (out, obs)| {
-                        acc & !(out.is_valid() ^ obs.observation().is_valid())
+                        acc & !(out.is_valid() ^ obs.get_observation().is_valid())
                     });
                 });
             });
@@ -497,8 +494,8 @@ where
 
         zip_eq(series, out_array.row_iter_mut()).try_for_each(|(scobs, mut out)| {
             // Compute time step to next observation.
-            let time_step = *scobs.timestamp() - timer;
-            timer = *scobs.timestamp();
+            let time_step = *scobs.get_timestamp() - timer;
+            timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
                 return Err(FSMError::NegativeTimeStep(time_step).into());
@@ -542,8 +539,8 @@ where
 
         zip_eq(series, out_array.row_iter_mut()).try_for_each(|(scobs, mut out_col)| {
             // Compute time step to next observation.
-            let time_step = *scobs.timestamp() - timer;
-            timer = *scobs.timestamp();
+            let time_step = *scobs.get_timestamp() - timer;
+            timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
                 return Err(FSMError::NegativeTimeStep(time_step).into());

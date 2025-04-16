@@ -33,38 +33,53 @@ fn main() {
         .filter(None, log::LevelFilter::Info)
         .init();
 
+    // let prior = UnivariateND::new([
+    //     Uniform1D::new((-1.5, 1.5)).unwrap(),
+    //     Uniform1D::new((1.5, 4.5)).unwrap(),
+    //     Constant1D::new(1.0),
+    //     Uniform1D::new((-0.75, 0.75)).unwrap(),
+    //     Constant1D::new(1.0),
+    //     Reciprocal1D::new((0.1, 0.35)).unwrap(),
+    //     Uniform1D::new((0.75, 0.95)).unwrap(),
+    //     Constant1D::new(750.0),
+    //     Uniform1D::new((10.0, 25.0)).unwrap(),
+    //     Constant1D::new(1.0),
+    //     Uniform1D::new((0.0, 15.0)).unwrap(),
+    //     Constant1D::new(0.0),
+    // ]);
+
     let prior = UnivariateND::new([
         Uniform1D::new((-1.5, 1.5)).unwrap(),
         Uniform1D::new((1.5, 4.5)).unwrap(),
         Constant1D::new(1.0),
         Uniform1D::new((-0.75, 0.75)).unwrap(),
         Constant1D::new(1.0),
-        Reciprocal1D::new((0.1, 0.35)).unwrap(),
-        Uniform1D::new((0.75, 0.9)).unwrap(),
-        Constant1D::new(1125.0),
+        Reciprocal1D::new((0.05, 0.25)).unwrap(),
+        Uniform1D::new((0.85, 1.0)).unwrap(),
+        Constant1D::new(375.0),
         Uniform1D::new((10.0, 25.0)).unwrap(),
-        Constant1D::new(1.0),
-        Uniform1D::new((0.0, 15.0)).unwrap(),
         Constant1D::new(0.0),
+        Constant1D::new(0.0),
+        Uniform1D::new((0.0, 30.0)).unwrap(),
     ]);
 
     let model = ECHModel::new(prior);
 
     #[allow(clippy::excessive_precision)]
     let refobs = [
-        ObserVec::from([-2.67159853, -13.38264243, -7.20006469]),
-        // ObserVec::from([-3.13531505, -13.98423491, -6.64658269]),
-        ObserVec::from([-5.34451816, -14.85328723, -1.73480069]),
-        // ObserVec::from([-3.38360946, -15.34720671, -1.71139834]),
-        ObserVec::from([-4.00239361, -14.94369, 1.2604304]),
-        // ObserVec::from([-4.21540068, -13.93568105, 4.73878965]),
-        ObserVec::from([-2.7273795, -14.29364075, 4.8267508]),
-        // ObserVec::from([-5.41469694, -13.9772912, 4.14112123]),
-        ObserVec::from([-4.28371012, -13.89409455, 5.13879915]),
-        // ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
+        // ObserVec::from([-2.67159853, -13.38264243, -7.20006469]),
+        ObserVec::from([-3.13531505, -13.98423491, -6.64658269]),
+        // ObserVec::from([-5.34451816, -14.85328723, -1.73480069]),
+        ObserVec::from([-3.38360946, -15.34720671, -1.71139834]),
+        // ObserVec::from([-4.00239361, -14.94369, 1.2604304]),
+        ObserVec::from([-4.21540068, -13.93568105, 4.73878965]),
+        // ObserVec::from([-2.7273795, -14.29364075, 4.8267508]),
+        ObserVec::from([-5.41469694, -13.9772912, 4.14112123]),
+        // ObserVec::from([-4.28371012, -13.89409455, 5.13879915]),
+        ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
     ];
 
-    const ENSEMBLE_SIZE: usize = 4096;
+    const ENSEMBLE_SIZE: usize = 2048;
 
     let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..refobs.len()).map(|i| {
         ScObs::new(
@@ -75,10 +90,10 @@ fn main() {
     }));
 
     let mut pf_settings = ParticleFilterSettingsBuilder::default()
-        .expl_factor(1.5)
-        .quantiles([0.2, 0.5, 1.0])
+        .expl_factor(2.0)
+        .quantiles([0.15, 0.5, 0.8])
         .rseed(70)
-        .sim_time_limit(1.5)
+        .sim_time_limit(2.5)
         .build()
         .unwrap();
 
@@ -86,8 +101,8 @@ fn main() {
         .pf_initialize_ensemble(
             &sc,
             ENSEMBLE_SIZE,
-            2_usize.pow(18),
-            Some((&root_mean_square_metric, 9.5)),
+            2_usize.pow(17),
+            Some((&root_mean_square_metric, 9.0)),
             &mut pf_settings,
         )
         .unwrap();
@@ -108,7 +123,7 @@ fn main() {
             None
         }
     } else {
-        warn!("no document fold found, results will not be saved");
+        warn!("no document folder found, results will not be saved");
 
         None
     };
@@ -127,7 +142,7 @@ fn main() {
     let mut total_counter = 1;
     let mut fevmd = init_result.get_ensbl().clone();
     let mut epsilon = init_result.get_quantiles().unwrap()[0];
-
+    let mut abort_counter = 0;
     let mut noise = ObserVecNoise::Gaussian(1.0, 0);
 
     for _ in 1..20 {
@@ -146,13 +161,22 @@ fn main() {
         );
 
         let run_abc_result = match run {
-            Ok(result) => result,
+            Ok(result) => {
+                abort_counter = 0;
+                result
+            }
             Err(err) => match err {
                 OcnusError::ParticleFilter(pferr) => match pferr {
                     ParticleFilterError::TimeLimitExceeded { .. } => break,
                     _ => {
-                        abc_settings.rseed += 1;
-                        continue;
+                        abort_counter += 1;
+
+                        if abort_counter < 3 {
+                            abc_settings.rseed += 1;
+                            continue;
+                        } else {
+                            break;
+                        }
                     }
                 },
                 _ => panic!(),

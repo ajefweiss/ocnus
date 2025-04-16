@@ -15,7 +15,7 @@ use ocnus::{
         },
     },
     math::CovMatrix,
-    obser::{NoNoise, ObserVec, ObserVecNoise, OcnusObser, ScObs, ScObsConf, ScObsSeries},
+    obser::{NoNoise, ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
     prodef::{Constant1D, Uniform1D, UnivariateND},
 };
 use std::{io::prelude::*, path::Path};
@@ -49,17 +49,30 @@ fn main() {
         Uniform1D::new((5.0, 20.0)).unwrap(),
     ]);
 
-    let model = ECHModel::new(prior);
+    let model: ECHModel<f64, UnivariateND<f64, 12>> = ECHModel::new(prior);
 
-    const SCOUNT: usize = 12;
+    const SCOUNT: usize = 6;
 
-    let sc = ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..(SCOUNT)).map(|i| {
-        ScObs::new(
-            i as f64 * 3.5 * 3600.0 as f64 + 9.0 * 3600.0,
-            ScObsConf::Position([1.0, 0.0, 0.0]),
-            None,
-        )
-    }));
+    let sc1: ScObsSeries<f64, ObserVec<f64, 3>> =
+        ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..(SCOUNT)).map(|i| {
+            ScObs::new(
+                i as f64 * 6.0 * 3600.0 as f64 + 16.0 * 3600.0,
+                ScObsConf::Position([1.0, 0.0, 0.0]),
+                None,
+            )
+        }));
+
+    let sc2: ScObsSeries<f64, ObserVec<f64, 3>> =
+        ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..(SCOUNT)).map(|i| {
+            ScObs::new(
+                i as f64 * 6.0 * 3600.0 as f64 + 16.0 * 3600.0,
+                ScObsConf::Position([1.0, 0.0, 0.05]),
+                None,
+            )
+        }));
+
+    let mut sc = sc1 + sc2;
+    sc.sort_by_timestamp();
 
     let mut fevmd_0 = FSMEnsbl {
         params_array: Matrix::<f64, _, Dyn, VecStorage<f64, Const<12>, Dyn>>::from_iterator(
@@ -73,7 +86,7 @@ fn main() {
         weights: vec![1.0],
     };
 
-    const NOISE_VAR: f64 = 1.0;
+    const NOISE_VAR: f64 = 0.1;
 
     let auto_correlation = |dt, dd| {
         if dd > 0.0 {
@@ -134,8 +147,17 @@ fn main() {
             obs
         }));
 
-    assert!(!&sc_synth.first_scobs().unwrap().get_observation().is_valid());
-    assert!(!&sc_synth.last_scobs().unwrap().get_observation().is_valid());
+    // let sc_synth = ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..(SCOUNT)).map(|i| {
+    //     ScObs::new(
+    //         i as f64 * 3.0 * 3600.0 as f64 + 16.0 * 3600.0,
+    //         ScObsConf::Distance(1.0),
+    //         if output.row(i)[0].any_nan() {
+    //             None
+    //         } else {
+    //             Some(output.row(i)[0].clone())
+    //         },
+    //     )
+    // }));
 
     const ENSEMBLE_SIZE: usize = 2048;
 
@@ -160,7 +182,9 @@ fn main() {
     let base_dir_opt = if let Some(user_dirs) = UserDirs::new() {
         let doc_dir = user_dirs.document_dir().unwrap();
 
-        let path = Path::new(doc_dir).join("Data").join("example_fisher_ech");
+        let path = Path::new(doc_dir)
+            .join("Data")
+            .join("example_fisher_multi_ech");
 
         if path.exists() {
             Some(path)
@@ -250,7 +274,8 @@ fn main() {
     }
 
     let iter_var = vec![
-        100.0, 75.0, 50.0, 25.0, 15.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, NOISE_VAR,
+        100.0, 75.0, 50.0, 25.0, 15.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.75,
+        0.5, 0.25, 0.15, 0.1, NOISE_VAR,
     ];
 
     for idx in 0..iter_var.len() {

@@ -7,7 +7,7 @@ use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3}
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
-/// coordinate system state type for a tapered torus geometry with arbitrary cross-section shapes.
+/// Coordinate system cs_state type for a tapered torus geometry with arbitrary cross-section shapes.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TTState<T>
 where
@@ -45,21 +45,21 @@ where
         "longitude",
         "latitude",
         "inclination",
-        "major_radius_0",
-        "minor_radius_0",
+        "distance_0",
+        "diameter_1au",
         "delta",
     ];
 
     fn contravariant_basis<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<6>, U1, CStride>,
-        state: &TTState<T>,
+        cs_state: &TTState<T>,
     ) -> Result<[Vector3<T>; 3], CoordsError> {
-        let major_radius = state.major_radius;
-        let minor_radius = state.minor_radius;
+        let major_radius = cs_state.major_radius;
+        let minor_radius = cs_state.minor_radius;
         let delta = Self::param_value("delta", params).unwrap();
 
-        let quaternion = state.q;
+        let quaternion = cs_state.q;
 
         let mu = ics[0];
         let nu = ics[1];
@@ -121,13 +121,13 @@ where
     fn transform_ics_to_ecs<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<6>, U1, CStride>,
-        state: &TTState<T>,
+        cs_state: &TTState<T>,
     ) -> Result<Vector3<T>, CoordsError> {
-        let major_radius = state.major_radius;
-        let minor_radius = state.minor_radius;
+        let major_radius = cs_state.major_radius;
+        let minor_radius = cs_state.minor_radius;
         let delta = Self::param_value("delta", params).unwrap();
 
-        let quaternion = state.q;
+        let quaternion = cs_state.q;
 
         let mu = ics[0];
         let nu = ics[1];
@@ -154,11 +154,11 @@ where
     fn transform_ecs_to_ics<CStride: Dim>(
         ecs: &VectorView3<T>,
         params: &VectorView<T, Const<6>, U1, CStride>,
-        state: &TTState<T>,
+        cs_state: &TTState<T>,
     ) -> Result<Vector3<T>, CoordsError> {
-        let major_radius = state.major_radius;
-        let minor_radius = state.minor_radius;
-        let quaternion = state.q;
+        let major_radius = cs_state.major_radius;
+        let minor_radius = cs_state.minor_radius;
+        let quaternion = cs_state.q;
 
         let delta = Self::param_value("delta", params).unwrap();
 
@@ -203,16 +203,21 @@ where
 
     fn initialize_cs<CStride: Dim>(
         params: &VectorView<T, Const<6>, U1, CStride>,
-        state: &mut TTState<T>,
+        cs_state: &mut TTState<T>,
     ) -> Result<(), CoordsError> {
+        // Extract parameters using their identifiers.
+        let distance_0 = Self::param_value("distance_0", params).unwrap() * T!(695510.0);
+        let diameter_1au = Self::param_value("diameter_1au", params).unwrap();
         let longitude = Self::param_value("longitude", params).unwrap();
         let latitude = Self::param_value("latitude", params).unwrap();
         let inclination = Self::param_value("inclination", params).unwrap();
 
-        state.major_radius = Self::param_value("major_radius_0", params).unwrap();
-        state.minor_radius = Self::param_value("minor_radius_0", params).unwrap();
+        let rt = distance_0 / T!(1.496e8);
 
-        state.q = quaternion_rot(longitude, latitude, inclination);
+        cs_state.minor_radius = diameter_1au * powf!(rt, T!(1.14)) / T!(2.0);
+        cs_state.major_radius = (rt - cs_state.minor_radius) / T!(2.0);
+
+        cs_state.q = quaternion_rot(longitude, latitude, inclination);
 
         Ok(())
     }
@@ -234,21 +239,21 @@ mod tests {
             0.9,
         ]);
 
-        let mut state = TTState::default();
+        let mut cs_state = TTState::default();
 
-        TTGeometry::initialize_cs(&params.fixed_rows::<6>(0), &mut state).unwrap();
+        TTGeometry::initialize_cs(&params.fixed_rows::<6>(0), &mut cs_state).unwrap();
 
         let ics_ref = Vector3::new(0.56, 0.17, 0.45);
 
         let ecs = TTGeometry::transform_ics_to_ecs(
             &ics_ref.as_view(),
             &params.fixed_rows::<6>(0),
-            &state,
+            &cs_state,
         )
         .unwrap();
 
         let ics_rec =
-            TTGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<6>(0), &state)
+            TTGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<6>(0), &cs_state)
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);
