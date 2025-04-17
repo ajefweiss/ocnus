@@ -37,38 +37,6 @@ where
     }
 }
 
-impl<T> TTGeometry<T>
-where
-    T: fXX,
-{
-    /// Computes the local contravariant basis vectors and returns the normalized vectors.
-    pub fn contravariant_basis_normalized<CStride: Dim>(
-        ics: &VectorView3<T>,
-        params: &VectorView<T, Const<6>, U1, CStride>,
-        cs_state: &TTState<T>,
-    ) -> Result<[Vector3<T>; 3], CoordsError> {
-        let [dmu, dnu, ds] = Self::contravariant_basis(ics, params, cs_state)?;
-
-        Ok([dmu / dmu.norm(), dnu / dnu.norm(), ds / ds.norm()])
-    }
-
-    /// Create a vector from contravariant components, using the normalized basis vectors.
-    pub fn contravariant_vector_normalized<CStride: Dim>(
-        ics: &VectorView3<T>,
-        components: &VectorView3<T>,
-        params: &VectorView<T, Const<6>, U1, CStride>,
-        cs_state: &TTState<T>,
-    ) -> Result<Vector3<T>, CoordsError> {
-        let basis = Self::contravariant_basis_normalized(ics, params, cs_state)?;
-
-        Ok(basis
-            .iter()
-            .zip(components.iter())
-            .map(|(b, c)| b.clone() * *c)
-            .sum())
-    }
-}
-
 impl<T> OcnusCoords<T, 6, TTState<T>> for TTGeometry<T>
 where
     T: fXX,
@@ -148,6 +116,36 @@ where
             quaternion.transform_vector(&dnu),
             quaternion.transform_vector(&ds),
         ])
+    }
+
+    /// Compute the determinant of the metric tensor.
+    fn detg<CStride: Dim>(
+        ics: &VectorView3<T>,
+        params: &VectorView<T, Const<6>, U1, CStride>,
+        _cs_state: &TTState<T>,
+    ) -> Result<T, CoordsError> {
+        Ok(ics[0] * Self::param_value("delta", params).unwrap() * powi!(sin!(T::pi() * ics[2]), 2))
+    }
+
+    fn initialize_cs<CStride: Dim>(
+        params: &VectorView<T, Const<6>, U1, CStride>,
+        cs_state: &mut TTState<T>,
+    ) -> Result<(), CoordsError> {
+        // Extract parameters using their identifiers.
+        let distance_0 = Self::param_value("distance_0", params).unwrap() * T!(695510.0);
+        let diameter_1au = Self::param_value("diameter_1au", params).unwrap();
+        let longitude = Self::param_value("longitude", params).unwrap();
+        let latitude = Self::param_value("latitude", params).unwrap();
+        let inclination = Self::param_value("inclination", params).unwrap();
+
+        let rt = distance_0 / T!(1.496e8);
+
+        cs_state.minor_radius = diameter_1au * powf!(rt, T!(1.14)) / T!(2.0);
+        cs_state.major_radius = (rt - cs_state.minor_radius) / T!(2.0);
+
+        cs_state.q = quaternion_rot(longitude, latitude, inclination);
+
+        Ok(())
     }
 
     fn transform_ics_to_ecs<CStride: Dim>(
@@ -236,27 +234,6 @@ where
         let mu = r / delta / radius_eff * denom;
 
         Ok(Vector3::new(mu, nu, psi / T::two_pi()))
-    }
-
-    fn initialize_cs<CStride: Dim>(
-        params: &VectorView<T, Const<6>, U1, CStride>,
-        cs_state: &mut TTState<T>,
-    ) -> Result<(), CoordsError> {
-        // Extract parameters using their identifiers.
-        let distance_0 = Self::param_value("distance_0", params).unwrap() * T!(695510.0);
-        let diameter_1au = Self::param_value("diameter_1au", params).unwrap();
-        let longitude = Self::param_value("longitude", params).unwrap();
-        let latitude = Self::param_value("latitude", params).unwrap();
-        let inclination = Self::param_value("inclination", params).unwrap();
-
-        let rt = distance_0 / T!(1.496e8);
-
-        cs_state.minor_radius = diameter_1au * powf!(rt, T!(1.14)) / T!(2.0);
-        cs_state.major_radius = (rt - cs_state.minor_radius) / T!(2.0);
-
-        cs_state.q = quaternion_rot(longitude, latitude, inclination);
-
-        Ok(())
     }
 }
 

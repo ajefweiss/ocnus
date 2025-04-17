@@ -1,7 +1,7 @@
 use crate::{
     coords::OcnusCoords,
     fXX,
-    math::{acos, atan2, cos, sin},
+    math::{acos, atan2, cos, powi, sin},
 };
 use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
@@ -69,6 +69,30 @@ where
         ])
     }
 
+    /// Compute the determinant of the metric tensor.
+    fn detg<CStride: Dim>(
+        ics: &VectorView3<T>,
+        _params: &VectorView<T, Const<4>, U1, CStride>,
+        _cs_state: &SPHState<T>,
+    ) -> Result<T, CoordsError> {
+        Ok(powi!(ics[0], 2))
+    }
+
+    fn initialize_cs<CStride: Dim>(
+        params: &VectorView<T, Const<4>, U1, CStride>,
+        cs_state: &mut SPHState<T>,
+    ) -> Result<(), CoordsError> {
+        let x0 = Self::param_value("center_x0", params).unwrap();
+        let y0 = Self::param_value("center_y0", params).unwrap();
+        let z0 = Self::param_value("center_z0", params).unwrap();
+        let radius = Self::param_value("radius_0", params).unwrap();
+
+        cs_state.center = Vector3::new(x0, y0, z0);
+        cs_state.radius = radius;
+
+        Ok(())
+    }
+
     fn transform_ics_to_ecs<CStride: Dim>(
         ics: &VectorView3<T>,
         _params: &VectorView<T, Const<4>, U1, CStride>,
@@ -104,21 +128,6 @@ where
             atan2!(v[1], v[0]),
             acos!(v[2] / vn),
         ))
-    }
-
-    fn initialize_cs<CStride: Dim>(
-        params: &VectorView<T, Const<4>, U1, CStride>,
-        cs_state: &mut SPHState<T>,
-    ) -> Result<(), CoordsError> {
-        let x0 = Self::param_value("center_x0", params).unwrap();
-        let y0 = Self::param_value("center_y0", params).unwrap();
-        let z0 = Self::param_value("center_z0", params).unwrap();
-        let radius = Self::param_value("radius_0", params).unwrap();
-
-        cs_state.center = Vector3::new(x0, y0, z0);
-        cs_state.radius = radius;
-
-        Ok(())
     }
 }
 

@@ -53,7 +53,11 @@ where
                 let b_phi = b_linearized * sign * bessel_jn(alpha * r * radius_linearized, 1);
 
                 // Account for non-normal basis vectors
-                Some(Vector3::new(T::zero(), b_phi / r / radius_linearized, b_s))
+                Some(Vector3::new(
+                    T::zero(),
+                    b_phi / r / powi!(radius_linearized, 2),
+                    b_s,
+                ))
             }
         },
         None => None,
@@ -89,7 +93,11 @@ where
                 let b_phi = r * radius_linearized * b_linearized * tau
                     / (T::one() + powi!(tau, 2) * powi!(r * radius_linearized, 2));
 
-                Some(Vector3::new(T::zero(), b_phi / r / radius_linearized, b_s))
+                Some(Vector3::new(
+                    T::zero(),
+                    b_phi / r / powi!(radius_linearized, 2),
+                    b_s,
+                ))
             }
         },
         None => None,
@@ -241,6 +249,38 @@ macro_rules! impl_cylm_forward_model {
                 )
             }
 
+            fn detg<CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                cs_state: &XCState<T>,
+            ) -> Result<T, CoordsError> {
+                $coords::detg(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
+                    cs_state,
+                )
+            }
+
+            fn initialize_cs<CStride: Dim>(
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                cs_state: &mut XCState<T>,
+            ) -> Result<(), CoordsError> {
+                $coords::initialize_cs(
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
+                    cs_state,
+                )
+            }
+
             fn transform_ics_to_ecs<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
@@ -270,21 +310,6 @@ macro_rules! impl_cylm_forward_model {
             ) -> Result<Vector3<T>, CoordsError> {
                 $coords::transform_ecs_to_ics(
                     ecs,
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-
-            fn initialize_cs<CStride: Dim>(
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &mut XCState<T>,
-            ) -> Result<(), CoordsError> {
-                $coords::initialize_cs(
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                     cs_state,
                 )
@@ -594,9 +619,13 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
+        dbg!(output[(0, 0)][1]);
+        dbg!(output[(2, 0)][1]);
+        dbg!(output[(4, 0)][2]);
+
+        assert!((output[(0, 0)][1] - 20.443700542024832).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 20.613568831029653).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 3.710237528435872).abs() < 1e-4);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
     }
 
@@ -659,9 +688,9 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 19.2867548508778).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 20.736719674193566).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 6.290175215512368).abs() < 1e-4);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
     }
 
@@ -731,10 +760,6 @@ mod tests {
                 None::<&mut NoNoise<f64>>,
             )
             .expect("simulation failed");
-
-        println!("oo: {}", &output[(0, 0)]);
-        println!("oo: {}", &output[(2, 0)]);
-        println!("oo: {}", &output[(4, 0)]);
 
         assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);

@@ -68,6 +68,17 @@ where
         cs_state: &CSST,
     ) -> Result<[Vector3<T>; 3], CoordsError>;
 
+    /// Computes the local contravariant basis vectors and returns the normalized vectors.
+    fn contravariant_basis_normalized<CStride: Dim>(
+        ics: &VectorView3<T>,
+        params: &VectorView<T, Const<P>, U1, CStride>,
+        cs_state: &CSST,
+    ) -> Result<[Vector3<T>; 3], CoordsError> {
+        let [dmu, dnu, ds] = Self::contravariant_basis(ics, params, cs_state)?;
+
+        Ok([dmu / dmu.norm(), dnu / dnu.norm(), ds / ds.norm()])
+    }
+
     /// Computes the local covariant basis vectors.
     fn covariant_basis<CStride: Dim>(
         _ics: &VectorView3<T>,
@@ -93,19 +104,28 @@ where
             .sum())
     }
 
-    /// Transform external coordinates `ecs` into the internal coordinates `ics`.
-    fn transform_ics_to_ecs<CStride: Dim>(
+    /// Create a vector from contravariant components, using the normalized basis vectors.
+    fn contravariant_vector_normalized<CStride: Dim>(
+        ics: &VectorView3<T>,
+        components: &VectorView3<T>,
+        params: &VectorView<T, Const<P>, U1, CStride>,
+        cs_state: &CSST,
+    ) -> Result<Vector3<T>, CoordsError> {
+        let basis = Self::contravariant_basis_normalized(ics, params, cs_state)?;
+
+        Ok(basis
+            .iter()
+            .zip(components.iter())
+            .map(|(b, c)| b.clone() * *c)
+            .sum())
+    }
+
+    /// Compute the determinant of the metric tensor.
+    fn detg<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
         cs_state: &CSST,
-    ) -> Result<Vector3<T>, CoordsError>;
-
-    /// Transform internal coordinates `ics` into cartesian coordinates `ecs`.
-    fn transform_ecs_to_ics<CStride: Dim>(
-        ecs: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
-        cs_state: &CSST,
-    ) -> Result<Vector3<T>, CoordsError>;
+    ) -> Result<T, CoordsError>;
 
     /// Initialize the coordinate cs_state.
     fn initialize_cs<CStride: Dim>(
@@ -134,6 +154,20 @@ where
         }
     }
 
+    /// Transform external coordinates `ecs` into the internal coordinates `ics`.
+    fn transform_ics_to_ecs<CStride: Dim>(
+        ics: &VectorView3<T>,
+        params: &VectorView<T, Const<P>, U1, CStride>,
+        cs_state: &CSST,
+    ) -> Result<Vector3<T>, CoordsError>;
+
+    /// Transform internal coordinates `ics` into cartesian coordinates `ecs`.
+    fn transform_ecs_to_ics<CStride: Dim>(
+        ecs: &VectorView3<T>,
+        params: &VectorView<T, Const<P>, U1, CStride>,
+        cs_state: &CSST,
+    ) -> Result<Vector3<T>, CoordsError>;
+
     /// Test the implementation of the contravariant basis vectors.
     #[cfg(test)]
     fn test_contravariant_basis<CStride: Dim>(
@@ -144,7 +178,7 @@ where
     ) where
         CSST: Default,
     {
-        use crate::math::T;
+        use crate::math::{T, abs};
 
         let mut cs_state = CSST::default();
 
@@ -187,12 +221,13 @@ where
             Self::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
-        // dbg!(&(basis[0], (ecs_1p - ecs_1m) / delta_h));
-        // dbg!(&(basis[1], (ecs_2p - ecs_2m) / delta_h));
-        // dbg!(&(basis[2], (ecs_3p - ecs_3m) / delta_h));
-
         assert!((basis[0] - (ecs_1p - ecs_1m) / delta_h).norm() < T!(10.0) * delta_h);
         assert!((basis[1] - (ecs_2p - ecs_2m) / delta_h).norm() < T!(10.0) * delta_h);
         assert!((basis[2] - (ecs_3p - ecs_3m) / delta_h).norm() < T!(10.0) * delta_h);
+
+        let detg_basis = abs!(basis[0].cross(&basis[1]).dot(&basis[2]));
+        let detg_analy = Self::detg(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state).unwrap();
+
+        dbg!(detg_basis, detg_analy);
     }
 }

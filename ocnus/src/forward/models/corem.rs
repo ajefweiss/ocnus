@@ -136,6 +136,38 @@ macro_rules! impl_core_forward_model {
                 )
             }
 
+            fn detg<CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                cs_state: &TTState<T>,
+            ) -> Result<T, CoordsError> {
+                $coords::detg(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
+                    cs_state,
+                )
+            }
+
+            fn initialize_cs<CStride: Dim>(
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                    U1,
+                    CStride,
+                >,
+                cs_state: &mut TTState<T>,
+            ) -> Result<(), CoordsError> {
+                $coords::initialize_cs(
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
+                    cs_state,
+                )
+            }
+
             fn transform_ics_to_ecs<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
@@ -165,21 +197,6 @@ macro_rules! impl_core_forward_model {
             ) -> Result<Vector3<T>, CoordsError> {
                 $coords::transform_ecs_to_ics(
                     ecs,
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-
-            fn initialize_cs<CStride: Dim>(
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &mut TTState<T>,
-            ) -> Result<(), CoordsError> {
-                $coords::initialize_cs(
                     &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
                     cs_state,
                 )

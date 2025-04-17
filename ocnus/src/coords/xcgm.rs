@@ -25,13 +25,13 @@ where
 
 /// The circular-cylindric contravariant basis vectors.
 #[allow(clippy::extra_unused_type_parameters)]
-pub fn cc_basis<T, const P: usize, M, GS, CStride: Dim>(
+pub fn cc_basis<T, const P: usize, M, CSST, CStride: Dim>(
     (r, phi, _z): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
-    M: OcnusCoords<T, P, GS>,
+    M: OcnusCoords<T, P, CSST>,
     T: fXX,
 {
     let y_offset = M::param_value("y", params).unwrap();
@@ -48,13 +48,13 @@ where
 
 /// The elliptic-cylindric contravariant basis vectors.
 #[allow(clippy::extra_unused_type_parameters)]
-pub fn ec_basis<T, const P: usize, M, GS, CStride: Dim>(
+pub fn ec_basis<T, const P: usize, M, CSST, CStride: Dim>(
     (mu, nu, _s): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
-    M: OcnusCoords<T, P, GS>,
+    M: OcnusCoords<T, P, CSST>,
     T: fXX,
 {
     let y_offset = M::param_value("y", params).unwrap();
@@ -69,7 +69,7 @@ where
 
     let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
 
-    let phi_nom = T::from_usize(2).unwrap() * T::pi() * delta * mu * radius_linearized;
+    let phi_nom = T::two_pi() * delta * mu * radius_linearized;
 
     let dmu = Vector3::from([
         delta * radius_linearized * com / denom,
@@ -88,14 +88,53 @@ where
     [dmu, dnu, ds]
 }
 
+/// The circular-cylindric metric determinant.
+#[allow(clippy::extra_unused_type_parameters)]
+pub fn cc_detg<T, const P: usize, M, CSST, CStride: Dim>(
+    (r, _phi, _z): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> T
+where
+    M: OcnusCoords<T, P, CSST>,
+    T: fXX,
+{
+    let y_offset = M::param_value("y", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    r * powi!(radius_linearized, 2)
+}
+
+/// The elliptic-cylindric metric determinant
+#[allow(clippy::extra_unused_type_parameters)]
+pub fn ec_detg<T, const P: usize, M, CSST, CStride: Dim>(
+    (mu, _nu, _s): (T, T, T),
+    params: &VectorView<T, Const<P>, U1, CStride>,
+    _state: &XCState<T>,
+) -> T
+where
+    M: OcnusCoords<T, P, CSST>,
+    T: fXX,
+{
+    let y_offset = M::param_value("y", params).unwrap();
+    let delta = M::param_value("delta", params).unwrap();
+    let radius = M::param_value("radius", params).unwrap();
+
+    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+
+    T::two_pi() * mu * powi!(delta, 2) * powi!(radius_linearized, 2)
+}
+
 /// The circular-cylindric coordinate transformation (ecs -> ics).
-pub fn cc_ecs_to_ics<T, const P: usize, M, GS, CStride: Dim>(
+pub fn cc_ecs_to_ics<T, const P: usize, M, CSST, CStride: Dim>(
     (x, y, z): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    M: OcnusCoords<T, P, GS>,
+    M: OcnusCoords<T, P, CSST>,
     T: fXX,
 {
     let radius = M::param_value("radius", params).unwrap();
@@ -111,13 +150,13 @@ where
 }
 
 /// The elliptic-cylindric coordinate transformation (ecs -> ics).
-pub fn ec_ecs_to_ics<T, const P: usize, M, GS, CStride: Dim>(
+pub fn ec_ecs_to_ics<T, const P: usize, M, CSST, CStride: Dim>(
     (x, y, z): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    M: OcnusCoords<T, P, GS>,
+    M: OcnusCoords<T, P, CSST>,
     T: fXX,
 {
     let y_offset = M::param_value("y", params).unwrap();
@@ -135,13 +174,13 @@ where
 }
 
 /// The circular-cylindric coordinate transformation (ics -> ecs).
-pub fn cc_ics_to_ecs<T, const P: usize, M, GS, CStride: Dim>(
+pub fn cc_ics_to_ecs<T, const P: usize, M, CSST, CStride: Dim>(
     (r, phi, y): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    M: OcnusCoords<T, P, GS>,
+    M: OcnusCoords<T, P, CSST>,
     T: fXX,
 {
     let radius = M::param_value("radius", params).unwrap();
@@ -157,13 +196,13 @@ where
 }
 
 /// The elliptic-cylindric coordinate transformation (ics -> ecs).
-pub fn ec_ics_to_ecs<T, const P: usize, M, GS, CStride: Dim>(
+pub fn ec_ics_to_ecs<T, const P: usize, M, CSST, CStride: Dim>(
     (mu, nu, s): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    M: OcnusCoords<T, P, GS>,
+    M: OcnusCoords<T, P, CSST>,
     T: fXX,
 {
     let y_offset = M::param_value("y", params).unwrap();
@@ -172,7 +211,7 @@ where
 
     let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
 
-    let omega = T::from_usize(2).unwrap() * T::pi() * nu;
+    let omega = T::two_pi() * nu;
 
     let df = mu * delta * radius_linearized
         / sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
@@ -185,7 +224,7 @@ where
 }
 
 macro_rules! impl_xcgm_geom {
-    ($model: ident, $params: expr, $fn_basis: tt, $fn_ics: tt, $fn_ecs: tt, $docs: literal) => {
+    ($model: ident, $params: expr, $fn_basis: tt, $fn_detg:tt, $fn_ics: tt, $fn_ecs: tt, $docs: literal) => {
         #[doc=$docs]
         #[allow(non_camel_case_types)]
         #[derive(Debug)]
@@ -228,6 +267,40 @@ macro_rules! impl_xcgm_geom {
                 ])
             }
 
+            /// Compute the determinant of the metric tensor.
+            fn detg<CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
+                cs_state: &XCState<T>,
+            ) -> Result<T, CoordsError> {
+                Ok($fn_detg::<T, { $params.len() }, Self, XCState<T>, CStride>(
+                    (ics[0], ics[1], ics[2]),
+                    params,
+                    cs_state,
+                ))
+            }
+
+            fn initialize_cs<CStride: Dim>(
+                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
+                cs_state: &mut XCState<T>,
+            ) -> Result<(), CoordsError> {
+                let phi = Self::param_value("phi", params).unwrap();
+                let theta = Self::param_value("theta", params).unwrap();
+                let psi = Self::param_value("psi", params).unwrap_or(T::zero());
+                let radius = Self::param_value("radius", params).unwrap();
+                let x_init = Self::param_value("x_0", params).unwrap();
+                let y = Self::param_value("y", params).unwrap();
+
+                cs_state.x = x_init;
+                cs_state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
+                    / cos!(phi)
+                    / cos!(theta);
+
+                cs_state.q = quaternion_rot(phi, psi, theta);
+
+                Ok(())
+            }
+
             fn transform_ics_to_ecs<CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
@@ -262,27 +335,6 @@ macro_rules! impl_xcgm_geom {
                     cs_state,
                 ))
             }
-
-            fn initialize_cs<CStride: Dim>(
-                params: &VectorView<T, Const<{ $params.len() }>, U1, CStride>,
-                cs_state: &mut XCState<T>,
-            ) -> Result<(), CoordsError> {
-                let phi = Self::param_value("phi", params).unwrap();
-                let theta = Self::param_value("theta", params).unwrap();
-                let psi = Self::param_value("psi", params).unwrap_or(T::zero());
-                let radius = Self::param_value("radius", params).unwrap();
-                let x_init = Self::param_value("x_0", params).unwrap();
-                let y = Self::param_value("y", params).unwrap();
-
-                cs_state.x = x_init;
-                cs_state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
-                    / cos!(phi)
-                    / cos!(theta);
-
-                cs_state.q = quaternion_rot(phi, psi, theta);
-
-                Ok(())
-            }
         }
     };
 }
@@ -292,6 +344,7 @@ impl_xcgm_geom!(
     CCGeometry,
     ["phi", "theta", "y", "radius", "x_0"],
     cc_basis,
+    cc_detg,
     cc_ecs_to_ics,
     cc_ics_to_ecs,
     "Circular-cylindric flux rope geometry."
@@ -302,6 +355,7 @@ impl_xcgm_geom!(
     ECGeometry,
     ["phi", "theta", "psi", "y", "delta", "radius", "x_0"],
     ec_basis,
+    ec_detg,
     ec_ecs_to_ics,
     ec_ics_to_ecs,
     "Elliptic-cylindric flux rope geometry."

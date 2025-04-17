@@ -10,12 +10,12 @@ use rayon::prelude::*;
 
 /// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`OcnusFSM`]
 /// with a [`ObserVec`] as observable type.
-pub trait FisherInformation<T, const P: usize, const N: usize, FS, GS>:
-    OcnusFSM<T, ObserVec<T, N>, P, FS, GS>
+pub trait FisherInformation<T, const P: usize, const N: usize, FS, CSST>:
+    OcnusFSM<T, ObserVec<T, N>, P, FS, CSST>
 where
     T: fXX,
     FS: Clone + Default + Send,
-    GS: Clone + Default + Send,
+    CSST: Clone + Default + Send,
     Self: Sync,
     StandardNormal: Distribution<T>,
 {
@@ -24,7 +24,7 @@ where
     fn fischer_information_matrix<C>(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        ensbl: &FSMEnsbl<T, P, FS, GS>,
+        ensbl: &FSMEnsbl<T, P, FS, CSST>,
         acfunc: &C,
     ) -> Result<Vec<SMatrix<T, P, P>>, OcnusError<T>>
     where
@@ -47,7 +47,7 @@ where
                                 &[*params_ref; P],
                             ),
                         fm_states: vec![FS::default(); P],
-                        cs_states: vec![GS::default(); P],
+                        cs_states: vec![CSST::default(); P],
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
@@ -57,7 +57,7 @@ where
                                 &[*params_ref; P],
                             ),
                         fm_states: vec![FS::default(); P],
-                        cs_states: vec![GS::default(); P],
+                        cs_states: vec![CSST::default(); P],
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
