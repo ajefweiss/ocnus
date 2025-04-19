@@ -78,21 +78,12 @@ where
         let dmu =
             Vector3::from([-cos!(psi) * com, sin!(psi) * com, som]) * radius_eff * delta / denom;
 
-        let cos_factor = (-T!(sqrt!(8.0)) * powi!(delta, 2) * T::two_pi() * sin!(T::two_pi() * nu))
-            / powf!(
-                T::one() + powi!(delta, 2) + cos!(T::four_pi() * nu)
-                    - powi!(delta, 2) * cos!(T::four_pi() * nu),
-                T!(1.5)
-            );
-
-        let sin_factor = (T!(sqrt!(8.0)) * T::two_pi() * cos!(T::two_pi() * nu))
-            / powf!(
-                T::one() + powi!(delta, 2) + cos!(T::four_pi() * nu)
-                    - powi!(delta, 2) * cos!(T::four_pi() * nu),
-                T!(1.5)
-            );
-
-        let dnu = Vector3::from([-cos!(psi) * cos_factor, sin!(psi) * cos_factor, sin_factor])
+        let dnu = Vector3::from([
+            cos!(psi) * powi!(delta, 2) * som,
+            -sin!(psi) * powi!(delta, 2) * som,
+            com,
+        ]) * T::two_pi()
+            / powf!(denom, T!(3.0))
             * mu
             * radius_eff
             * delta;
@@ -122,9 +113,35 @@ where
     fn detg<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<6>, U1, CStride>,
-        _cs_state: &TTState<T>,
+        cs_state: &TTState<T>,
     ) -> Result<T, CoordsError> {
-        Ok(ics[0] * Self::param_value("delta", params).unwrap() * powi!(sin!(T::pi() * ics[2]), 2))
+        let major_radius = cs_state.major_radius;
+        let minor_radius = cs_state.minor_radius;
+        let delta = Self::param_value("delta", params).unwrap();
+
+        let mu = ics[0];
+        let nu = ics[1];
+
+        // Axial coordinate s, but its an angle between [0, 2π].
+        let psi = T::two_pi() * ics[2];
+        let psi_half = T::pi() * ics[2];
+
+        let omega = T::two_pi() * nu;
+
+        let radius_eff = minor_radius * powi!(sin!(psi_half), 2);
+        let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+
+        let detg = mu * minor_radius * delta * (cos!(T!(2.0) * psi) - cos!(T!(3.0) * psi))
+            / T!(2.0)
+            * cos!(omega)
+            + major_radius * denom;
+
+        Ok(
+            T::two_pi() * detg * radius_eff * delta * T::two_pi() / powf!(denom, T!(3.0))
+                * mu
+                * radius_eff
+                * delta,
+        )
     }
 
     fn initialize_cs<CStride: Dim>(
@@ -250,14 +267,14 @@ mod tests {
             7.0_f64.to_radians(),
             0.5,
             0.1,
-            0.9,
+            0.8,
         ]);
 
         let mut cs_state = TTState::default();
 
         TTGeometry::initialize_cs(&params.fixed_rows::<6>(0), &mut cs_state).unwrap();
 
-        let ics_ref = Vector3::new(0.56, 0.17, 0.45);
+        let ics_ref = Vector3::new(0.56, 0.17, 0.5);
 
         let ecs = TTGeometry::transform_ics_to_ecs(
             &ics_ref.as_view(),

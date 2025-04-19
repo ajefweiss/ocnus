@@ -55,8 +55,8 @@ where
 
         Ok([
             Vector3::new(
-                sin!(theta) * cos!(phi),
-                sin!(theta) * sin!(phi),
+                cos!(phi) * sin!(theta),
+                sin!(phi) * sin!(theta),
                 cos!(theta),
             ) * radius,
             Vector3::new(-sin!(phi) * sin!(theta), cos!(phi) * sin!(theta), T::zero()) * radius * r,
@@ -73,9 +73,14 @@ where
     fn detg<CStride: Dim>(
         ics: &VectorView3<T>,
         _params: &VectorView<T, Const<4>, U1, CStride>,
-        _cs_state: &SPHState<T>,
+        cs_state: &SPHState<T>,
     ) -> Result<T, CoordsError> {
-        Ok(powi!(ics[0], 2))
+        let radius = cs_state.radius;
+
+        let r = ics[0];
+        let theta = ics[2];
+
+        Ok(powi!(r, 2) * powi!(radius, 3) * sin!(theta))
     }
 
     fn initialize_cs<CStride: Dim>(
@@ -138,14 +143,7 @@ mod tests {
 
     #[test]
     fn test_sph_coords() {
-        let params = SVector::<f64, 6>::from([
-            5.0_f64.to_radians(),
-            -3.0_f64.to_radians(),
-            7.0_f64.to_radians(),
-            0.5,
-            0.1,
-            0.9,
-        ]);
+        let params = SVector::<f64, 4>::from([0.0, 0.0, 0.0, 0.75]);
 
         let mut cs_state = SPHState::default();
 

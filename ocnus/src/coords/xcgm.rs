@@ -26,7 +26,7 @@ where
 /// The circular-cylindric contravariant basis vectors.
 #[allow(clippy::extra_unused_type_parameters)]
 pub fn cc_basis<T, const P: usize, M, CSST, CStride: Dim>(
-    (r, phi, _z): (T, T, T),
+    (r, nu, _z): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
@@ -37,13 +37,15 @@ where
     let y_offset = M::param_value("y", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
+    let omega = T::two_pi() * nu;
     let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
 
-    let dr = Vector3::from([cos!(phi), T::zero(), sin!(phi)]) * radius_linearized;
-    let dphi = Vector3::from([-sin!(phi), T::zero(), cos!(phi)]) * r * radius_linearized;
+    let dr = Vector3::from([cos!(omega), T::zero(), sin!(omega)]) * radius_linearized;
+    let dnu =
+        Vector3::from([-sin!(omega), T::zero(), cos!(omega)]) * T::two_pi() * r * radius_linearized;
     let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
 
-    [dr, dphi, dz]
+    [dr, dnu, dz]
 }
 
 /// The elliptic-cylindric contravariant basis vectors.
@@ -69,7 +71,7 @@ where
 
     let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
 
-    let phi_nom = T::two_pi() * delta * mu * radius_linearized;
+    let nu_nom = T::two_pi() * delta * mu * radius_linearized;
 
     let dmu = Vector3::from([
         delta * radius_linearized * com / denom,
@@ -78,9 +80,9 @@ where
     ]);
 
     let dnu = Vector3::from([
-        -phi_nom * powi!(delta, 2) * som / powi!(denom, 3),
+        -nu_nom * powi!(delta, 2) * som / powi!(denom, 3),
         T::zero(),
-        phi_nom * com / powi!(denom, 3),
+        nu_nom * com / powi!(denom, 3),
     ]);
 
     let ds = Vector3::from([T::zero(), T::one(), T::zero()]);
@@ -91,7 +93,7 @@ where
 /// The circular-cylindric metric determinant.
 #[allow(clippy::extra_unused_type_parameters)]
 pub fn cc_detg<T, const P: usize, M, CSST, CStride: Dim>(
-    (r, _phi, _z): (T, T, T),
+    (r, _nu, _z): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> T
@@ -104,7 +106,7 @@ where
 
     let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
 
-    r * powi!(radius_linearized, 2)
+    T::two_pi() * r * powi!(radius_linearized, 2)
 }
 
 /// The elliptic-cylindric metric determinant
@@ -142,11 +144,16 @@ where
 
     let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
 
-    // Compute polar coordinates (r, phi).
+    // Compute polar coordinates (r, omega).
     let r = sqrt!(powi!(x, 2) + powi!(z, 2)) / radius_linearized;
-    let phi = atan2!(z, x);
 
-    Vector3::new(r, phi, y)
+    let omega = if r == T::zero() {
+        T::zero()
+    } else {
+        atan2!(z, x) / T::two_pi()
+    };
+
+    Vector3::new(r, omega, y)
 }
 
 /// The elliptic-cylindric coordinate transformation (ecs -> ics).
@@ -167,15 +174,22 @@ where
 
     // Compute internal coordinates (mu, nu).
     let r = sqrt!(powi!(x, 2) + powi!(z, 2));
-    let mu = r * sqrt!(powi!(x, 2) + powi!(z, 2) * powi!(delta, 2)) / r / delta / radius_linearized;
-    let nu = atan2!(z, x) / T!(2.0) / T::pi();
+
+    let (mu, nu) = if r == T::zero() {
+        (T::zero(), T::zero())
+    } else {
+        (
+            r * sqrt!(powi!(x, 2) + powi!(z, 2) * powi!(delta, 2)) / r / delta / radius_linearized,
+            atan2!(z, x) / T!(2.0) / T::pi(),
+        )
+    };
 
     Vector3::new(mu, nu, y)
 }
 
 /// The circular-cylindric coordinate transformation (ics -> ecs).
 pub fn cc_ics_to_ecs<T, const P: usize, M, CSST, CStride: Dim>(
-    (r, phi, y): (T, T, T),
+    (r, nu, y): (T, T, T),
     params: &VectorView<T, Const<P>, U1, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
@@ -186,11 +200,12 @@ where
     let radius = M::param_value("radius", params).unwrap();
     let y_offset = M::param_value("y", params).unwrap();
 
+    let omega = T::two_pi() * nu;
     let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
 
     // Compute cartesian coordinates (x, y, z).
-    let x = cos!(phi) * r * radius_linearized;
-    let z = sin!(phi) * r * radius_linearized;
+    let x = cos!(omega) * r * radius_linearized;
+    let z = sin!(omega) * r * radius_linearized;
 
     Vector3::new(x, y, z)
 }

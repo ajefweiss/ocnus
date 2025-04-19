@@ -6,7 +6,7 @@ use crate::{
         FSMError, FisherInformation, OcnusFSM,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
     },
-    math::{T, bessel_jn, cos, powi, sin, sqrt},
+    math::{T, bessel_jn, powi, sqrt},
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
     prodef::OcnusProDeF,
 };
@@ -14,15 +14,15 @@ use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use std::{cmp::Ordering, marker::PhantomData};
 
-/// Linear force-free magnetic field observable.
-pub fn cc_lff_obs<T, const P: usize, M, CSST>(
-    (r, _phi, _z): (T, T, T),
+/// Linear force-free magnetic field Chi (nu) and Xi (s) functions.
+pub fn cc_lff_chi_xi<T, const P: usize, M>(
+    (r, nu, z): (T, T, T),
     params: &SVectorView<T, P>,
-    _state: &XCState<T>,
-) -> Option<Vector3<T>>
+    cs_state: &XCState<T>,
+) -> Option<(T, T)>
 where
     T: fXX,
-    M: OcnusCoords<T, P, CSST>,
+    M: OcnusCoords<T, P, XCState<T>>,
 {
     // Extract parameters using their identifiers.
     let b = M::param_value("b_scale", params).unwrap();
@@ -48,16 +48,24 @@ where
             _ => {
                 let b_linearized = b / (T::one() - powi!(y_offset, 2));
 
-                // Bessel function evaluation uses 11 terms.
-                let b_s = b_linearized * bessel_jn(alpha * r * radius_linearized, 0);
-                let b_phi = b_linearized * sign * bessel_jn(alpha * r * radius_linearized, 1);
+                if r == T::zero() {
+                    Some((T::zero(), b_linearized))
+                } else {
+                    // Bessel function evaluation uses 11 terms.
+                    let chi = b_linearized
+                        * radius_linearized
+                        * sign
+                        * bessel_jn(alpha * r * radius_linearized, 1)
+                        / M::detg(&Vector3::new(r, nu, z).as_view(), params, cs_state).unwrap();
+                    let xi: T = T::two_pi()
+                        * r
+                        * powi!(radius_linearized, 2)
+                        * b_linearized
+                        * bessel_jn(alpha * r * radius_linearized, 0)
+                        / M::detg(&Vector3::new(r, nu, z).as_view(), params, cs_state).unwrap();
 
-                // Account for non-normal basis vectors
-                Some(Vector3::new(
-                    T::zero(),
-                    b_phi / r / powi!(radius_linearized, 2),
-                    b_s,
-                ))
+                    Some((chi, xi))
+                }
             }
         },
         None => None,
@@ -65,14 +73,14 @@ where
 }
 
 /// Uniform twist magnetic field observable.
-pub fn cc_ut_obs<T, const P: usize, M, CSST>(
-    (r, _phi, _z): (T, T, T),
+pub fn cc_ut_chi_xi<T, const P: usize, M>(
+    (r, nu, z): (T, T, T),
     params: &SVectorView<T, P>,
-    _state: &XCState<T>,
-) -> Option<Vector3<T>>
+    cs_state: &XCState<T>,
+) -> Option<(T, T)>
 where
     T: fXX,
-    M: OcnusCoords<T, P, CSST>,
+    M: OcnusCoords<T, P, XCState<T>>,
 {
     // Extract parameters using their identifiers.
     let b = M::param_value("b_scale", params).unwrap();
@@ -88,16 +96,18 @@ where
             _ => {
                 let b_linearized = b / (T::one() - powi!(y_offset, 2));
 
-                let b_s =
-                    b_linearized / (T::one() + powi!(tau, 2) * powi!(r * radius_linearized, 2));
-                let b_phi = r * radius_linearized * b_linearized * tau
-                    / (T::one() + powi!(tau, 2) * powi!(r * radius_linearized, 2));
+                if r == T::zero() {
+                    Some((T::zero(), b_linearized))
+                } else {
+                    let chi = r * powi!(radius_linearized, 2) * b_linearized * tau
+                        / (T::one() + powi!(tau, 2) * powi!(r * radius_linearized, 2))
+                        / M::detg(&Vector3::new(r, nu, z).as_view(), params, cs_state).unwrap();
+                    let xi = T::two_pi() * r * powi!(radius_linearized, 2) * b_linearized
+                        / (T::one() + powi!(tau, 2) * powi!(r * radius_linearized, 2))
+                        / M::detg(&Vector3::new(r, nu, z).as_view(), params, cs_state).unwrap();
 
-                Some(Vector3::new(
-                    T::zero(),
-                    b_phi / r / powi!(radius_linearized, 2),
-                    b_s,
-                ))
+                    Some((chi, xi))
+                }
             }
         },
         None => None,
@@ -105,19 +115,17 @@ where
 }
 
 /// Magnetic field configuration as is used in Nieves-Chinchilla et al. (2018).
-pub fn ec_hybrid_obs<T, const P: usize, M, CSST>(
-    (mu, nu, _s): (T, T, T),
+pub fn ec_hybrid_obs<T, const P: usize, M>(
+    (mu, nu, z): (T, T, T),
     params: &SVectorView<T, P>,
-    _state: &XCState<T>,
-) -> Option<Vector3<T>>
+    cs_state: &XCState<T>,
+) -> Option<(T, T)>
 where
     T: fXX,
-    M: OcnusCoords<T, P, CSST>,
+    M: OcnusCoords<T, P, XCState<T>>,
 {
     // Extract parameters using their identifiers.
     let y_offset = M::param_value("y", params).unwrap();
-    let psi = M::param_value("psi", params).unwrap();
-    let delta = M::param_value("delta", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
     let b = M::param_value("b_scale", params).unwrap();
     let lambda = M::param_value("lambda", params).unwrap();
@@ -140,37 +148,36 @@ where
             _ => {
                 let b_linearized = b / (T::one() - powi!(y_offset, 2));
                 let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
-                let omega = T::two_pi() * (nu - psi);
 
-                // We remove one radius_linearized everywhere as it cancels out.
-                // See Eqs. 7-9 in Weiss 2024 et al.
-                let sqrtg = T::two_pi() * powi!(delta, 2) * mu * radius_linearized
-                    / (powi!(cos!(omega), 2) + powi!(delta, 2) * powi!(sin!(omega), 2));
+                if mu == T::zero() {
+                    Some((T::zero(), b_linearized))
+                } else {
+                    // Bessel function evaluation uses 11 terms.
+                    let chi_lff = b_linearized
+                        * radius_linearized
+                        * sign
+                        * bessel_jn(alpha * mu * radius_linearized, 1)
+                        / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
+                    let xi_lff: T = T::two_pi()
+                        * mu
+                        * powi!(radius_linearized, 2)
+                        * b_linearized
+                        * bessel_jn(alpha * mu * radius_linearized, 0)
+                        / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
 
-                // LFF terms.
-                let b_s_lff = T!(2.0)
-                    * T::pi()
-                    * mu
-                    * radius_linearized
-                    * b_linearized
-                    * bessel_jn(alpha * mu * radius_linearized, 0)
-                    / sqrtg;
-                let b_nu_lff =
-                    b_linearized * sign * bessel_jn(alpha * mu * radius_linearized, 1) / sqrtg;
+                    // UT terms.
+                    let chi_ut = mu * powi!(radius_linearized, 2) * b_linearized * tau
+                        / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
+                        / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
+                    let xi_ut = T::two_pi() * mu * powi!(radius_linearized, 2) * b_linearized
+                        / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
+                        / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
 
-                // UT terms.
-                let b_s_ut = T::two_pi() * mu * radius_linearized * b_linearized
-                    / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
-                    / sqrtg;
-                let b_nu_ut = mu * radius_linearized * b_linearized * tau
-                    / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
-                    / sqrtg;
-
-                Some(Vector3::new(
-                    T::zero(),
-                    lambda * b_nu_lff + (T::one() - lambda) * b_nu_ut,
-                    lambda * b_s_lff + (T::one() - lambda) * b_s_ut,
-                ))
+                    Some((
+                        chi_lff * lambda + (T::one() - lambda) * chi_ut,
+                        xi_lff * lambda + (T::one() - lambda) * xi_ut,
+                    ))
+                }
             }
         },
         None => None,
@@ -390,15 +397,15 @@ macro_rules! impl_cylm_forward_model {
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
-                let obs = $fn_obs::<
+                let opt_chi_xi = $fn_obs::<
                     T,
                     { $coords::<f64>::PARAMS.len() + $params.len() },
-                    Self,
-                    XCState<T>,
+                    Self
                 >((mu, nu, s), params, cs_state);
 
-                match obs {
-                    Some(b_q) => {
+                match opt_chi_xi {
+                    Some((chi, xi)) => {
+                        let b_q = Vector3::new(T::zero(), chi, xi);
                         let b_s = Self::contravariant_vector(
                             &q.as_view(),
                             &b_q.as_view(),
@@ -531,7 +538,7 @@ impl_cylm_forward_model!(
     CCLFFModel,
     CCGeometry,
     ["velocity", "b_scale", "alpha"],
-    cc_lff_obs,
+    cc_lff_chi_xi,
     "Circular-cylindrical linear force-free magnetic flux rope model."
 );
 
@@ -539,7 +546,7 @@ impl_cylm_forward_model!(
     CCUTModel,
     CCGeometry,
     ["velocity", "b_scale", "tau"],
-    cc_ut_obs,
+    cc_ut_chi_xi,
     "Circular-cylindrical uniform twist magnetic flux rope model."
 );
 
@@ -556,6 +563,7 @@ mod tests {
     use super::*;
     use crate::{
         forward::FSMEnsbl,
+        math::abs,
         obser::NoNoise,
         prodef::{Constant1D, Uniform1D, UnivariateND},
     };
@@ -619,14 +627,71 @@ mod tests {
             )
             .expect("simulation failed");
 
-        dbg!(output[(0, 0)][1]);
-        dbg!(output[(2, 0)][1]);
-        dbg!(output[(4, 0)][2]);
-
-        assert!((output[(0, 0)][1] - 20.443700542024832).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.613568831029653).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 3.710237528435872).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_cclff_model_twist() {
+        let prior = UnivariateND::new([
+            Uniform1D::new((-1.0, 1.0)).unwrap(),
+            Uniform1D::new((0.5, 1.0)).unwrap(),
+            Uniform1D::new((0.05, 0.1)).unwrap(),
+            Uniform1D::new((0.1, 0.5)).unwrap(),
+            Constant1D::new(1125.0),
+            Uniform1D::new((5.0, 100.0)).unwrap(),
+            Uniform1D::new((-2.4, 2.4)).unwrap(),
+            Uniform1D::new((0.0, 1.0)).unwrap(),
+        ]);
+
+        let model = CCLFFModel::new(prior);
+
+        let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator(
+            (0..2).map(|i| ScObs::new(0.0, ScObsConf::Distance(i as f64), None)),
+        );
+
+        let mut ensbl = FSMEnsbl {
+            params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
+            fm_states: vec![(); 1],
+            cs_states: vec![XCState::<f64>::default(); 1],
+            weights: vec![1.0; 1],
+        };
+
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+
+        ensbl.params_array.set_column(
+            0,
+            &SVector::<f64, 8>::from([
+                0_f64.to_radians(),
+                0_f64.to_radians(),
+                0.0,
+                1.56,
+                0.0,
+                600.0,
+                20.0,
+                2.4048255576957,
+            ]),
+        );
+
+        model
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .expect("initialization failed");
+        model
+            .fsm_simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &mut output.as_view_mut(),
+                None::<&mut NoNoise<f64>>,
+            )
+            .expect("simulation failed");
+
+        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-4);
+        assert!(abs!(output[(0, 0)][2]) < 1e-4);
+
+        assert!(abs!(output[(1, 0)][1]) < 1e-4);
+        assert!(abs!(output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0) < 1e-4);
     }
 
     #[test]
@@ -688,10 +753,71 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 19.2867548508778).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.736719674193566).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 6.290175215512368).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-4);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_ccut_model_twist() {
+        let prior = UnivariateND::new([
+            Uniform1D::new((-1.0, 1.0)).unwrap(),
+            Uniform1D::new((0.5, 1.0)).unwrap(),
+            Uniform1D::new((0.05, 0.1)).unwrap(),
+            Uniform1D::new((0.1, 0.5)).unwrap(),
+            Constant1D::new(1125.0),
+            Uniform1D::new((5.0, 100.0)).unwrap(),
+            Uniform1D::new((-2.4, 2.4)).unwrap(),
+            Uniform1D::new((0.0, 1.0)).unwrap(),
+        ]);
+
+        let model = CCUTModel::new(prior);
+
+        let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator(
+            (0..2).map(|i| ScObs::new(0.0, ScObsConf::Distance(i as f64), None)),
+        );
+
+        let mut ensbl = FSMEnsbl {
+            params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
+            fm_states: vec![(); 1],
+            cs_states: vec![XCState::<f64>::default(); 1],
+            weights: vec![1.0; 1],
+        };
+
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+
+        ensbl.params_array.set_column(
+            0,
+            &SVector::<f64, 8>::from([
+                0_f64.to_radians(),
+                0_f64.to_radians(),
+                0.0,
+                1.56,
+                0.0,
+                600.0,
+                20.0,
+                1.0,
+            ]),
+        );
+
+        model
+            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .expect("initialization failed");
+        model
+            .fsm_simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &mut output.as_view_mut(),
+                None::<&mut NoNoise<f64>>,
+            )
+            .expect("simulation failed");
+
+        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-4);
+        assert!(abs!(output[(0, 0)][2]) < 1e-4);
+
+        assert!(abs!(output[(1, 0)][1] - 10.0) < 1e-4);
+        assert!(abs!(output[(1, 0)][2] - 10.0) < 1e-4);
     }
 
     #[test]
@@ -761,9 +887,9 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-4);
+        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-4);
+        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-4);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
 
         ensbl.params_array.set_column(
