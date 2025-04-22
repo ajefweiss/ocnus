@@ -194,6 +194,8 @@ where
 
             settings.rseed += 1;
 
+            self.fsm_initialize_states_ensbl(series, &mut target_ensbl)?;
+
             self.fsm_simulate_ensbl(
                 series,
                 &mut target_ensbl,

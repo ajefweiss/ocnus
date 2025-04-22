@@ -162,7 +162,7 @@ where
     pub fn new(range: (T, T)) -> Result<Univariate1D<T>, ProDeFError<T>> {
         let (minv, maxv) = range;
 
-        if (minv < -T::pi() / T!(2.0)) || (maxv > T::pi() / T!(2.0)) || (minv > maxv) {
+        if (minv < -T::half_pi()) || (maxv > T::half_pi()) || (minv > maxv) {
             return Err(ProDeFError::InvalidRange {
                 name: "Cosine1D",
                 maxv,

@@ -1,5 +1,4 @@
 use chrono::Local;
-use directories::UserDirs;
 use dyn_fmt::AsStrFormatExt;
 use env_logger::Builder;
 use log::warn;
@@ -18,7 +17,7 @@ use ocnus::{
     obser::{NoNoise, ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
     prodef::{Constant1D, Uniform1D, UnivariateND},
 };
-use std::{io::prelude::*, path::Path};
+use std::{fs::create_dir, io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -147,18 +146,6 @@ fn main() {
             obs
         }));
 
-    // let sc_synth = ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..(SCOUNT)).map(|i| {
-    //     ScObs::new(
-    //         i as f64 * 3.0 * 3600.0 as f64 + 16.0 * 3600.0,
-    //         ScObsConf::Distance(1.0),
-    //         if output.row(i)[0].any_nan() {
-    //             None
-    //         } else {
-    //             Some(output.row(i)[0].clone())
-    //         },
-    //     )
-    // }));
-
     const ENSEMBLE_SIZE: usize = 2048;
 
     let mut pf_settings = ParticleFilterSettingsBuilder::default()
@@ -179,14 +166,17 @@ fn main() {
         )
         .unwrap();
 
-    let base_dir_opt = if let Some(user_dirs) = UserDirs::new() {
-        let doc_dir = user_dirs.document_dir().unwrap();
+    let path = Path::new("ocnus")
+        .join("examples")
+        .join("output")
+        .join("fisher_mult_ech");
 
-        let path = Path::new(doc_dir)
-            .join("Data")
-            .join("example_fisher_multi_ech");
+    let base_dir_opt = if path.exists() {
+        Some(path)
+    } else {
+        if path.parent().unwrap().parent().unwrap().exists() {
+            create_dir(&path).expect("failed to create output directory");
 
-        if path.exists() {
             Some(path)
         } else {
             warn!(
@@ -196,10 +186,6 @@ fn main() {
 
             None
         }
-    } else {
-        warn!("no document fold found, results will not be saved");
-
-        None
     };
 
     if let Some(base_dir) = &base_dir_opt {

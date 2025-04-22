@@ -5,6 +5,7 @@ use crate::{
     forward::{
         FSMError, FisherInformation, OcnusFSM,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
+        models::concat_arrays,
     },
     math::{T, bessel_jn, powi, sqrt},
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
@@ -184,29 +185,6 @@ where
     }
 }
 
-macro_rules! concat_arrays {
-    ($a: expr, $b: expr) => {{
-        let mut c = [$a[0]; $a.len() + $b.len()];
-
-        let mut i1 = 0;
-        let mut i2 = 0;
-
-        while i1 < $a.len() {
-            c[i1] = $a[i1];
-
-            i1 += 1;
-        }
-
-        while i2 < $b.len() {
-            c[$a.len() + i2] = $b[i2];
-
-            i2 += 1;
-        }
-
-        c
-    }};
-}
-
 macro_rules! impl_cylm_forward_model {
     ($model: ident, $coords: ident, $params: expr, $fn_obs: tt, $docs: literal) => {
         #[doc=$docs]
@@ -360,7 +338,7 @@ macro_rules! impl_cylm_forward_model {
                 Ok(())
             }
 
-            fn fsm_initialize_states(
+            fn fsm_initialize_states(&self,
                 _series: &ScObsSeries<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
@@ -752,10 +730,6 @@ mod tests {
                 None::<&mut NoNoise<f64>>,
             )
             .expect("simulation failed");
-
-        dbg!(output[(0, 0)][1]);
-        dbg!(output[(2, 0)][1]);
-        dbg!(output[(4, 0)][2]);
 
         assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-4);
         assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-4);

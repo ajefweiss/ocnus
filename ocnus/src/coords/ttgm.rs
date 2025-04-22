@@ -217,7 +217,7 @@ where
 
         let psi = if x == major_radius {
             if y > T::zero() {
-                T::pi() / T!(2.0)
+                T::half_pi()
             } else {
                 T::pi() * T!(1.5)
             }
@@ -298,6 +298,6 @@ mod tests {
 
         assert!((ics_rec - ics_ref).norm() < 1e-4);
 
-        TTGeometry::test_contravariant_basis(&ics_ref.as_view(), &params.fixed_rows::<6>(0), 1e-5);
+        TTGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<6>(0), 1e-5);
     }
 }

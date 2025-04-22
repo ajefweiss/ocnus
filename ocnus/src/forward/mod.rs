@@ -14,7 +14,9 @@ mod fisher;
 mod models;
 
 pub use fisher::FisherInformation;
-pub use models::{CCLFFModel, CCUTModel, COREModel, COREState, ECHModel};
+pub use models::{
+    CCLFFModel, CCUTModel, COREModel, COREState, ECHModel, WSAHUXModel, WSAInputData, WSAState,
+};
 
 use crate::{
     OcnusError,
@@ -91,7 +93,7 @@ where
         for<'a> &'a D: OcnusProDeF<T, P>,
     {
         self.fsm_initialize_params(params, opt_pdf, rng)?;
-        Self::fsm_initialize_states(series, &params.as_view(), fm_state, cs_state)?;
+        self.fsm_initialize_states(series, &params.as_view(), fm_state, cs_state)?;
 
         Ok(())
     }
@@ -203,6 +205,7 @@ where
 
     /// Initialize the coordinate system and forward model states.
     fn fsm_initialize_states(
+        &self,
         series: &ScObsSeries<T, O>,
         params: &SVectorView<T, P>,
         fm_state: &mut FMST,
@@ -232,7 +235,7 @@ where
                 chunks
                     .iter_mut()
                     .try_for_each(|((params, fm_state), cs_state)| {
-                        Self::fsm_initialize_states(series, params, fm_state, cs_state)?;
+                        self.fsm_initialize_states(series, params, fm_state, cs_state)?;
 
                         Ok::<(), OcnusError<T>>(())
                     })?;
@@ -279,6 +282,7 @@ where
         T: SampleUniform,
         FMST: Send,
         CSST: Send,
+        Self: Sync,
     {
         let start = Instant::now();
 
@@ -297,7 +301,7 @@ where
                     .try_for_each(|((params, fm_state), cs_state)| {
                         params.set_column(0, &pdf.resample(&mut rng)?);
 
-                        Self::fsm_initialize_states(
+                        self.fsm_initialize_states(
                             series,
                             &params.fixed_rows::<P>(0),
                             fm_state,

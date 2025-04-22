@@ -22,15 +22,17 @@ rand_distr = "*"
 rand_xoshiro = "*"
 rayon = "*"
 serde = { version = "*", features = ["derive"] }
-serde_arrays = "0.*"
+serde_arrays = "*"
 serde_json = "*"
+serde_json5 = "*"
 thiserror = "*"
 
 [dev-dependencies]
+criterion = "*"
 directories = "*"
 dyn-fmt = "*"
-criterion = "*"
 env_logger = "*"
+plotters = "*"
 
 [[bench]]
 name = "cylm"
@@ -38,4 +40,8 @@ harness = false
 
 [[bench]]
 name = "corem"
+harness = false
+
+[[bench]]
+name = "wsahux"
 harness = false

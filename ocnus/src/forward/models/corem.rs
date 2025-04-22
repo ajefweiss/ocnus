@@ -5,6 +5,7 @@ use crate::{
     forward::{
         FSMError, FisherInformation, OcnusFSM,
         filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
+        models::concat_arrays,
     },
     math::{T, ln, powf, powi},
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
@@ -82,28 +83,6 @@ where
     }
 }
 
-macro_rules! concat_arrays {
-    ($a: expr, $b: expr) => {{
-        let mut c = [$a[0]; $a.len() + $b.len()];
-
-        let mut i1 = 0;
-        let mut i2 = 0;
-
-        while i1 < $a.len() {
-            c[i1] = $a[i1];
-
-            i1 += 1;
-        }
-
-        while i2 < $b.len() {
-            c[$a.len() + i2] = $b[i2];
-
-            i2 += 1;
-        }
-
-        c
-    }};
-}
 macro_rules! impl_core_forward_model {
     ($model: ident, $coords: ident, $params: expr, $fn_obs: tt, $docs: literal) => {
         #[doc=$docs]
@@ -283,7 +262,7 @@ macro_rules! impl_core_forward_model {
                 Ok(())
             }
 
-            fn fsm_initialize_states(
+            fn fsm_initialize_states(&self,
                 _series: &ScObsSeries<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,

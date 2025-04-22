@@ -59,6 +59,11 @@ pub trait fXX:
     fn four_pi() -> Self {
         Self::two_pi() + Self::two_pi()
     }
+
+    /// Returns π/2.
+    fn half_pi() -> Self {
+        RealField::frac_pi_2()
+    }
 }
 
 impl fXX for f32 {}

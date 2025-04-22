@@ -1,5 +1,4 @@
 use chrono::Local;
-use directories::UserDirs;
 use dyn_fmt::AsStrFormatExt;
 use env_logger::Builder;
 use log::warn;
@@ -17,7 +16,7 @@ use ocnus::{
     obser::{ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
     prodef::{Constant1D, Uniform1D, UnivariateND},
 };
-use std::{io::prelude::*, path::Path};
+use std::{fs::create_dir, io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -91,12 +90,17 @@ fn main() {
         )
         .unwrap();
 
-    let base_dir_opt = if let Some(user_dirs) = UserDirs::new() {
-        let doc_dir = user_dirs.document_dir().unwrap();
+    let path = Path::new("ocnus")
+        .join("examples")
+        .join("output")
+        .join("fit_core");
 
-        let path = Path::new(doc_dir).join("Data").join("example_fit_core");
+    let base_dir_opt = if path.exists() {
+        Some(path)
+    } else {
+        if path.parent().unwrap().parent().unwrap().exists() {
+            create_dir(&path).expect("failed to create output directory");
 
-        if path.exists() {
             Some(path)
         } else {
             warn!(
@@ -106,10 +110,6 @@ fn main() {
 
             None
         }
-    } else {
-        warn!("no document folder found, results will not be saved");
-
-        None
     };
 
     if let Some(base_dir) = &base_dir_opt {

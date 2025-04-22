@@ -34,7 +34,7 @@ mod sphgm;
 mod ttgm;
 mod xcgm;
 
-pub use sphgm::{SPHGeometry, SPHState};
+pub use sphgm::{CNSPHGeometry, SPHGeometry, SPHState};
 pub use ttgm::{TTGeometry, TTState};
 pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
@@ -170,7 +170,7 @@ where
 
     /// Test the implementation of the contravariant basis vectors.
     #[cfg(test)]
-    fn test_contravariant_basis<CStride: Dim>(
+    fn test_implementation<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
 
@@ -227,8 +227,6 @@ where
 
         let detg_basis = abs!(basis[0].cross(&basis[1]).dot(&basis[2]));
         let detg_analy = Self::detg(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state).unwrap();
-
-        dbg!(&detg_basis, &detg_analy);
 
         assert!(abs!(detg_basis / detg_analy - T::one()) < T!(1e-4));
     }
