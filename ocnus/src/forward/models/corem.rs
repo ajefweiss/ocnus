@@ -9,9 +9,9 @@ use crate::{
     },
     math::{T, ln, powf, powi},
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
-    prodef::OcnusProDeF,
 };
 use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
+use ocnus_stats::OcnusPDF;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, marker::PhantomData};
@@ -90,12 +90,12 @@ macro_rules! impl_core_forward_model {
         pub struct $model<T, D>(D, PhantomData<T>)
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -110,7 +110,7 @@ macro_rules! impl_core_forward_model {
             for $model<T, D>
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($coords::<f64>::PARAMS, $params);
@@ -211,7 +211,7 @@ macro_rules! impl_core_forward_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, TTState<T>>,
         {
             const RCS: usize = 128;
@@ -374,7 +374,7 @@ macro_rules! impl_core_forward_model {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
@@ -391,7 +391,7 @@ macro_rules! impl_core_forward_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -407,7 +407,7 @@ macro_rules! impl_core_forward_model {
             T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -423,7 +423,7 @@ macro_rules! impl_core_forward_model {
             T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -439,7 +439,7 @@ macro_rules! impl_core_forward_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
     };
@@ -456,12 +456,9 @@ impl_core_forward_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        forward::FSMEnsbl,
-        obser::NoNoise,
-        prodef::{Constant1D, Uniform1D, UnivariateND},
-    };
+    use crate::{forward::FSMEnsbl, obser::NoNoise};
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
+    use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 
     #[test]
     fn test_core_circ_model() {
@@ -540,8 +537,8 @@ mod tests {
         println!("{}", output);
         println!("{}", output_diag);
 
-        // assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-4);
-        // assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-4);
-        // assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-4);
+        // assert!((output[(0, 0)][1] - 17.744318).abs() < 1e-6);
+        // assert!((output[(2, 0)][1] - 19.713774).abs() < 1e-6);
+        // assert!((output[(4, 0)][2] + 2.3477454).abs() < 1e-6);
     }
 }

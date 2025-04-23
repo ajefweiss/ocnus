@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 
-members = ["ocnus"]
+members = ["ocnus", "ocnus_stats"]
 
 [profile.bench]
 opt-level = 3
 
 [profile.dev]
-opt-level = 3
+opt-level = 1
 
 [profile.release]
 opt-level = 3

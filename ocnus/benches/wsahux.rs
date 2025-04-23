@@ -3,8 +3,8 @@ use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
     forward::{FSMEnsbl, OcnusFSM, WSAHUXModel, WSAState},
     obser::{NoNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
-    prodef::{Constant1D, UnivariateND},
 };
+use ocnus_stats::{Constant1D, UnivariateND};
 use std::{hint::black_box, path::Path, time::Duration};
 
 const ENSEMBLE_SIZE: usize = 2_usize.pow(8);

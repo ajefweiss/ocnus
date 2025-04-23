@@ -12,8 +12,8 @@ use ocnus::{
         },
     },
     obser::{ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
-    prodef::{Uniform1D, UnivariateND},
 };
+use ocnus_stats::{Uniform1D, UnivariateND};
 use std::{fs, io::prelude::*, path::Path};
 
 fn main() {

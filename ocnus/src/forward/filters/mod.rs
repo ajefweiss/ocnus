@@ -278,7 +278,7 @@ where
     {
         let mut file = std::fs::File::create(path)?;
 
-        file.write_all(serde_json::to_string(&self).unwrap().as_bytes())?;
+        file.write_all(serde_json5::to_string(&self).unwrap().as_bytes())?;
 
         Ok(())
     }

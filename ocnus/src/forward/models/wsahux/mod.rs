@@ -13,10 +13,10 @@ use crate::{
     },
     math::{T, abs, exp, powf},
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
-    prodef::OcnusProDeF,
 };
 use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
 use num_traits::Float;
+use ocnus_stats::OcnusPDF;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::Deserialize;
 use std::{fs, io, path::Path};
@@ -51,12 +51,12 @@ macro_rules! impl_wsa_model {
         pub struct $model<T, const R: usize, D>(D, pub WSAInputData<T>, pub (T, T, T))
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, const R: usize, D> $model<T, R, D>
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = "Limits the latitude to the given value."]
             pub fn limit_latitude(&mut self, max_lat: T) {
@@ -106,7 +106,7 @@ macro_rules! impl_wsa_model {
             OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, ()> for $model<T, R, D>
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($coords::<f64>::PARAMS, $params);
@@ -207,7 +207,7 @@ macro_rules! impl_wsa_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, ()>,
         {
             const RCS: usize = 128;
@@ -426,7 +426,7 @@ macro_rules! impl_wsa_model {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
@@ -443,7 +443,7 @@ macro_rules! impl_wsa_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -459,7 +459,7 @@ macro_rules! impl_wsa_model {
             T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -475,7 +475,7 @@ macro_rules! impl_wsa_model {
             T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -491,7 +491,7 @@ macro_rules! impl_wsa_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
     };
@@ -508,12 +508,9 @@ impl_wsa_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        forward::FSMEnsbl,
-        obser::NoNoise,
-        prodef::{Constant1D, UnivariateND},
-    };
+    use crate::{forward::FSMEnsbl, obser::NoNoise};
     use nalgebra::DMatrix;
+    use ocnus_stats::{Constant1D, UnivariateND};
 
     #[test]
     fn test_wsahux() {
@@ -563,10 +560,10 @@ mod tests {
 
         let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|v| v[0] as f32));
 
-        assert!(abs!(speed[0] - 298.2084) < 1e-4);
-        assert!(abs!(speed[25] - 440.25708) < 1e-4);
-        assert!(abs!(speed[50] - 442.22626) < 1e-4);
-        assert!(abs!(speed[75] - 435.19177) < 1e-4);
-        assert!(abs!(speed[99] - 320.37265) < 1e-4);
+        assert!(abs!(speed[0] - 298.2084) < 1e-6);
+        assert!(abs!(speed[25] - 440.25708) < 1e-6);
+        assert!(abs!(speed[50] - 442.22626) < 1e-6);
+        assert!(abs!(speed[75] - 435.19177) < 1e-6);
+        assert!(abs!(speed[99] - 320.37265) < 1e-6);
     }
 }

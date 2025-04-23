@@ -46,8 +46,8 @@ mod tests {
     fn test_bessel() {
         assert!(abs!(bessel_jn(0.0, 0) - 1.0) < 1e-6);
         assert!(abs!(bessel_jn(0.0, 1)) < 1e-6);
-        assert!(abs!(bessel_jn(2.4048, 0)) < 1e-4);
-        assert!(abs!(bessel_jn(5.5201, 0)) < 1e-4);
-        assert!(abs!(bessel_jn(3.8317, 1)) < 1e-4);
+        assert!(abs!(bessel_jn(2.4048, 0)) < 1e-6);
+        assert!(abs!(bessel_jn(5.5201, 0)) < 1e-6);
+        assert!(abs!(bessel_jn(3.8317, 1)) < 1e-6);
     }
 }

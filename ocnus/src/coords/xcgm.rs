@@ -421,9 +421,9 @@ mod tests {
             CCGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<5>(0), &cs_state)
                 .unwrap();
 
-        assert!((ics_rec - ics_ref).norm() < 1e-4);
+        assert!((ics_rec - ics_ref).norm() < 1e-6);
 
-        CCGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<5>(0), 1e-5);
+        CCGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<5>(0), 1e-6);
     }
 
     #[test]
@@ -455,8 +455,8 @@ mod tests {
             ECGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<7>(0), &cs_state)
                 .unwrap();
 
-        assert!((ics_rec - ics_ref).norm() < 1e-4);
+        assert!((ics_rec - ics_ref).norm() < 1e-6);
 
-        ECGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<7>(0), 1e-5);
+        ECGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<7>(0), 1e-6);
     }
 }

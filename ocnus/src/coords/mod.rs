@@ -228,6 +228,6 @@ where
         let detg_basis = abs!(basis[0].cross(&basis[1]).dot(&basis[2]));
         let detg_analy = Self::detg(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state).unwrap();
 
-        assert!(abs!(detg_basis / detg_analy - T::one()) < T!(1e-4));
+        assert!(abs!(detg_basis / detg_analy - T::one()) < T!(1e-6));
     }
 }

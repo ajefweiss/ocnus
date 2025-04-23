@@ -16,14 +16,13 @@ itertools = "*"
 log = "*"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
 num-traits = "*"
+ocnus_stats = { path = "../ocnus_stats" }
 rand = "*"
-rand_chacha = "*"
 rand_distr = "*"
 rand_xoshiro = "*"
 rayon = "*"
 serde = { version = "*", features = ["derive"] }
 serde_arrays = "*"
-serde_json = "*"
 serde_json5 = "*"
 thiserror = "*"
 

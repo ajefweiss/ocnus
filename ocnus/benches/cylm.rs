@@ -4,8 +4,8 @@ use ocnus::{
     coords::XCState,
     forward::{CCLFFModel, FSMEnsbl, OcnusFSM},
     obser::{NoNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
-    prodef::{Constant1D, Uniform1D, UnivariateND},
 };
+use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 use std::{hint::black_box, time::Duration};
 
 const ENSEMBLE_SIZE: usize = 2_usize.pow(16);

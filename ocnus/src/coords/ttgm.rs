@@ -296,8 +296,8 @@ mod tests {
             TTGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<6>(0), &cs_state)
                 .unwrap();
 
-        assert!((ics_rec - ics_ref).norm() < 1e-4);
+        assert!((ics_rec - ics_ref).norm() < 1e-6);
 
-        TTGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<6>(0), 1e-5);
+        TTGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<6>(0), 1e-6);
     }
 }

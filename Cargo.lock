@@ -1034,17 +1034,36 @@ dependencies = [
  "log",
  "nalgebra",
  "num-traits",
+ "ocnus_stats",
  "plotters",
  "rand",
- "rand_chacha",
  "rand_distr",
  "rand_xoshiro",
  "rayon",
  "serde",
  "serde_arrays",
- "serde_json",
  "serde_json5",
  "thiserror 2.0.11",
+]
+
+[[package]]
+name = "ocnus_stats"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "derive_builder",
+ "derive_more",
+ "itertools 0.10.5",
+ "log",
+ "nalgebra",
+ "rand",
+ "rand_distr",
+ "rand_xoshiro",
+ "rayon",
+ "serde",
+ "serde_arrays",
+ "serde_json5",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

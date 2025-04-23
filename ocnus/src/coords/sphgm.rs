@@ -254,9 +254,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!((ics_rec - ics_ref).norm() < 1e-4);
+        assert!((ics_rec - ics_ref).norm() < 1e-6);
 
-        SPHGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<4>(0), 1e-5);
+        SPHGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<4>(0), 1e-6);
     }
 
     #[test]
@@ -278,8 +278,8 @@ mod tests {
             CNSPHGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<0>(0), &())
                 .unwrap();
 
-        assert!((ics_rec - ics_ref).norm() < 1e-4);
+        assert!((ics_rec - ics_ref).norm() < 1e-6);
 
-        CNSPHGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<0>(0), 1e-5);
+        CNSPHGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<0>(0), 1e-6);
     }
 }

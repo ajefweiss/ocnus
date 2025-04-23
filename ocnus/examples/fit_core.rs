@@ -14,8 +14,8 @@ use ocnus::{
     },
     math::CovMatrix,
     obser::{ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
-    prodef::{Constant1D, Uniform1D, UnivariateND},
 };
+use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 use std::{fs::create_dir, io::prelude::*, path::Path};
 
 fn main() {

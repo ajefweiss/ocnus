@@ -8,11 +8,11 @@ use crate::{
     },
     math::{T, exp, powi},
     obser::{ObserVec, ObserVecNoise, ScObsSeries},
-    prodef::{OcnusProDeF, ParticlesND},
 };
 use itertools::Itertools;
 use log::{debug, info};
 use nalgebra::DMatrix;
+use ocnus_stats::{OcnusPDF, ParticlesND};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use std::{cmp::Ordering, time::Instant};
@@ -53,12 +53,16 @@ where
         let mut interim_ensbl = FSMEnsbl::<T, P, FMST, CSST>::new(sim_ensemble_size);
         let mut interim_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
-        // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
+        let ensbl_params_view = ensbl.params_array.as_view();
+
+        // Create a Particle OcnusPDF from input and multiply by the exploration factor.
         let density_old = ParticlesND::from_particles(
-            ensbl.params_array.as_view(),
+            &ensbl_params_view,
             self.model_prior().get_valid_range(),
             ensbl.weights.clone(),
-        )? * settings.expl_factor;
+        )
+        .unwrap()
+            * settings.expl_factor;
 
         while counter != sim_ensemble_size {
             self.fsm_initialize_ensbl(
@@ -152,12 +156,15 @@ where
 
         weights.iter_mut().for_each(|w| *w /= weights_total);
 
-        // Create a Particle OcnusProDeF from the temporary simulations.
+        let interim_params_view = interim_ensbl.params_array.as_view();
+
+        // Create a Particle OcnusPDF from the temporary simulations.
         let density_new = ParticlesND::from_particles(
-            interim_ensbl.params_array.as_view(),
+            &interim_params_view,
             self.model_prior().get_valid_range(),
             weights,
-        )?;
+        )
+        .unwrap();
 
         let kld = density_new.kullback_leibler_divergence_mvpdf_estimate(&density_old);
 

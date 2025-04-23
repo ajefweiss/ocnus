@@ -8,12 +8,12 @@ use crate::{
     },
     math::{T, powi},
     obser::{OcnusNoise, OcnusObser, ScObsSeries},
-    prodef::{OcnusProDeF, ParticlesND},
 };
 use itertools::Itertools;
 use log::{debug, info};
 use nalgebra::{DMatrix, DVectorView, Dyn, Scalar, U1};
 use num_traits::{Float, Zero};
+use ocnus_stats::{OcnusPDF, ParticlesND};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use std::{
@@ -102,12 +102,16 @@ where
         let mut temp_ensbl = FSMEnsbl::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<O>::zeros(series.len(), sim_ensemble_size);
 
-        // Create a Particle OcnusProDeF from input and multiply by the exploration factor.
+        let ensbl_params_view = ensbl.params_array.as_view();
+
+        // Create a Particle OcnusPDF from input and multiply by the exploration factor.
         let mut density_old = ParticlesND::from_particles(
-            ensbl.params_array.as_view(),
+            &ensbl_params_view,
             self.model_prior().get_valid_range(),
             ensbl.weights.clone(),
-        )? * settings.expl_factor;
+        )
+        .unwrap()
+            * settings.expl_factor;
 
         while counter != ensemble_size {
             self.fsm_initialize_ensbl(
@@ -248,12 +252,15 @@ where
             }
         }
 
+        let target_params_view = target_ensbl.params_array.as_view();
+
         // Create new density using importance weights.
         let density_new = ParticlesND::from_particles_and_ptpdf(
-            target_ensbl.params_array.as_view(),
+            &target_params_view,
             &density_old,
             &self.model_prior(),
-        )?;
+        )
+        .unwrap();
 
         // Reset the covariance matrix in the old density.
         density_old *= T::one() / settings.expl_factor;

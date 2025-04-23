@@ -5,8 +5,8 @@ use nalgebra::DMatrix;
 use ocnus::{
     forward::{FSMEnsbl, OcnusFSM, WSAHUXModel},
     obser::{NoNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
-    prodef::{Constant1D, UnivariateND},
 };
+use ocnus_stats::{Constant1D, UnivariateND};
 use plotters::prelude::*;
 use std::{fs::create_dir, io::prelude::*, path::Path};
 

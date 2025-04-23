@@ -5,19 +5,20 @@ pub mod coords;
 pub mod forward;
 pub mod math;
 pub mod obser;
-pub mod prodef;
 
 use coords::CoordsError;
 use forward::{FSMError, filters::ParticleFilterError};
 use math::MathError;
 use nalgebra::{RealField, Scalar};
 use num_traits::{AsPrimitive, Float, FromPrimitive, float::TotalOrder};
-use prodef::ProDeFError;
+use ocnus_stats::StatsError;
 use std::{
     fmt::{Debug, Display},
     iter::Sum,
 };
 use thiserror::Error;
+
+pub use ocnus_stats as stats;
 
 /// Generic container type for errors.
 #[allow(missing_docs)]
@@ -32,7 +33,7 @@ pub enum OcnusError<T> {
     #[error("particle filter error")]
     ParticleFilter(#[from] ParticleFilterError<T>),
     #[error("stats error")]
-    ProDeF(#[from] ProDeFError<T>),
+    ProDeF(#[from] StatsError<T>),
 }
 
 /// A trait that describes a generic floating point numbers within the **ocnus** crate. In practical

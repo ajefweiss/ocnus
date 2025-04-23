@@ -19,14 +19,14 @@ where
     cholesky_ltm: DMatrix<T>,
 
     /// The inverse of the covariance matrix.
-    inverse_matrix: DMatrix<T>,
+    matrix_inverse: DMatrix<T>,
 
     /// The underlying dynamically sized covariance matrix.
     #[deref]
     matrix: DMatrix<T>,
 
     /// The pseudo-determinant of the covariance matrix.
-    pseudo_determinant: T,
+    determinant: T,
 }
 
 impl<T> CovMatrix<T>
@@ -37,7 +37,7 @@ where
     pub fn from_matrix(matrix: &DMatrixView<T>) -> Result<Self, MathError<T>> {
         let matrix_owned = matrix.into_owned();
 
-        let (cholesky_ltm, pseudo_determinant) = match matrix.cholesky() {
+        let (cholesky_ltm, determinant) = match matrix.cholesky() {
             Some(result) => (result.l(), result.determinant()),
             None => {
                 error!(
@@ -51,7 +51,7 @@ where
             }
         };
 
-        let inverse_matrix = match matrix.try_inverse() {
+        let matrix_inverse = match matrix.try_inverse() {
             Some(result) => result,
             None => {
                 error!(
@@ -67,9 +67,9 @@ where
 
         Ok(Self {
             cholesky_ltm,
-            inverse_matrix,
+            matrix_inverse,
             matrix: matrix_owned,
-            pseudo_determinant,
+            determinant,
         })
     }
 
@@ -131,7 +131,7 @@ where
         // Reset zero variance columns/rows to zero.
         for idx in zero_variance_indices.iter() {
             result.cholesky_ltm[(*idx, *idx)] = T::zero();
-            result.inverse_matrix[(*idx, *idx)] = T::zero();
+            result.matrix_inverse[(*idx, *idx)] = T::zero();
             result.matrix[(*idx, *idx)] = T::zero();
         }
 
@@ -154,15 +154,15 @@ where
             panic!("iterator length must be a multiple of the covariance matrix dimension")
         }
 
-        let mut lh = -(ln!(self.pseudo_determinant) + T::from_usize(ndim).unwrap() * (T::two_pi()))
-            / T!(2.0);
+        let mut lh =
+            -(ln!(self.determinant) + T::from_usize(ndim).unwrap() * (T::two_pi())) / T!(2.0);
 
         for idx in 0..ndim {
             let view = delta.rows_with_step(idx, self.ndim(), ndim - 1);
 
             lh -= (&view.transpose()
                 * self
-                    .inverse_matrix
+                    .matrix_inverse
                     .view((0, 0), (view.nrows(), view.nrows()))
                 * view)[(0, 0)]
                 / T!(2.0);
@@ -177,8 +177,8 @@ where
     }
 
     /// Returns the pseudo-determinant of the covariance matrix.
-    pub fn pseudo_determinant(&self) -> T {
-        self.pseudo_determinant
+    pub fn determinant(&self) -> T {
+        self.determinant
     }
 
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition.
@@ -187,8 +187,8 @@ where
     }
 
     /// Returns a reference to the inverse of the covariance matrix.
-    pub fn ref_inverse_matrix(&self) -> &DMatrix<T> {
-        &self.inverse_matrix
+    pub fn ref_matrix_inverse(&self) -> &DMatrix<T> {
+        &self.matrix_inverse
     }
 
     /// Returns a reference to the covariance matrix.
@@ -233,9 +233,9 @@ where
 
         Self::Output {
             cholesky_ltm: self.cholesky_ltm * sqrt!(rhs),
-            inverse_matrix: self.inverse_matrix / rhs,
+            matrix_inverse: self.matrix_inverse / rhs,
             matrix: self.matrix * rhs,
-            pseudo_determinant: self.pseudo_determinant * powi!(rhs, dim),
+            determinant: self.determinant * powi!(rhs, dim),
         }
     }
 }
@@ -248,9 +248,9 @@ where
         let dim = self.matrix.ncols() as i32;
 
         self.cholesky_ltm *= sqrt!(rhs);
-        self.inverse_matrix /= rhs;
+        self.matrix_inverse /= rhs;
         self.matrix *= rhs;
-        self.pseudo_determinant *= powi!(rhs, dim);
+        self.determinant *= powi!(rhs, dim);
     }
 }
 
@@ -364,9 +364,9 @@ mod tests {
         assert!((covmat.cholesky_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
         assert!((covmat.cholesky_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);
 
-        assert!((covmat.inverse_matrix[(0, 0)] - 6.915894).abs() < f32::EPSILON);
-        assert!((covmat.inverse_matrix[(2, 0)] + 4.5933948).abs() < f32::EPSILON);
+        assert!((covmat.matrix_inverse[(0, 0)] - 6.915894).abs() < f32::EPSILON);
+        assert!((covmat.matrix_inverse[(2, 0)] + 4.5933948).abs() < f32::EPSILON);
 
-        assert!((covmat.pseudo_determinant() - 0.0069507807).abs() < f32::EPSILON);
+        assert!((covmat.determinant() - 0.0069507807).abs() < f32::EPSILON);
     }
 }

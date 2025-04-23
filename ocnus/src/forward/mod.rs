@@ -23,13 +23,13 @@ use crate::{
     coords::OcnusCoords,
     fXX,
     obser::{ObserVec, OcnusNoise, OcnusObser, ScObs, ScObsSeries},
-    prodef::{OcnusProDeF, ParticlesND, ProDeFError},
 };
 use itertools::zip_eq;
 use log::debug;
 use nalgebra::{
     Const, DMatrixViewMut, Dim, Dyn, Matrix, SVectorView, SVectorViewMut, Scalar, VecStorage,
 };
+use ocnus_stats::{OcnusPDF, ParticlesND, StatsError};
 use rand::{Rng, SeedableRng};
 use rand_distr::uniform::SampleUniform;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -90,7 +90,7 @@ where
         rng: &mut impl Rng,
     ) -> Result<(), OcnusError<T>>
     where
-        for<'a> &'a D: OcnusProDeF<T, P>,
+        for<'x> &'x D: OcnusPDF<T, P>,
     {
         self.fsm_initialize_params(params, opt_pdf, rng)?;
         self.fsm_initialize_states(series, &params.as_view(), fm_state, cs_state)?;
@@ -107,7 +107,7 @@ where
         rseed: u64,
     ) -> Result<(), OcnusError<T>>
     where
-        for<'a> &'a D: OcnusProDeF<T, P>,
+        for<'x> &'x D: OcnusPDF<T, P>,
         FMST: Send,
         CSST: Send,
         Self: Sync,
@@ -148,9 +148,9 @@ where
     fn fsm_initialize_params(
         &self,
         params: &mut SVectorViewMut<T, P>,
-        opt_pdf: Option<impl OcnusProDeF<T, P>>,
+        opt_pdf: Option<impl OcnusPDF<T, P>>,
         rng: &mut impl Rng,
-    ) -> Result<(), ProDeFError<T>> {
+    ) -> Result<(), StatsError<T>> {
         params.set_column(
             0,
             &match opt_pdf.as_ref() {
@@ -170,7 +170,7 @@ where
         rseed: u64,
     ) -> Result<(), OcnusError<T>>
     where
-        for<'a> &'a D: OcnusProDeF<T, P>,
+        for<'x> &'x D: OcnusPDF<T, P>,
         FMST: Send,
         CSST: Send,
         Self: Sync,
@@ -299,7 +299,7 @@ where
                 chunks
                     .iter_mut()
                     .try_for_each(|((params, fm_state), cs_state)| {
-                        params.set_column(0, &pdf.resample(&mut rng)?);
+                        params.set_column(0, &pdf.resample(&mut rng));
 
                         self.fsm_initialize_states(
                             series,
@@ -585,7 +585,7 @@ where
     }
 
     /// Returns a reference to the underlying model prior.
-    fn model_prior(&self) -> impl OcnusProDeF<T, P>;
+    fn model_prior(&self) -> impl OcnusPDF<T, P>;
 
     /// Step sizes for finite differences.
     fn param_step_sizes(&self) -> [T; P];
@@ -645,7 +645,7 @@ where
     {
         let mut file = std::fs::File::create(path)?;
 
-        file.write_all(serde_json::to_string(&self).unwrap().as_bytes())?;
+        file.write_all(serde_json5::to_string(&self).unwrap().as_bytes())?;
 
         Ok(())
     }

@@ -9,9 +9,9 @@ use crate::{
     },
     math::{T, bessel_jn, powi, sqrt},
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
-    prodef::OcnusProDeF,
 };
 use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
+use ocnus_stats::OcnusPDF;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use std::{cmp::Ordering, marker::PhantomData};
 
@@ -192,12 +192,12 @@ macro_rules! impl_cylm_forward_model {
         pub struct $model<T, D>(D, PhantomData<T>)
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -212,7 +212,7 @@ macro_rules! impl_cylm_forward_model {
             for $model<T, D>
         where
             T: fXX,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($coords::<f64>::PARAMS, $params);
@@ -313,7 +313,7 @@ macro_rules! impl_cylm_forward_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
         {
             const RCS: usize = 128;
@@ -441,7 +441,7 @@ macro_rules! impl_cylm_forward_model {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
@@ -458,7 +458,7 @@ macro_rules! impl_cylm_forward_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -474,7 +474,7 @@ macro_rules! impl_cylm_forward_model {
             T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -490,7 +490,7 @@ macro_rules! impl_cylm_forward_model {
             T: fXX + SampleUniform,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
 
@@ -506,7 +506,7 @@ macro_rules! impl_cylm_forward_model {
             T: fXX,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'a> &'a D: OcnusProDeF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
         }
     };
@@ -539,13 +539,9 @@ impl_cylm_forward_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        forward::FSMEnsbl,
-        math::abs,
-        obser::NoNoise,
-        prodef::{Constant1D, Uniform1D, UnivariateND},
-    };
+    use crate::{forward::FSMEnsbl, math::abs, obser::NoNoise};
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
+    use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 
     #[test]
     fn test_cclff_model() {
@@ -605,10 +601,10 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
-        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
     }
 
     #[test]
@@ -665,11 +661,11 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-4);
-        assert!(abs!(output[(0, 0)][2]) < 1e-4);
+        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-6);
+        assert!(abs!(output[(0, 0)][2]) < 1e-6);
 
-        assert!(abs!(output[(1, 0)][1]) < 1e-4);
-        assert!(abs!(output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0) < 1e-4);
+        assert!(abs!(output[(1, 0)][1]) < 1e-6);
+        assert!(abs!(output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0) < 1e-6);
     }
 
     #[test]
@@ -731,10 +727,10 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-4);
-        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
     }
 
     #[test]
@@ -791,11 +787,11 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-4);
-        assert!(abs!(output[(0, 0)][2]) < 1e-4);
+        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-6);
+        assert!(abs!(output[(0, 0)][2]) < 1e-6);
 
-        assert!(abs!(output[(1, 0)][1] - 10.0) < 1e-4);
-        assert!(abs!(output[(1, 0)][2] - 10.0) < 1e-4);
+        assert!(abs!(output[(1, 0)][1] - 10.0) < 1e-6);
+        assert!(abs!(output[(1, 0)][2] - 10.0) < 1e-6);
     }
 
     #[test]
@@ -867,10 +863,10 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-4);
-        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
 
         // LFF
 
@@ -905,9 +901,9 @@ mod tests {
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-4);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-4);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-4);
-        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-4);
+        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
     }
 }

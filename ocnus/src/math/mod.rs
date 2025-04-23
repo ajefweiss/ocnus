@@ -56,12 +56,6 @@ macro_rules! acos {
     };
 }
 
-macro_rules! asin {
-    ($value: expr) => {
-        num_traits::Float::asin($value)
-    };
-}
-
 macro_rules! atan2 {
     ($value_y: expr, $value_x: expr) => {
         num_traits::Float::atan2($value_y, $value_x)
@@ -113,7 +107,6 @@ macro_rules! sqrt {
 pub(crate) use T;
 pub(crate) use abs;
 pub(crate) use acos;
-pub(crate) use asin;
 pub(crate) use atan2;
 pub(crate) use cos;
 pub(crate) use exp;
