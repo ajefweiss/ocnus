@@ -73,6 +73,5 @@ docs/_build/
 # Pyenv
 .python-version
 
-# Example output files
+# ocnus
 *.particles
-*.png

@@ -1,16 +1,60 @@
-[workspace]
-resolver = "2"
+[package]
+name = "ocnus"
+version = "0.1.0"
+edition = "2024"
 
-members = ["ocnus"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "ocnus"
+crate-type = ["lib"]
+
+[dependencies]
+chrono = "*"
+covmatrix = { path = "../rs-covmat" }
+derive_builder = "*"
+derive_more = { version = "*", features = ["full"] }
+itertools = "*"
+log = "*"
+nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
+num-traits = "*"
+rand = "*"
+rand_distr = "*"
+rand_xoshiro = "*"
+rayon = "*"
+serde = { version = "*", features = ["derive"] }
+serde_arrays = "*"
+serde_json5 = "*"
+typenum = "*"
+thiserror = "*"
+
+[dev-dependencies]
+approx = "*"
+criterion = "*"
+directories = "*"
+dyn-fmt = "*"
+env_logger = "*"
+plotters = "*"
 
 [profile.bench]
 opt-level = 3
 
 [profile.dev]
-opt-level = 3
+opt-level = 1
 
 [profile.release]
 opt-level = 3
 
 [profile.test]
 opt-level = 1
+
+[[bench]]
+name = "cylm"
+harness = false
+
+[[bench]]
+name = "corem"
+harness = false
+
+[[bench]]
+name = "wsahux"
+harness = false
