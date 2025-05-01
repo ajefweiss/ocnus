@@ -1,13 +1,14 @@
-use crate::{fXX, math::T};
 use derive_more::{Deref, DerefMut};
+use nalgebra::RealField;
 use nalgebra::{DMatrix, Scalar};
+use num_traits::AsPrimitive;
 use serde::{Deserialize, Serialize};
 
 /// WSA-HUX input data structure.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WSAInputData<T>
 where
-    T: fXX,
+    T: RealField,
 {
     /// Longitudes.
     pub lon_1d: DMatrix<T>,
@@ -31,7 +32,7 @@ where
 
 impl<T> WSAInputData<T>
 where
-    T: fXX,
+    T: RealField,
 {
     /// The shape of the underlying input matrices.
     pub fn shape(&self) -> (usize, usize) {
@@ -53,7 +54,7 @@ where
 
 impl<T, const R: usize> WSAState<T, R>
 where
-    T: fXX,
+    T: AsPrimitive<usize> + RealField,
 {
     /// Initialize [`WSAState`] from given input date.
     pub fn initialize(&mut self, dr: T, input: &WSAInputData<T>) {
@@ -71,12 +72,12 @@ where
 
 impl<T, const R: usize> Default for WSAState<T, R>
 where
-    T: fXX,
+    T: AsPrimitive<usize> + Default + RealField,
 {
     fn default() -> Self {
         Self {
             angle: T::default(),
-            wsahux: vec![WSASlice::new(T!(R as f64), 1); 1],
+            wsahux: vec![WSASlice::new(T::from_usize(R).unwrap(), 1); 1],
         }
     }
 }
@@ -89,10 +90,13 @@ where
 
 impl<T, const R: usize> WSASlice<T, R>
 where
-    T: fXX,
+    T: AsPrimitive<usize> + RealField,
 {
-    /// Create a new [`WSAStream`].
+    /// Create a new [`WSASlice`].
     pub fn new(dr: T, lon: usize) -> Self {
-        Self(DMatrix::zeros((T!(R as f64) / dr).as_(), lon))
+        Self(DMatrix::zeros(
+            (T::from_f64(R as f64).unwrap() / dr).as_(),
+            lon,
+        ))
     }
 }

@@ -1,64 +1,55 @@
-//! Coordinate systems, geometries and cs_state types.
+//! # Model geometries and coordinate systems.
 //!
-//! The [`OcnusCoords`] trait describes the coordinate systems, or *geometries*, that are used
-//! within the **ocnus** framework to conveniently describe the physical systems of the employed
-//! models. An implementation of the trait guarantuees the existance of bi-directional coordinate
-//! transformation functions, and methods that compute the covariant and contravariant basis
-//! vectors.
+//! This module primarily provides the [`OcnusCoords`] trait that is shared for all coordinate systems that describe a model geometry.
+//! The trait provides bi-directional coordinate transformation functions, and methods that compute the covariant and contravariant basis vectors.
 //!
-//! For consistency, the coordinate systems are all not orthonormal. Therefore, one must properly
-//! account for using co- and contravariant basis vectors. Simple geometries may nonetheless have
-//! orthogonal basis vectors.
-//!
-//! Implemented coordinate systems / geometries:
+//! For consistency, the coordinate systems are all not orthonormal. Therefore, one must properly account for using co- and contravariant basis vectors. Simple geometries may nonetheless have orthogonal basis vectors.
+
+//! Currently implemented coordinate systems / geometries:
 //! - [`CCGeometry`] A circular-cylindrical geometry with internal coordinates (r, ϕ, z) for flux
 //!   rope models.
 //! - [`ECGeometry`] An elliptic-cylindrical geometry with internal coordinates (μ, ν, z) for flux
 //!   rope models.
 //! - [`TTGeometry`] A tapered-toroidal geometry with an elliptical cross-section and internal
 //!   coordinates (μ, ν, s) for flux rope models.
-//! - [`SPHGeometry`] A spherical geometry with internal coordiantes (r, ϕ, θ) for solar wind or
-//!   spheromak models.
+//! - [`SPHGeometry`] A spherical geometry with internal coordiantes (r, ϕ, θ) for spheromak models.
+//! - [`USPHGeometry`] A unit sphere with internal coordiantes (r, ϕ, θ) for global heliospheric  (e.g. solar wind) models.
 //!
-//! Each geometry is associated with a coordinate system cs_state type that allows for the defintion
-//! of time-varying coordatinate systems. The coordinate system cs_state types must be initialized
-//! from the coordinate parameters using an implementation of [`OcnusCoords::initialize_cs`].
-//!
-//! Implemented coordinate system cs_state types:
-//! - [`XCState`] A generic coordinate system cs_state type for cylindrical geometries with arbitrary
-//!   cross-sections.
-//! - [`TTState`] A coordinate system cs_state type for [`TTGeometry`].
-//! - [`SPHState`] A coordinate system cs_state type for [`SPHGeometry`].
+//! Each geometry is associated with a fixed coordinate system state type, which enables the description of time-varying coordatinate systems.
+//! The coordinate system state types must be initialized from the coordinate system parameters using an implementation of [`OcnusCoords::initialize_cs`].
 
 mod sphgm;
 mod ttgm;
 mod xcgm;
 
-pub use sphgm::{CNSPHGeometry, SPHGeometry, SPHState};
+pub use sphgm::{SPHGeometry, SPHState, USPHGeometry};
 pub use ttgm::{TTGeometry, TTState};
 pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
-use crate::fXX;
-use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};
+use nalgebra::{
+    Const, Dim, RealField, Scalar, U1, Unit, UnitQuaternion, Vector3, VectorView, VectorView3,
+};
 use thiserror::Error;
 
-/// Errors associated with the [`coords`](crate::coords) module.
+/// Error types associated with the [`OcnusCoords`] trait.
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
 pub enum CoordsError {
     #[error("failed conversion from internal into external coordinates")]
-    ExternalCoordsNotFound,
+    ExternalCoordinatesNotFound,
     #[error("failed conversion from external into internal coordinates")]
-    InternalCoordsNotFound,
+    InternalCoordinatesNotFound,
 }
 
-/// A trait that must be implemented for any type that represents a 3D curvilinear coordinate
-/// system with `P` model parameters and a coordinate system cs_state type `CSST`.
+/// A trait that is shared by all coordinate systems describing a model geometry.
+///
+/// Each coordinate system is associated with a single coordinate system state type `CSST`.
 pub trait OcnusCoords<T, const P: usize, CSST>
 where
-    T: fXX,
+    T: Copy + RealField,
+    Self: Send + Sync,
 {
-    /// Static coordinate parameter names.
+    /// Coordinate system parameter names.
     const PARAMS: [&'static str; P];
 
     /// Computes the local contravariant basis vectors.
@@ -85,7 +76,7 @@ where
         _params: &VectorView<T, Const<P>, U1, CStride>,
         _state: &CSST,
     ) -> Result<[Vector3<T>; 3], CoordsError> {
-        unimplemented!("covariant basis vectors are currently not implemented")
+        unimplemented!("computation of the covariant basis vectors is currently not implemented")
     }
 
     /// Create a vector from contravariant components.
@@ -168,30 +159,33 @@ where
         cs_state: &CSST,
     ) -> Result<Vector3<T>, CoordsError>;
 
-    /// Test the implementation of the contravariant basis vectors.
+    /// Test the implemented trait functions.
     #[cfg(test)]
     fn test_implementation<CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<P>, U1, CStride>,
-
         delta_h: T,
     ) where
         CSST: Default,
     {
-        use crate::math::{T, abs};
-
         let mut cs_state = CSST::default();
 
         Self::initialize_cs(&params.fixed_rows::<P>(0), &mut cs_state).unwrap();
 
-        let ics_1p = ics + Vector3::<T>::x_axis().into_inner() * delta_h / T!(2.0);
-        let ics_1m = ics - Vector3::<T>::x_axis().into_inner() * delta_h / T!(2.0);
+        let ics_1p =
+            ics + Vector3::<T>::x_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
+        let ics_1m =
+            ics - Vector3::<T>::x_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
 
-        let ics_2p = ics + Vector3::<T>::y_axis().into_inner() * delta_h / T!(2.0);
-        let ics_2m = ics - Vector3::<T>::y_axis().into_inner() * delta_h / T!(2.0);
+        let ics_2p =
+            ics + Vector3::<T>::y_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
+        let ics_2m =
+            ics - Vector3::<T>::y_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
 
-        let ics_3p = ics + Vector3::<T>::z_axis().into_inner() * delta_h / T!(2.0);
-        let ics_3m = ics - Vector3::<T>::z_axis().into_inner() * delta_h / T!(2.0);
+        let ics_3p =
+            ics + Vector3::<T>::z_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
+        let ics_3m =
+            ics - Vector3::<T>::z_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
 
         let basis =
             Self::contravariant_basis(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state)
@@ -221,13 +215,68 @@ where
             Self::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
                 .unwrap();
 
-        assert!((basis[0] - (ecs_1p - ecs_1m) / delta_h).norm() < T!(10.0) * delta_h);
-        assert!((basis[1] - (ecs_2p - ecs_2m) / delta_h).norm() < T!(10.0) * delta_h);
-        assert!((basis[2] - (ecs_3p - ecs_3m) / delta_h).norm() < T!(10.0) * delta_h);
+        assert!(
+            (basis[0] - (ecs_1p - ecs_1m) / delta_h).norm() < T::from_usize(10).unwrap() * delta_h
+        );
+        assert!(
+            (basis[1] - (ecs_2p - ecs_2m) / delta_h).norm() < T::from_usize(10).unwrap() * delta_h
+        );
+        assert!(
+            (basis[2] - (ecs_3p - ecs_3m) / delta_h).norm() < T::from_usize(10).unwrap() * delta_h
+        );
 
-        let detg_basis = abs!(basis[0].cross(&basis[1]).dot(&basis[2]));
+        let detg_basis = (basis[0].cross(&basis[1]).dot(&basis[2])).abs();
         let detg_analy = Self::detg(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state).unwrap();
 
-        assert!(abs!(detg_basis / detg_analy - T::one()) < T!(1e-6));
+        assert!((detg_basis / detg_analy - T::one()).abs() < T::from_f64(1e-6).unwrap());
+    }
+}
+
+/// Generate unit quaternion from three successive rotations around the z, y and x-axis.
+pub fn quaternion_rot<T>(z_angle: T, y_angle: T, x_angle: T) -> UnitQuaternion<T>
+where
+    T: Copy + Scalar + RealField,
+{
+    let uz = Vector3::<T>::z_axis();
+    let uy = Vector3::<T>::y_axis();
+    let ux = Vector3::<T>::x_axis();
+
+    let rot_z = UnitQuaternion::from_axis_angle(&uz, z_angle);
+
+    let rot_y = UnitQuaternion::from_axis_angle(
+        &Unit::new_unchecked(rot_z.transform_vector(&uy)),
+        -y_angle,
+    );
+
+    let rot_x = UnitQuaternion::from_axis_angle(
+        &Unit::new_unchecked((rot_y * rot_z).transform_vector(&ux)),
+        x_angle,
+    );
+
+    rot_x * (rot_y * rot_z)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quaternions() {
+        assert!(quaternion_rot(0.0, 0.0, 0.0) == UnitQuaternion::identity());
+
+        let rad90 = 90.0_f64.to_radians();
+
+        assert!(
+            quaternion_rot(rad90, 0.0, 0.0)
+                == UnitQuaternion::new(Vector3::new(0.0, 0.0, 1.0) * rad90)
+        );
+        assert!(
+            quaternion_rot(0.0, rad90, 0.0)
+                == UnitQuaternion::new(Vector3::new(0.0, -1.0, 0.0) * rad90)
+        );
+        assert!(
+            quaternion_rot(0.0, 0.0, rad90)
+                == UnitQuaternion::new(Vector3::new(1.0, 0.0, 0.0) * rad90)
+        );
     }
 }

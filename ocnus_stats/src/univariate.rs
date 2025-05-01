@@ -1,4 +1,4 @@
-use crate::{OcnusPDF, StatsError};
+use crate::{Density, StatsError};
 use derive_more::{Deref, DerefMut, IntoIterator};
 use log::error;
 use nalgebra::{MatrixView, RealField, SVector, SVectorView, Scalar, U1};
@@ -23,11 +23,20 @@ impl<T, const N: usize> UnivariateND<T, N> {
     }
 }
 
-impl<T, const N: usize> OcnusPDF<T, N> for &UnivariateND<T, N>
+impl<T, const N: usize> Density<T, N> for &UnivariateND<T, N>
 where
     T: Copy + RealField + SampleUniform + Scalar,
     StandardNormal: Distribution<T>,
 {
+    fn constant_values(&self) -> [Option<T>; N] {
+        self.0
+            .iter()
+            .map(|uvpdf| uvpdf.constant_values()[0])
+            .collect::<Vec<Option<T>>>()
+            .try_into()
+            .unwrap()
+    }
+
     fn density_rel(&self, x: &SVectorView<T, N>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
@@ -80,11 +89,15 @@ pub enum Univariate1D<T> {
     Uniform(Uniform1D<T>),
 }
 
-impl<T> OcnusPDF<T, 1> for &Univariate1D<T>
+impl<T> Density<T, 1> for &Univariate1D<T>
 where
     T: Copy + RealField + SampleUniform + Scalar,
     StandardNormal: Distribution<T>,
 {
+    fn constant_values(&self) -> [Option<T>; 1] {
+        [None; 1]
+    }
+
     fn density_rel(&self, x: &MatrixView<T, U1, U1>) -> T {
         match self {
             Univariate1D::Constant(pdf) => pdf.density_rel(x),
@@ -120,21 +133,23 @@ where
 
 /// A constant probability density function.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Constant1D<T> {
-    constant: T,
-}
+pub struct Constant1D<T>(T);
 
 impl<T> Constant1D<T> {
     /// Create a new [`Univariate1D`].
     pub fn new(constant: T) -> Univariate1D<T> {
-        Univariate1D::Constant(Self { constant })
+        Univariate1D::Constant(Self(constant))
     }
 }
 
-impl<T> OcnusPDF<T, 1> for &Constant1D<T>
+impl<T> Density<T, 1> for &Constant1D<T>
 where
     T: Copy + RealField + Scalar,
 {
+    fn constant_values(&self) -> [Option<T>; 1] {
+        [Some(self.0); 1]
+    }
+
     fn density_rel(&self, x: &MatrixView<T, U1, U1>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
@@ -144,11 +159,11 @@ where
     }
 
     fn draw_sample(&self, _rng: &mut impl Rng) -> Result<SVector<T, 1>, StatsError<T>> {
-        Ok(SVector::from([self.constant]))
+        Ok(SVector::from([self.0]))
     }
 
     fn get_valid_range(&self) -> [(T, T); 1] {
-        [(self.constant, self.constant)]
+        [(self.0, self.0)]
     }
 }
 
@@ -178,10 +193,14 @@ where
     }
 }
 
-impl<T> OcnusPDF<T, 1> for &Cosine1D<T>
+impl<T> Density<T, 1> for &Cosine1D<T>
 where
     T: Copy + RealField + SampleUniform,
 {
+    fn constant_values(&self) -> [Option<T>; 1] {
+        [None; 1]
+    }
+
     fn density_rel(&self, x: &MatrixView<T, U1, U1>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
@@ -237,11 +256,15 @@ where
     }
 }
 
-impl<T> OcnusPDF<T, 1> for &Normal1D<T>
+impl<T> Density<T, 1> for &Normal1D<T>
 where
     T: Copy + RealField + SampleUniform,
     StandardNormal: Distribution<T>,
 {
+    fn constant_values(&self) -> [Option<T>; 1] {
+        [None; 1]
+    }
+
     fn density_rel(&self, x: &MatrixView<T, U1, U1>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
@@ -314,10 +337,14 @@ where
     }
 }
 
-impl<T> OcnusPDF<T, 1> for &Reciprocal1D<T>
+impl<T> Density<T, 1> for &Reciprocal1D<T>
 where
     T: Copy + RealField + SampleUniform,
 {
+    fn constant_values(&self) -> [Option<T>; 1] {
+        [None; 1]
+    }
+
     fn density_rel(&self, x: &MatrixView<T, U1, U1>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
@@ -378,10 +405,14 @@ where
     }
 }
 
-impl<T> OcnusPDF<T, 1> for &Uniform1D<T>
+impl<T> Density<T, 1> for &Uniform1D<T>
 where
     T: Copy + RealField + SampleUniform,
 {
+    fn constant_values(&self) -> [Option<T>; 1] {
+        [None; 1]
+    }
+
     fn density_rel(&self, x: &MatrixView<T, U1, U1>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();

@@ -1,8 +1,8 @@
-use crate::{fXX, math::abs, obser::OcnusObser};
+use crate::obser::OcnusObser;
 use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::Vector3;
+use nalgebra::{RealField, Vector3};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{Ordering, max},
@@ -35,13 +35,13 @@ impl<T, O> ScObs<T, O> {
     /// Compute distance betweeo two [`ScObs`]
     pub fn distance(&self, other: &Self) -> T
     where
-        T: fXX,
+        T: Copy + RealField,
     {
         let conf_0 = &self.configuration;
         let conf_1 = &other.configuration;
 
         match (conf_0, conf_1) {
-            (ScObsConf::Distance(x_0), ScObsConf::Distance(x_1)) => abs!(*x_1 - *x_0),
+            (ScObsConf::Distance(x_0), ScObsConf::Distance(x_1)) => (*x_1 - *x_0).abs(),
             (ScObsConf::Position(r_0), ScObsConf::Position(r_1)) => {
                 (Vector3::from(*r_1) - Vector3::from(*r_0)).norm()
             }

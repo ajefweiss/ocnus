@@ -1,3 +1,4 @@
+use crate::{CovMatrix, Density, StatsError};
 use log::error;
 use nalgebra::{Const, DMatrix, Dyn, MatrixView, RealField, SVector, SVectorView, Scalar};
 use rand::Rng;
@@ -8,11 +9,9 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
-use crate::{CovMatrix, OcnusPDF, StatsError};
-
 /// A multivariate normal probability density function.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MultivariateND<T, const P: usize>
+pub struct MultivariateND<T, const N: usize>
 where
     T: Scalar,
 {
@@ -20,19 +19,24 @@ where
     covmat: CovMatrix<T>,
 
     /// The mean parameter of the multivariate normal distribution.
-    mean: SVector<T, P>,
+    mean: SVector<T, N>,
 
     /// Valid parameter range.
     #[serde(with = "serde_arrays")]
-    range: [(T, T); P],
+    range: [(T, T); N],
 }
 
-impl<T, const P: usize> MultivariateND<T, P>
+impl<T, const N: usize> MultivariateND<T, N>
 where
     T: Copy + RealField + Scalar,
+    StandardNormal: Distribution<T>,
 {
-    /// Estimates the exact density  at a specific position `x`.
-    pub fn density(&self, x: &SVectorView<T, P>) -> T {
+    /// Calculates the exact density  at a specific position `x`.
+    pub fn density(&self, x: &SVectorView<T, N>) -> T {
+        if !self.validate_sample(x) {
+            return (-T::one()).sqrt();
+        }
+
         let diff = x - self.mean;
         let value = (diff.transpose() * self.covmat.ref_matrix_inverse() * diff)[(0, 0)];
 
@@ -52,8 +56,13 @@ where
             / ((T::two_pi()).powi(p_nonzero as i32) * self.covmat.determinant()).sqrt()
     }
 
+    /// Returns the pseudo-determinant of the covariance matrix.
+    pub fn determinant(&self) -> T {
+        self.covmat.determinant()
+    }
+
     /// Create a [`MultivariateND`] from a covariance matrix.
-    pub fn from_covmat(covmat: CovMatrix<T>, mean: SVector<T, P>, range: [(T, T); P]) -> Self {
+    pub fn from_covmat(covmat: CovMatrix<T>, mean: SVector<T, N>, range: [(T, T); N]) -> Self {
         Self {
             covmat,
             mean,
@@ -63,8 +72,8 @@ where
 
     /// Create a [`MultivariateND`] from an ensemble of particles.
     pub fn from_particles<'a>(
-        particles: &MatrixView<'a, T, Const<P>, Dyn>,
-        range: [(T, T); P],
+        particles: &MatrixView<'a, T, Const<N>, Dyn>,
+        range: [(T, T); N],
         weights: Option<&[T]>,
     ) -> Option<Self>
     where
@@ -80,29 +89,84 @@ where
     }
 
     /// Compute the Kullback-Leibler divergence between two [`MultivariateND`].
-    pub fn kullback_leibler_divergence(&self, other: &MultivariateND<T, P>) -> T
+    pub fn kullback_leibler_divergence(
+        &self,
+        other: &MultivariateND<T, N>,
+    ) -> Result<T, StatsError<T>>
     where
         T: Sum + for<'x> Sum<&'x T>,
     {
-        let l_0 = self.covmat.ref_cholesky_ltm();
+        if self.covmat.ndim() != other.covmat.ndim() {
+            return Err(StatsError::InvalidCovMatrix {
+                msg: "covariance matrix dimensions are mismatched",
+                covm_ndim: self.covmat.ndim(),
+                expd_ndim: other.covmat.ndim(),
+            });
+        }
+
+        let mut l_0 = self.covmat.ref_cholesky_ltm().clone();
         let mu_0 = self.mean;
 
-        let l_1 = other.covmat.ref_cholesky_ltm();
+        let mut l_1 = other.covmat.ref_cholesky_ltm().clone();
         let mu_1 = other.mean;
 
-        let m = l_0.clone().cholesky().unwrap().solve(&l_1);
-        let y = l_1.clone().cholesky().unwrap().solve(&(&mu_1 - &mu_0));
+        let mut p_nonzero = N;
 
-        (m.iter().sum::<T>() - T::from_usize(P).unwrap()
+        // Detect zero'd columns/rows that need to be modified.
+        (0..l_0.nrows()).for_each(|idx| {
+            if l_0[(idx, idx)].eq(&T::zero()) {
+                l_0[(idx, idx)] = T::one() / T::zero();
+
+                p_nonzero -= 1;
+
+                // Set off diagonals to zero.
+                for jdx in 0..l_0.ncols() {
+                    if jdx != idx {
+                        l_0[(idx, jdx)] = T::zero();
+                        l_0[(jdx, idx)] = T::zero();
+                    }
+                }
+            };
+        });
+
+        let m = l_0.clone().solve_lower_triangular(&l_1).unwrap();
+
+        // Detect zero'd columns/rows that need to be modified.
+        (0..l_1.nrows()).for_each(|idx| {
+            if l_1[(idx, idx)].eq(&T::zero()) {
+                l_1[(idx, idx)] = T::one() / T::zero();
+
+                // Set off diagonals to zero.
+                for jdx in 0..l_1.ncols() {
+                    if jdx != idx {
+                        l_1[(idx, jdx)] = T::zero();
+                        l_1[(jdx, idx)] = T::zero();
+                    }
+                }
+            };
+        });
+
+        let y = l_1
+            .clone()
+            .solve_lower_triangular(&(&mu_1 - &mu_0))
+            .unwrap();
+
+        Ok((m.iter().sum::<T>() - T::from_usize(p_nonzero).unwrap()
             + y.norm()
             + T::from_usize(2).unwrap()
                 * l_1
                     .diagonal()
                     .iter()
                     .zip(l_0.diagonal().iter())
-                    .map(|(a, b)| (*a / *b).ln())
+                    .map(|(a, b)| {
+                        if a.is_finite() && b.is_finite() {
+                            (*a / *b).ln()
+                        } else {
+                            T::zero()
+                        }
+                    })
                     .sum::<T>())
-            / T::from_usize(2).unwrap()
+            / T::from_usize(2).unwrap())
     }
 
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition
@@ -120,14 +184,37 @@ where
     pub fn ref_matrix(&self) -> &DMatrix<T> {
         &self.covmat.ref_matrix()
     }
+
+    /// Returns the center of the multivariate normal density.
+    pub fn ref_mean(&self) -> &SVector<T, N> {
+        &self.mean
+    }
 }
 
-impl<T, const P: usize> OcnusPDF<T, P> for &MultivariateND<T, P>
+impl<T, const N: usize> Density<T, N> for &MultivariateND<T, N>
 where
     T: Copy + RealField,
     StandardNormal: Distribution<T>,
 {
-    fn density_rel(&self, x: &SVectorView<T, P>) -> T {
+    fn constant_values(&self) -> [Option<T>; N] {
+        self.covmat
+            .ref_matrix()
+            .diagonal()
+            .iter()
+            .zip(self.mean.iter())
+            .map(|(cov, mean)| {
+                if cov.eq(&T::zero()) {
+                    Some(*mean)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<Option<T>>>()
+            .try_into()
+            .unwrap()
+    }
+
+    fn density_rel(&self, x: &SVectorView<T, N>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
         }
@@ -138,12 +225,12 @@ where
         (-value / T::from_usize(2).unwrap()).exp()
     }
 
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, P>, StatsError<T>> {
+    fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, N>, StatsError<T>> {
         let normal = StandardNormal;
 
         let mut proposal = self.mean
             + self.covmat.ref_cholesky_ltm()
-                * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+                * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
@@ -151,7 +238,7 @@ where
         while !self.validate_sample(&proposal.as_view()) {
             proposal = self.mean
                 + self.covmat.ref_cholesky_ltm()
-                    * SVector::<T, P>::from_iterator((0..P).map(|_| rng.sample(normal)));
+                    * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
@@ -171,18 +258,18 @@ where
         Ok(proposal)
     }
 
-    fn get_valid_range(&self) -> [(T, T); P] {
+    fn get_valid_range(&self) -> [(T, T); N] {
         self.range
     }
 }
 
-impl<T, const P: usize> Add<&SVector<T, P>> for MultivariateND<T, P>
+impl<T, const N: usize> Add<&SVector<T, N>> for MultivariateND<T, N>
 where
     T: Clone + RealField + Scalar,
 {
-    type Output = MultivariateND<T, P>;
+    type Output = MultivariateND<T, N>;
 
-    fn add(self, rhs: &SVector<T, P>) -> Self::Output {
+    fn add(self, rhs: &SVector<T, N>) -> Self::Output {
         Self {
             covmat: self.covmat,
             mean: self.mean + rhs,
@@ -191,20 +278,20 @@ where
     }
 }
 
-impl<T, const P: usize> AddAssign<&SVector<T, P>> for MultivariateND<T, P>
+impl<T, const N: usize> AddAssign<&SVector<T, N>> for MultivariateND<T, N>
 where
     T: Clone + RealField + Scalar,
 {
-    fn add_assign(&mut self, rhs: &SVector<T, P>) {
+    fn add_assign(&mut self, rhs: &SVector<T, N>) {
         self.mean += rhs
     }
 }
 
-impl<T, const P: usize> Mul<T> for MultivariateND<T, P>
+impl<T, const N: usize> Mul<T> for MultivariateND<T, N>
 where
     T: Copy + RealField + Scalar,
 {
-    type Output = MultivariateND<T, P>;
+    type Output = MultivariateND<T, N>;
 
     fn mul(self, rhs: T) -> Self::Output {
         Self {
@@ -215,7 +302,7 @@ where
     }
 }
 
-impl<T, const P: usize> MulAssign<T> for MultivariateND<T, P>
+impl<T, const N: usize> MulAssign<T> for MultivariateND<T, N>
 where
     T: Copy + RealField + Scalar,
 {
@@ -224,13 +311,13 @@ where
     }
 }
 
-impl<T, const P: usize> Sub<&SVector<T, P>> for MultivariateND<T, P>
+impl<T, const N: usize> Sub<&SVector<T, N>> for MultivariateND<T, N>
 where
     T: Copy + RealField + Scalar,
 {
-    type Output = MultivariateND<T, P>;
+    type Output = MultivariateND<T, N>;
 
-    fn sub(self, rhs: &SVector<T, P>) -> Self::Output {
+    fn sub(self, rhs: &SVector<T, N>) -> Self::Output {
         Self {
             covmat: self.covmat,
             mean: self.mean - rhs,
@@ -239,11 +326,11 @@ where
     }
 }
 
-impl<T, const P: usize> SubAssign<&SVector<T, P>> for MultivariateND<T, P>
+impl<T, const N: usize> SubAssign<&SVector<T, N>> for MultivariateND<T, N>
 where
     T: Copy + RealField + Scalar,
 {
-    fn sub_assign(&mut self, rhs: &SVector<T, P>) {
+    fn sub_assign(&mut self, rhs: &SVector<T, N>) {
         self.mean -= rhs
     }
 }
@@ -266,7 +353,7 @@ mod tests {
                 if idx % 3 == 1 {
                     0.0
                 } else {
-                    (idx % 3) as f32 + rng.sample::<f32, StandardNormal>(uniform)
+                    rng.sample::<f32, StandardNormal>(uniform)
                 }
             }),
         );
@@ -287,7 +374,7 @@ mod tests {
 
         assert!(
             (&mvpdf)
-                .density_rel(&SVector::from([2.2, 0.0, 0.35]).as_view())
+                .density_rel(&SVector::from([0.2, 0.1, 0.35]).as_view())
                 .is_nan()
         );
 
@@ -303,5 +390,40 @@ mod tests {
             MultivariateND::from_particles(array_view, [(-0.75, 0.75); 3], None).unwrap();
 
         assert!(mvpdf.covmat.ref_matrix() == mvpdf_ensbl.covmat.ref_matrix());
+    }
+
+    #[test]
+    fn test_multivariate_kld() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let uniform = StandardNormal;
+
+        let array_1 = Matrix::<f32, U3, Dyn, VecStorage<f32, U3, Dyn>>::from_iterator(
+            10000,
+            (0..30000).map(|idx| {
+                if idx % 3 == 1 {
+                    0.0
+                } else {
+                    rng.sample::<f32, StandardNormal>(uniform)
+                }
+            }),
+        );
+
+        let array_2 = Matrix::<f32, U3, Dyn, VecStorage<f32, U3, Dyn>>::from_iterator(
+            10000,
+            (0..30000).map(|idx| {
+                if idx % 3 == 1 {
+                    0.0
+                } else {
+                    0.25 + rng.sample::<f32, StandardNormal>(uniform)
+                }
+            }),
+        );
+
+        let mvpdf_1 =
+            MultivariateND::from_particles(&array_1.as_view(), [(-2.0, 2.0); 3], None).unwrap();
+        let mvpdf_2 =
+            MultivariateND::from_particles(&array_2.as_view(), [(-2.0, 2.0); 3], None).unwrap();
+
+        assert!((mvpdf_1.kullback_leibler_divergence(&mvpdf_2).unwrap() - 0.20391017).abs() < 1e-6);
     }
 }

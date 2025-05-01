@@ -1,69 +1,25 @@
-//! Forward simulation models.
-//!
-//! The [`OcnusFSM`] trait represent a forward simulation with a generic observable type.
-//! A [`OcnusFSM`] must be built on-top of a coordiante system / geometry, i.e. it must also
-//! implement [`OcnusCoords`]. Any OcnusFSM is also by extension associated with the coordinate
-//! system state type `CSST` of the underlying coordinate system, and is additonally associated
-//! with its own forward simulation model state type `FMST`.
-//!
-//! For models that are sufficiently fast, this trait also provides ensemble methods with a
-//! corresponding data structure [`FSMEnsbl`] to hold an ensemble.
-
-pub mod filters;
-mod fisher;
-mod models;
-
-pub use fisher::FisherInformation;
-pub use models::{
-    CCLFFModel, CCUTModel, COREModel, COREState, ECHModel, WSAHUXModel, WSAInputData, WSAState,
-};
-
 use crate::{
-    OcnusError,
+    OcnusEnsbl, OcnusError,
     coords::OcnusCoords,
-    fXX,
     obser::{ObserVec, OcnusNoise, OcnusObser, ScObs, ScObsSeries},
+    stats::{Density, ParticlesND, StatsError},
 };
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{
-    Const, DMatrixViewMut, Dim, Dyn, Matrix, SVectorView, SVectorViewMut, Scalar, VecStorage,
-};
-use ocnus_stats::{OcnusPDF, ParticlesND, StatsError};
+use nalgebra::{DMatrixViewMut, Dim, RealField, SVectorView, SVectorViewMut, Scalar};
 use rand::{Rng, SeedableRng};
-use rand_distr::uniform::SampleUniform;
+use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::{io::Write, ops::AddAssign, time::Instant};
+use std::{ops::AddAssign, time::Instant};
 use thiserror::Error;
 
-/// Errors associated with forward simulation models.
-#[allow(missing_docs)]
-#[derive(Debug, Error)]
-pub enum FSMError<T> {
-    #[error("observation is invalid")]
-    InvalidObservation,
-    #[error(
-        "invalid output array shape: found {output_rows} x {output_cols} 
-        but expected {expected_rows} x {expected_cols}"
-    )]
-    InvalidOutputShape {
-        expected_cols: usize,
-        expected_rows: usize,
-        output_cols: usize,
-        output_rows: usize,
-    },
-    #[error("forward simulation is backwards in time (dt=-{0:.2}sec)")]
-    NegativeTimeStep(T),
-}
-
-/// The trait that must be implemented for any forward simulation model with an observable of type
-/// `O` and a forward simulation model state type of `FMST`.
-pub trait OcnusFSM<T, O, const P: usize, FMST, CSST>: OcnusCoords<T, P, CSST>
+/// A trait that is shared by all forward simulation models.
+pub trait OcnusModel<T, O, const P: usize, FMST, CSST>: OcnusCoords<T, P, CSST>
 where
-    T: fXX,
+    T: Copy + RealField,
     O: OcnusObser,
+    StandardNormal: Distribution<T>,
 {
     /// The base rayon chunk size that is used for any parallel iterators.
     ///
@@ -71,16 +27,16 @@ where
     const RCS: usize;
 
     /// Evolve a model state forward in time.
-    fn fsm_forward(
+    fn forward(
         &self,
         time_step: T,
         params: &SVectorView<T, P>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
-    ) -> Result<(), FSMError<T>>;
+    ) -> Result<(), ModelError<T>>;
 
     /// Initialize the model parameters, the coordinate system and forward model states.
-    fn fsm_initialize<D>(
+    fn initialize<D>(
         &self,
         series: &ScObsSeries<T, O>,
         params: &mut SVectorViewMut<T, P>,
@@ -90,24 +46,24 @@ where
         rng: &mut impl Rng,
     ) -> Result<(), OcnusError<T>>
     where
-        for<'x> &'x D: OcnusPDF<T, P>,
+        for<'x> &'x D: Density<T, P>,
     {
-        self.fsm_initialize_params(params, opt_pdf, rng)?;
-        self.fsm_initialize_states(series, &params.as_view(), fm_state, cs_state)?;
+        self.initialize_params(params, opt_pdf, rng)?;
+        self.initialize_states(series, &params.as_view(), fm_state, cs_state)?;
 
         Ok(())
     }
 
     /// Initialize the model parameters, the coordinate system and forward model states for an ensemble.
-    fn fsm_initialize_ensbl<D>(
+    fn initialize_ensbl<D>(
         &self,
         series: &ScObsSeries<T, O>,
-        ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
         opt_pdf: Option<&D>,
         rseed: u64,
     ) -> Result<(), OcnusError<T>>
     where
-        for<'x> &'x D: OcnusPDF<T, P>,
+        for<'x> &'x D: Density<T, P>,
         FMST: Send,
         CSST: Send,
         Self: Sync,
@@ -127,7 +83,7 @@ where
                 chunks
                     .iter_mut()
                     .try_for_each(|((params, fm_state), cs_state)| {
-                        self.fsm_initialize(series, params, fm_state, cs_state, opt_pdf, &mut rng)?;
+                        self.initialize(series, params, fm_state, cs_state, opt_pdf, &mut rng)?;
 
                         Ok::<(), OcnusError<T>>(())
                     })?;
@@ -145,10 +101,10 @@ where
     }
 
     /// Initialize the model parameters
-    fn fsm_initialize_params(
+    fn initialize_params(
         &self,
         params: &mut SVectorViewMut<T, P>,
-        opt_pdf: Option<impl OcnusPDF<T, P>>,
+        opt_pdf: Option<impl Density<T, P>>,
         rng: &mut impl Rng,
     ) -> Result<(), StatsError<T>> {
         params.set_column(
@@ -163,14 +119,14 @@ where
     }
 
     /// Initialize the model parameters for an ensemble.
-    fn fsm_initialize_params_ensbl<D>(
+    fn initialize_params_ensbl<D>(
         &self,
-        ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
         opt_pdf: Option<&D>,
         rseed: u64,
     ) -> Result<(), OcnusError<T>>
     where
-        for<'x> &'x D: OcnusPDF<T, P>,
+        for<'x> &'x D: Density<T, P>,
         FMST: Send,
         CSST: Send,
         Self: Sync,
@@ -186,7 +142,7 @@ where
                 let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 17) as u64);
 
                 chunks.iter_mut().try_for_each(|params| {
-                    self.fsm_initialize_params(params, opt_pdf, &mut rng)?;
+                    self.initialize_params(params, opt_pdf, &mut rng)?;
 
                     Ok::<(), OcnusError<T>>(())
                 })?;
@@ -204,7 +160,7 @@ where
     }
 
     /// Initialize the coordinate system and forward model states.
-    fn fsm_initialize_states(
+    fn initialize_states(
         &self,
         series: &ScObsSeries<T, O>,
         params: &SVectorView<T, P>,
@@ -213,10 +169,10 @@ where
     ) -> Result<(), OcnusError<T>>;
 
     /// Initialize the the coordinate system and forward model states for an ensemble.
-    fn fsm_initialize_states_ensbl(
+    fn initialize_states_ensbl(
         &self,
         series: &ScObsSeries<T, O>,
-        ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
     ) -> Result<(), OcnusError<T>>
     where
         FMST: Send,
@@ -235,7 +191,7 @@ where
                 chunks
                     .iter_mut()
                     .try_for_each(|((params, fm_state), cs_state)| {
-                        self.fsm_initialize_states(series, params, fm_state, cs_state)?;
+                        self.initialize_states(series, params, fm_state, cs_state)?;
 
                         Ok::<(), OcnusError<T>>(())
                     })?;
@@ -252,8 +208,8 @@ where
         Ok(())
     }
 
-    /// Generate a vector observable.
-    fn fsm_observe(
+    /// Generate an observable, dependent on the spacecraft observation configuration.
+    fn observe(
         &self,
         scobs: &ScObs<T, O>,
         params: &SVectorView<T, P>,
@@ -262,7 +218,7 @@ where
     ) -> Result<O, OcnusError<T>>;
 
     /// Return internal coordinates and the basis vectors at the location of the observation.
-    fn fsm_observe_ics_plus_basis(
+    fn observe_ics_plus_basis(
         &self,
         scobs: &ScObs<T, O>,
         params: &SVectorView<T, P>,
@@ -271,10 +227,10 @@ where
     ) -> Result<ObserVec<T, 12>, OcnusError<T>>;
 
     /// Resample the model parameters, and re-initialize the coordinate system and forward model states for an ensemble.
-    fn fsm_resample_ensbl(
+    fn resample_ensbl(
         &self,
         series: &ScObsSeries<T, O>,
-        ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
         pdf: &ParticlesND<T, P>,
         rseed: u64,
     ) -> Result<(), OcnusError<T>>
@@ -301,7 +257,7 @@ where
                     .try_for_each(|((params, fm_state), cs_state)| {
                         params.set_column(0, &pdf.resample(&mut rng));
 
-                        self.fsm_initialize_states(
+                        self.initialize_states(
                             series,
                             &params.fixed_rows::<P>(0),
                             fm_state,
@@ -326,7 +282,7 @@ where
     /// Perform a forward simulation and generate synthetic observables for the given spacecraft
     /// observers. Returns true/false if the observation series is valid w.r.t. the spacecraft
     /// observatin series.
-    fn fsm_simulate<RStride: Dim, CStride: Dim>(
+    fn simulate<RStride: Dim, CStride: Dim>(
         &self,
         series: &ScObsSeries<T, O>,
         params: &SVectorView<T, P>,
@@ -337,7 +293,7 @@ where
         let mut timer = T::zero();
 
         if (series.len() != out_array.nrows()) || (out_array.ncols() != 1) {
-            return Err(FSMError::InvalidOutputShape {
+            return Err(ModelError::InvalidOutputShape {
                 expected_cols: 1,
                 expected_rows: series.len(),
                 output_cols: out_array.ncols(),
@@ -352,10 +308,10 @@ where
             timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
-                return Err(FSMError::NegativeTimeStep(time_step).into());
+                return Err(ModelError::NegativeTimeStep(time_step).into());
             } else {
-                self.fsm_forward(time_step, params, fm_state, cs_state)?;
-                out_row[(0, 0)] = self.fsm_observe(scobs, params, fm_state, cs_state)?;
+                self.forward(time_step, params, fm_state, cs_state)?;
+                out_row[(0, 0)] = self.observe(scobs, params, fm_state, cs_state)?;
             }
 
             Ok::<(), OcnusError<T>>(())
@@ -372,10 +328,10 @@ where
     /// Perform an ensemble forward simulation and generate synthetic observables for the given
     /// spacecraft observers. Returns the indices of ensemble members that are valid w.r.t.
     /// to the spacecraft observation series.
-    fn fsm_simulate_ensbl<N>(
+    fn simulate_ensbl<N>(
         &self,
         series: &ScObsSeries<T, O>,
-        ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
         out_array: &mut DMatrixViewMut<O>,
         opt_noise: Option<&mut N>,
     ) -> Result<Vec<bool>, OcnusError<T>>
@@ -390,7 +346,7 @@ where
         let mut timer = T::zero();
 
         if (series.len() != out_array.nrows()) || (out_array.ncols() != ensbl.len()) {
-            return Err(FSMError::InvalidOutputShape {
+            return Err(ModelError::InvalidOutputShape {
                 expected_cols: ensbl.len(),
                 expected_rows: series.len(),
                 output_cols: out_array.ncols(),
@@ -405,7 +361,7 @@ where
             timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
-                return Err(FSMError::NegativeTimeStep(time_step).into());
+                return Err(ModelError::NegativeTimeStep(time_step).into());
             } else {
                 ensbl
                     .params_array
@@ -417,10 +373,9 @@ where
                     .try_for_each(|mut chunks| {
                         chunks.iter_mut().try_for_each(
                             |(((params, fm_state), cs_state), out)| {
-                                self.fsm_forward(time_step, params, fm_state, cs_state)?;
+                                self.forward(time_step, params, fm_state, cs_state)?;
 
-                                out[(0, 0)] =
-                                    self.fsm_observe(scobs, params, fm_state, cs_state)?;
+                                out[(0, 0)] = self.observe(scobs, params, fm_state, cs_state)?;
 
                                 Ok::<(), OcnusError<T>>(())
                             },
@@ -452,7 +407,7 @@ where
         }
 
         debug!(
-            "fsm_simulate_ensbl: {:2.2}M evaluations in {:.2} sec",
+            "simulate_ensbl: {:2.2}M evaluations in {:.2} sec",
             (series.len() * ensbl.len()) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3
         );
@@ -476,7 +431,7 @@ where
 
     /// Perform a forward simulation and return the internal coordinates and basis vectors for
     /// the given spacecraft observers.
-    fn fsm_simulate_ics_plus_basis(
+    fn simulate_ics_plus_basis(
         &self,
         series: &ScObsSeries<T, O>,
         params: &SVectorView<T, P>,
@@ -487,7 +442,7 @@ where
         let mut timer = T::zero();
 
         if (series.len() != out_array.nrows()) || (out_array.ncols() != 1) {
-            return Err(FSMError::InvalidOutputShape {
+            return Err(ModelError::InvalidOutputShape {
                 expected_cols: 1,
                 expected_rows: series.len(),
                 output_cols: out_array.ncols(),
@@ -502,10 +457,10 @@ where
             timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
-                return Err(FSMError::NegativeTimeStep(time_step).into());
+                return Err(ModelError::NegativeTimeStep(time_step).into());
             } else {
-                self.fsm_forward(time_step, params, fm_state, cs_state)?;
-                out[(0, 0)] = self.fsm_observe_ics_plus_basis(scobs, params, fm_state, cs_state)?;
+                self.forward(time_step, params, fm_state, cs_state)?;
+                out[(0, 0)] = self.observe_ics_plus_basis(scobs, params, fm_state, cs_state)?;
             }
 
             Ok::<(), OcnusError<T>>(())
@@ -516,10 +471,10 @@ where
 
     /// Perform an ensemble forward simulation and return the internal coordinates and basis
     /// vectors for  the given spacecraft observers.
-    fn fsm_simulate_ics_plus_basis_ensbl(
+    fn simulate_ics_plus_basis_ensbl(
         &self,
         series: &ScObsSeries<T, O>,
-        ensbl: &mut FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
         out_array: &mut DMatrixViewMut<ObserVec<T, 12>>,
     ) -> Result<(), OcnusError<T>>
     where
@@ -532,7 +487,7 @@ where
         let mut timer = T::zero();
 
         if (series.len() != out_array.nrows()) || (out_array.ncols() != ensbl.len()) {
-            return Err(FSMError::InvalidOutputShape {
+            return Err(ModelError::InvalidOutputShape {
                 expected_cols: ensbl.len(),
                 expected_rows: series.len(),
                 output_cols: out_array.ncols(),
@@ -547,7 +502,7 @@ where
             timer = *scobs.get_timestamp();
 
             if time_step < T::zero() {
-                return Err(FSMError::NegativeTimeStep(time_step).into());
+                return Err(ModelError::NegativeTimeStep(time_step).into());
             } else {
                 ensbl
                     .params_array
@@ -559,11 +514,10 @@ where
                     .try_for_each(|mut chunks| {
                         chunks.iter_mut().try_for_each(
                             |(((params, fm_state), cs_state), out)| {
-                                self.fsm_forward(time_step, params, fm_state, cs_state)?;
+                                self.forward(time_step, params, fm_state, cs_state)?;
 
-                                out[(0, 0)] = self.fsm_observe_ics_plus_basis(
-                                    scobs, params, fm_state, cs_state,
-                                )?;
+                                out[(0, 0)] =
+                                    self.observe_ics_plus_basis(scobs, params, fm_state, cs_state)?;
 
                                 Ok::<(), OcnusError<T>>(())
                             },
@@ -577,7 +531,7 @@ where
         })?;
 
         debug!(
-            "fsm_simulate_ics_plus_basis_ensbl: {:2.2}M evaluations in {:.2} sec",
+            "simulate_ics_plus_basis_ensbl: {:2.2}M evaluations in {:.2} sec",
             (series.len() * ensbl.len()) as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3
         );
@@ -585,68 +539,28 @@ where
     }
 
     /// Returns a reference to the underlying model prior.
-    fn model_prior(&self) -> impl OcnusPDF<T, P>;
+    fn model_prior(&self) -> impl Density<T, P>;
 
     /// Step sizes for finite differences.
     fn param_step_sizes(&self) -> [T; P];
 }
 
-/// A data structure that stores an ensemble of model parameters and states for a [`OcnusFSM`].
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FSMEnsbl<T, const P: usize, FMST, CSST>
-where
-    T: fXX,
-{
-    /// Ensemble model parameters.
-    pub params_array: Matrix<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>,
-
-    /// Forward model states
-    pub fm_states: Vec<FMST>,
-
-    /// Coordinate system states.
-    pub cs_states: Vec<CSST>,
-
-    /// Ensemble weights.
-    pub weights: Vec<T>,
-}
-
-impl<T, const P: usize, FMST, CSST> FSMEnsbl<T, P, FMST, CSST>
-where
-    T: fXX,
-{
-    /// Returns true if the ensemble contains no members.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Returns the number of members in the ensemble, also referred to as its 'length'.
-    pub fn len(&self) -> usize {
-        self.params_array.ncols()
-    }
-
-    /// Create a new [`FSMEnsbl`] filled with zeros.
-    pub fn new(size: usize) -> Self
-    where
-        FMST: Default + Clone,
-        CSST: Default + Clone,
-    {
-        Self {
-            params_array: Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::zeros(size),
-            fm_states: vec![FMST::default(); size],
-            cs_states: vec![CSST::default(); size],
-            weights: vec![T::one() / T::from_usize(size).unwrap(); size],
-        }
-    }
-
-    /// Serialize ensemble to a JSON file.
-    pub fn save(&self, path: String) -> std::io::Result<()>
-    where
-        Self: Serialize,
-    {
-        let mut file = std::fs::File::create(path)?;
-
-        file.write_all(serde_json5::to_string(&self).unwrap().as_bytes())?;
-
-        Ok(())
-    }
+/// Error types associated with the [`OcnusModel`] trait.
+#[allow(missing_docs)]
+#[derive(Debug, Error)]
+pub enum ModelError<T> {
+    #[error("observation is unexpecteedly not valid")]
+    InvalidObservation,
+    #[error(
+        "invalid output array shape: found {output_rows} x {output_cols} 
+        but expected {expected_rows} x {expected_cols}"
+    )]
+    InvalidOutputShape {
+        expected_cols: usize,
+        expected_rows: usize,
+        output_cols: usize,
+        output_rows: usize,
+    },
+    #[error("attempted to simulate is backwards in time (dt=-{0:.2}sec)")]
+    NegativeTimeStep(T),
 }

@@ -1,17 +1,13 @@
-use crate::{
-    coords::{CoordsError, OcnusCoords},
-    fXX,
-    math::{acos, atan2, cos, powi, sin},
-};
-use nalgebra::{Const, Dim, U1, Vector3, VectorView, VectorView3};
+use crate::coords::{CoordsError, OcnusCoords};
+use nalgebra::{Const, Dim, RealField, U1, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
-/// Coordinate system cs_state type for a spherical geometry
+/// Coordinate system state type for a spherical geometry
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct SPHState<T>
 where
-    T: fXX,
+    T: RealField,
 {
     /// Spherical center.
     pub center: Vector3<T>,
@@ -23,25 +19,25 @@ where
 /// Spherical geometry with arbitrary center position and radius.
 pub struct SPHGeometry<T>(PhantomData<T>)
 where
-    T: fXX;
+    T: RealField;
 
 impl<T> Default for SPHGeometry<T>
 where
-    T: fXX,
+    T: RealField,
 {
     fn default() -> Self {
         Self(PhantomData::<T>)
     }
 }
 
-/// Centered normalized spherical geometry.
-pub struct CNSPHGeometry<T>(PhantomData<T>)
+/// Spherical geometry for a unit sphere centered on the origin.
+pub struct USPHGeometry<T>(PhantomData<T>)
 where
-    T: fXX;
+    T: RealField;
 
-impl<T> Default for CNSPHGeometry<T>
+impl<T> Default for USPHGeometry<T>
 where
-    T: fXX,
+    T: RealField,
 {
     fn default() -> Self {
         Self(PhantomData::<T>)
@@ -50,7 +46,7 @@ where
 
 impl<T> OcnusCoords<T, 4, SPHState<T>> for SPHGeometry<T>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     const PARAMS: [&'static str; 4] = ["center_x0", "center_y0", "center_z0", "radius_0"];
 
@@ -67,15 +63,15 @@ where
 
         Ok([
             Vector3::new(
-                cos!(phi) * sin!(theta),
-                sin!(phi) * sin!(theta),
-                cos!(theta),
+                phi.cos() * theta.sin(),
+                phi.sin() * theta.sin(),
+                theta.cos(),
             ) * radius,
-            Vector3::new(-sin!(phi) * sin!(theta), cos!(phi) * sin!(theta), T::zero()) * radius * r,
+            Vector3::new(-phi.sin() * theta.sin(), phi.cos() * theta.sin(), T::zero()) * radius * r,
             Vector3::new(
-                cos!(phi) * cos!(theta),
-                sin!(phi) * cos!(theta),
-                -sin!(theta),
+                phi.cos() * theta.cos(),
+                phi.sin() * theta.cos(),
+                -theta.sin(),
             ) * radius
                 * r,
         ])
@@ -92,7 +88,7 @@ where
         let r = ics[0];
         let theta = ics[2];
 
-        Ok(powi!(r, 2) * powi!(radius, 3) * sin!(theta))
+        Ok(r.powi(2) * radius.powi(3) * theta.sin())
     }
 
     fn initialize_cs<CStride: Dim>(
@@ -123,9 +119,9 @@ where
         let theta = ics[2];
 
         Ok(Vector3::new(
-            radius * r * cos!(phi) * sin!(theta),
-            radius * r * sin!(phi) * sin!(theta),
-            radius * r * cos!(theta),
+            radius * r * phi.cos() * theta.sin(),
+            radius * r * phi.sin() * theta.sin(),
+            radius * r * theta.cos(),
         ) + center)
     }
 
@@ -142,15 +138,15 @@ where
 
         Ok(Vector3::new(
             vn / radius,
-            atan2!(v[1], v[0]),
-            acos!(v[2] / vn),
+            v[1].atan2(v[0]),
+            (v[2] / vn).acos(),
         ))
     }
 }
 
-impl<T> OcnusCoords<T, 0, ()> for CNSPHGeometry<T>
+impl<T> OcnusCoords<T, 0, ()> for USPHGeometry<T>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     const PARAMS: [&'static str; 0] = [];
 
@@ -165,15 +161,15 @@ where
 
         Ok([
             Vector3::new(
-                cos!(phi) * sin!(theta),
-                sin!(phi) * sin!(theta),
-                cos!(theta),
+                phi.cos() * theta.sin(),
+                phi.sin() * theta.sin(),
+                theta.cos(),
             ),
-            Vector3::new(-sin!(phi) * sin!(theta), cos!(phi) * sin!(theta), T::zero()) * r,
+            Vector3::new(-phi.sin() * theta.sin(), phi.cos() * theta.sin(), T::zero()) * r,
             Vector3::new(
-                cos!(phi) * cos!(theta),
-                sin!(phi) * cos!(theta),
-                -sin!(theta),
+                phi.cos() * theta.cos(),
+                phi.sin() * theta.cos(),
+                -theta.sin(),
             ) * r,
         ])
     }
@@ -187,7 +183,7 @@ where
         let r = ics[0];
         let theta = ics[2];
 
-        Ok(powi!(r, 2) * sin!(theta))
+        Ok(r.powi(2) * theta.sin())
     }
 
     fn initialize_cs<CStride: Dim>(
@@ -207,9 +203,9 @@ where
         let theta = ics[2];
 
         Ok(Vector3::new(
-            r * cos!(phi) * sin!(theta),
-            r * sin!(phi) * sin!(theta),
-            r * cos!(theta),
+            r * phi.cos() * theta.sin(),
+            r * phi.sin() * theta.sin(),
+            r * theta.cos(),
         ))
     }
 
@@ -221,13 +217,13 @@ where
         let v = ecs;
         let vn = v.norm();
 
-        Ok(Vector3::new(vn, atan2!(v[1], v[0]), acos!(v[2] / vn)))
+        Ok(Vector3::new(vn, v[1].atan2(v[0]), (v[2] / vn).acos()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::coords::{CNSPHGeometry, OcnusCoords, SPHGeometry, SPHState};
+    use super::*;
     use nalgebra::{SVector, Vector3};
 
     #[test]
@@ -263,23 +259,20 @@ mod tests {
     fn test_cnsph_coords() {
         let params = SVector::<f64, 0>::from([]);
 
-        CNSPHGeometry::initialize_cs(&params.fixed_rows::<0>(0), &mut ()).unwrap();
+        USPHGeometry::initialize_cs(&params.fixed_rows::<0>(0), &mut ()).unwrap();
 
         let ics_ref = Vector3::new(0.56, 0.17, 0.45);
 
-        let ecs = CNSPHGeometry::transform_ics_to_ecs(
-            &ics_ref.as_view(),
-            &params.fixed_rows::<0>(0),
-            &(),
-        )
-        .unwrap();
+        let ecs =
+            USPHGeometry::transform_ics_to_ecs(&ics_ref.as_view(), &params.fixed_rows::<0>(0), &())
+                .unwrap();
 
         let ics_rec =
-            CNSPHGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<0>(0), &())
+            USPHGeometry::transform_ecs_to_ics(&ecs.as_view(), &params.fixed_rows::<0>(0), &())
                 .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-6);
 
-        CNSPHGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<0>(0), 1e-6);
+        USPHGeometry::test_implementation(&ics_ref.as_view(), &params.fixed_rows::<0>(0), 1e-6);
     }
 }

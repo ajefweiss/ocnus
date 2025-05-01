@@ -1,3 +1,5 @@
+//! Model implementations.
+
 mod corem;
 mod cylm;
 mod wsahux;

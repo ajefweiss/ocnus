@@ -4,17 +4,15 @@ use env_logger::Builder;
 use log::warn;
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
-    OcnusError,
+    OcnusEnsbl, OcnusError, OcnusModel,
     coords::XCState,
-    forward::{
-        ECHModel, FSMEnsbl, FisherInformation, OcnusFSM,
-        filters::{
-            ABCParticleFilter, ABCParticleFilterSettings, ParticleFilter, ParticleFilterError,
-            ParticleFilterSettingsBuilder, SIRParticleFilter, root_mean_square_metric,
-        },
+    methods::{
+        ABCParticleFilter, ABCSettings, FisherInformation, ParticleFilter, ParticleFilterError,
+        ParticleFilterSettingsBuilder, SIRParticleFilter,
     },
-    math::CovMatrix,
-    obser::{NoNoise, ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
+    models::ECHModel,
+    obser::{NullNoise, ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries, observec_rmse},
+    stats::CovMatrix,
 };
 use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 use std::{fs::create_dir, io::prelude::*, path::Path};
@@ -73,7 +71,7 @@ fn main() {
     let mut sc = sc1 + sc2;
     sc.sort_by_timestamp();
 
-    let mut fevmd_0 = FSMEnsbl {
+    let mut fevmd_0 = OcnusEnsbl {
         params_array: Matrix::<f64, _, Dyn, VecStorage<f64, Const<12>, Dyn>>::from_iterator(
             1,
             [
@@ -128,15 +126,13 @@ fn main() {
     // Create synthetic output.
     let mut output = DMatrix::<ObserVec<_, 3>>::zeros(sc.len(), 1);
 
+    model.initialize_states_ensbl(&sc, &mut fevmd_0).unwrap();
     model
-        .fsm_initialize_states_ensbl(&sc, &mut fevmd_0)
-        .unwrap();
-    model
-        .fsm_simulate_ensbl(
+        .simulate_ensbl(
             &sc,
             &mut fevmd_0,
             &mut output.as_view_mut(),
-            None::<&mut NoNoise<f64>>,
+            None::<&mut NullNoise<f64>>,
         )
         .unwrap();
 
@@ -159,9 +155,8 @@ fn main() {
     let init_result = model
         .pf_initialize_ensemble(
             &sc_synth,
-            ENSEMBLE_SIZE,
-            2_usize.pow(17),
-            Some((&root_mean_square_metric, 10.0)),
+            (ENSEMBLE_SIZE, 2_usize.pow(17)),
+            Some((&observec_rmse, 10.0)),
             &mut pf_settings,
         )
         .unwrap();
@@ -206,11 +201,8 @@ fn main() {
     let mut noise = ObserVecNoise::Gaussian(NOISE_VAR, 0);
 
     for _ in 1..10 {
-        let mut abc_settings = ABCParticleFilterSettings::Threshold((
-            pf_settings.clone(),
-            &root_mean_square_metric,
-            epsilon,
-        ));
+        let mut abc_settings =
+            ABCSettings::Threshold((pf_settings.clone(), &observec_rmse, epsilon));
 
         let run = model.pf_abc_iter(
             &sc_synth,
@@ -226,7 +218,7 @@ fn main() {
                 result
             }
             Err(err) => match err {
-                OcnusError::ParticleFilter(pferr) => match pferr {
+                OcnusError::FilterError(pferr) => match pferr {
                     ParticleFilterError::TimeLimitExceeded { .. } => break,
                     _ => {
                         abort_counter += 1;

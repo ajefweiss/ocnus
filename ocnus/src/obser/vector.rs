@@ -1,22 +1,19 @@
 //! Implementation of a `N`-dimensional vector observable.
 
-use crate::{
-    fXX,
-    math::{CovMatrix, powi},
-    obser::OcnusObser,
-};
+use crate::obser::{OcnusNoise, OcnusObser, ScObsSeries};
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use nalgebra::{DMatrix, DVector, DVectorView, SVector};
-use num_traits::{Float, Zero};
-use rand_distr::{Distribution, Normal, StandardNormal};
+use nalgebra::{DMatrix, DVector, DVectorView, RealField, SVector};
+use num_traits::Zero;
+use ocnus_stats::{CovMatrix, StatsError};
+use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
+use std::ops::Div;
 use std::{
     fmt::{Debug, Display, Formatter},
+    iter::Sum,
     ops::{Add, AddAssign, Mul, Sub, SubAssign},
 };
-
-use super::{OcnusNoise, ScObsSeries};
 
 /// Generic N-dimensional observation vector.
 #[derive(Clone, Debug, Deref, Deserialize, From, Index, IndexMut, IntoIterator, Serialize)]
@@ -29,7 +26,7 @@ pub struct ObserVec<T, const N: usize>(
 
 impl<T, const N: usize> ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     /// Returns true if any entry within the observation vector is `NaN`.
     pub fn any_nan(&self) -> bool {
@@ -38,7 +35,7 @@ where
 
     /// Returns true if all entries within the observation vector are `NaN`.
     pub fn is_nan(&self) -> bool {
-        self.iter().fold(true, |acc, next| acc & next.is_nan())
+        self.iter().fold(true, |acc, next| acc & !next.is_finite())
     }
 
     /// Calculate the mean square error between two observation vectors.
@@ -47,6 +44,7 @@ where
     /// If only one of the two observations is considered valid, returns `NaN`.
     pub fn mean_square_error(&self, other: &Self) -> T
     where
+        T: Sum,
         Self: OcnusObser,
     {
         if self.is_valid() & other.is_valid() {
@@ -54,13 +52,16 @@ where
         } else if !self.is_valid() & !other.is_valid() {
             T::zero()
         } else {
-            T::nan()
+            (-T::one()).sqrt()
         }
     }
 
     /// Calculate the sum of squares over the entries within the observation vector.
-    pub fn sum_of_squares(&self) -> T {
-        self.iter().map(|value| powi!(*value, 2)).sum::<T>()
+    pub fn sum_of_squares(&self) -> T
+    where
+        T: Sum,
+    {
+        self.iter().map(|value| value.powi(2)).sum::<T>()
     }
 
     /// Return a new observation vector filled with zeros.
@@ -71,7 +72,7 @@ where
 
 impl<T, const N: usize> Add for ObserVec<T, N>
 where
-    T: fXX,
+    T: RealField,
 {
     type Output = ObserVec<T, N>;
 
@@ -88,7 +89,7 @@ where
 
 impl<'a, T, const N: usize> Add<&'a ObserVec<T, N>> for &'a ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     type Output = ObserVec<T, N>;
 
@@ -105,7 +106,7 @@ where
 
 impl<T, const N: usize> AddAssign for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn add_assign(&mut self, rhs: Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += *rhs);
@@ -114,7 +115,7 @@ where
 
 impl<'a, T, const N: usize> AddAssign<&'a ObserVec<T, N>> for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn add_assign(&mut self, rhs: &'a Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value += *rhs);
@@ -123,16 +124,50 @@ where
 
 impl<T, const N: usize> Default for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn default() -> Self {
-        ObserVec([T::nan(); N])
+        ObserVec([(-T::one()).sqrt(); N])
+    }
+}
+
+impl<T, const N: usize> Div<T> for ObserVec<T, N>
+where
+    T: Copy + RealField,
+{
+    type Output = ObserVec<T, N>;
+
+    fn div(self, rhs: T) -> Self::Output {
+        ObserVec(
+            self.iter()
+                .map(|value| *value / rhs)
+                .collect::<Vec<T>>()
+                .try_into()
+                .unwrap(),
+        )
+    }
+}
+
+impl<T, const N: usize> Div<T> for &ObserVec<T, N>
+where
+    T: Copy + RealField,
+{
+    type Output = ObserVec<T, N>;
+
+    fn div(self, rhs: T) -> Self::Output {
+        ObserVec(
+            self.iter()
+                .map(|value| *value / rhs)
+                .collect::<Vec<T>>()
+                .try_into()
+                .unwrap(),
+        )
     }
 }
 
 impl<T> Display for ObserVec<T, 3>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{:.2} | {:.2} | {:.2}]", self[0], self[1], self[2])
@@ -141,7 +176,7 @@ where
 
 impl<T> Display for ObserVec<T, 4>
 where
-    T: fXX,
+    T: RealField,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -154,7 +189,7 @@ where
 
 impl<T> Display for ObserVec<T, 12>
 where
-    T: fXX,
+    T: RealField,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -178,7 +213,7 @@ where
 
 impl<T, const N: usize> From<SVector<T, N>> for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn from(value: SVector<T, N>) -> Self {
         ObserVec::from(value.data.0[0])
@@ -187,14 +222,14 @@ where
 
 impl<T, const N: usize> Mul<T> for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     type Output = ObserVec<T, N>;
 
     fn mul(self, rhs: T) -> Self::Output {
         ObserVec(
             self.iter()
-                .map(|v| *v * rhs)
+                .map(|value| *value * rhs)
                 .collect::<Vec<T>>()
                 .try_into()
                 .unwrap(),
@@ -204,14 +239,14 @@ where
 
 impl<T, const N: usize> Mul<T> for &ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     type Output = ObserVec<T, N>;
 
     fn mul(self, rhs: T) -> Self::Output {
         ObserVec(
             self.iter()
-                .map(|v| *v * rhs)
+                .map(|value| *value * rhs)
                 .collect::<Vec<T>>()
                 .try_into()
                 .unwrap(),
@@ -225,7 +260,7 @@ impl<const N: usize> Mul<ObserVec<f32, N>> for f32 {
     fn mul(self, rhs: ObserVec<f32, N>) -> Self::Output {
         ObserVec(
             rhs.iter()
-                .map(|v| *v * self)
+                .map(|value| *value * self)
                 .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
@@ -239,7 +274,7 @@ impl<const N: usize> Mul<ObserVec<f64, N>> for f64 {
     fn mul(self, rhs: ObserVec<f64, N>) -> Self::Output {
         ObserVec(
             rhs.iter()
-                .map(|v| *v * self)
+                .map(|value| *value * self)
                 .collect::<Vec<f64>>()
                 .try_into()
                 .unwrap(),
@@ -253,7 +288,7 @@ impl<'a, const N: usize> Mul<&'a ObserVec<f32, N>> for f32 {
     fn mul(self, rhs: &'a ObserVec<f32, N>) -> Self::Output {
         ObserVec(
             rhs.iter()
-                .map(|v| *v * self)
+                .map(|value| *value * self)
                 .collect::<Vec<f32>>()
                 .try_into()
                 .unwrap(),
@@ -267,7 +302,7 @@ impl<'a, const N: usize> Mul<&'a ObserVec<f64, N>> for f64 {
     fn mul(self, rhs: &'a ObserVec<f64, N>) -> Self::Output {
         ObserVec(
             rhs.iter()
-                .map(|v| *v * self)
+                .map(|value| *value * self)
                 .collect::<Vec<f64>>()
                 .try_into()
                 .unwrap(),
@@ -277,7 +312,7 @@ impl<'a, const N: usize> Mul<&'a ObserVec<f64, N>> for f64 {
 
 impl<T, const N: usize> OcnusObser for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn is_valid(&self) -> bool {
         !self.any_nan()
@@ -286,7 +321,7 @@ where
 
 impl<T, const N: usize> PartialEq for ObserVec<T, N>
 where
-    T: Float,
+    T: RealField,
 {
     fn eq(&self, other: &Self) -> bool {
         self.iter()
@@ -298,7 +333,7 @@ where
 
 impl<T, const N: usize> Sub for ObserVec<T, N>
 where
-    T: fXX,
+    T: RealField,
 {
     type Output = ObserVec<T, N>;
 
@@ -315,7 +350,7 @@ where
 
 impl<T, const N: usize> SubAssign for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn sub_assign(&mut self, rhs: Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= *rhs);
@@ -324,7 +359,7 @@ where
 
 impl<'a, T, const N: usize> SubAssign<&'a ObserVec<T, N>> for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn sub_assign(&mut self, rhs: &'a Self) {
         zip_eq(self.0.iter_mut(), rhs.iter()).for_each(|(value, rhs)| *value -= *rhs);
@@ -333,7 +368,7 @@ where
 
 impl<'a, T, const N: usize> Sub<&'a ObserVec<T, N>> for &'a ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     type Output = ObserVec<T, N>;
 
@@ -350,7 +385,7 @@ where
 
 impl<T, const N: usize> Zero for ObserVec<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     fn is_zero(&self) -> bool {
         self.0.iter().all(|value| value == &T::zero())
@@ -370,7 +405,7 @@ where
 #[allow(missing_docs)]
 pub enum ObserVecNoise<T, const N: usize>
 where
-    T: fXX,
+    T: RealField,
 {
     Gaussian(T, u64),
     Multivariate(CovMatrix<T>, u64),
@@ -378,14 +413,14 @@ where
 
 impl<T, const N: usize> ObserVecNoise<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     /// Compute the likelihood for an observation `x` with expected mean `mu`.
     pub fn multivariate_likelihood(
         &self,
         x: &DVectorView<ObserVec<T, N>>,
         mu: &ScObsSeries<T, ObserVec<T, N>>,
-    ) -> T {
+    ) -> Result<T, StatsError<T>> {
         let mut x_flat = x
             .iter()
             .flat_map(|x_obs| x_obs.iter().cloned().collect::<Vec<T>>())
@@ -407,7 +442,7 @@ where
             .iter_mut()
             .zip(mu_flat.iter_mut())
             .for_each(|(xv, muv)| {
-                if xv.is_nan() && muv.is_nan() {
+                if !xv.is_finite() && !muv.is_finite() {
                     *xv = T::zero();
                     *muv = T::zero();
                 }
@@ -431,23 +466,26 @@ where
 
 impl<T, const N: usize> OcnusNoise<T, ObserVec<T, N>> for ObserVecNoise<T, N>
 where
-    T: fXX,
+    T: Copy + RealField,
     StandardNormal: Distribution<T>,
 {
     fn generate_noise(
         &self,
-        series: &super::ScObsSeries<T, ObserVec<T, N>>,
+        series: &ScObsSeries<T, ObserVec<T, N>>,
         rng: &mut impl rand::Rng,
     ) -> nalgebra::DVector<ObserVec<T, N>> {
         match self {
             ObserVecNoise::Gaussian(std_dev, ..) => {
-                let normal = Normal::new(T::zero(), *std_dev).unwrap();
+                let normal = StandardNormal;
                 let size = series.len();
 
-                DVector::from_iterator(size, (0..size).map(|_| ObserVec([rng.sample(normal); N])))
+                DVector::from_iterator(
+                    size,
+                    (0..size).map(|_| ObserVec([rng.sample(normal) * *std_dev; N])),
+                )
             }
             ObserVecNoise::Multivariate(covmat, ..) => {
-                let normal = Normal::new(T::zero(), T::one()).unwrap();
+                let normal = StandardNormal;
                 let size = series.len();
 
                 let mut result = DVector::from_iterator(
@@ -489,6 +527,32 @@ where
     }
 }
 
+/// Mean square error (MSE) for the [`ObserVec`] type.
+pub fn observec_mse<T, const N: usize>(
+    out: &DVectorView<ObserVec<T, N>>,
+    series: &ScObsSeries<T, ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    out.into_iter()
+        .zip(series)
+        .map(|(out_vec, scobs)| out_vec.mean_square_error(scobs.get_observation()))
+        .sum::<T>()
+        / T::from_usize(series.count_observations()).unwrap()
+}
+
+/// Root mean square error (RMSE) for the [`ObserVec`] type.
+pub fn observec_rmse<T, const N: usize>(
+    out: &DVectorView<ObserVec<T, N>>,
+    series: &ScObsSeries<T, ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_mse(out, series).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +583,9 @@ mod tests {
 
         assert!((&ov_1 * 2.0).sum_of_squares() == 4.0 * 14.0);
         assert!((2.0 * &ov_1).sum_of_squares() == 4.0 * 14.0);
+
+        assert!((ov_1.clone() / 2.0).sum_of_squares() == 14.0 / 4.0);
+        assert!((&ov_1 / 2.0).sum_of_squares() == 14.0 / 4.0);
 
         assert!(ObserVec::<f64, 3>::default().any_nan());
         assert!(ObserVec::<f64, 3>::default().is_nan());

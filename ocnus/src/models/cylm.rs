@@ -1,18 +1,13 @@
 use crate::{
-    OcnusError,
+    ModelError, OcnusError, OcnusModel,
     coords::{CCGeometry, CoordsError, ECGeometry, OcnusCoords, XCState},
-    fXX,
-    forward::{
-        FSMError, FisherInformation, OcnusFSM,
-        filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
-        models::concat_arrays,
-    },
-    math::{T, bessel_jn, powi, sqrt},
+    math::bessel_jn,
+    models::concat_arrays,
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
 };
-use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
-use ocnus_stats::OcnusPDF;
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use nalgebra::{Const, Dim, RealField, SVectorView, U1, Vector3, VectorView, VectorView3};
+use ocnus_stats::Density;
+use rand_distr::{Distribution, StandardNormal};
 use std::{cmp::Ordering, marker::PhantomData};
 
 /// Linear force-free magnetic field Chi (nu) and Xi (s) functions.
@@ -22,7 +17,7 @@ pub fn cc_lff_chi_xi<T, const P: usize, M>(
     cs_state: &XCState<T>,
 ) -> Option<(T, T)>
 where
-    T: fXX,
+    T: Copy + RealField,
     M: OcnusCoords<T, P, XCState<T>>,
 {
     // Extract parameters using their identifiers.
@@ -31,7 +26,7 @@ where
     let alpha_signed = M::param_value("alpha", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     let (alpha, sign) = match alpha_signed.partial_cmp(&T::zero()) {
         Some(ord) => match ord {
@@ -47,7 +42,7 @@ where
         Some(ord) => match ord {
             Ordering::Greater => None,
             _ => {
-                let b_linearized = b / (T::one() - powi!(y_offset, 2));
+                let b_linearized = b / (T::one() - y_offset.powi(2));
 
                 if mu == T::zero() {
                     Some((T::zero(), b_linearized))
@@ -60,7 +55,7 @@ where
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
                     let xi_lff: T = T::two_pi()
                         * mu
-                        * powi!(radius_linearized, 2)
+                        * radius_linearized.powi(2)
                         * b_linearized
                         * bessel_jn(alpha * mu * radius_linearized, 0)
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
@@ -80,7 +75,7 @@ pub fn cc_ut_chi_xi<T, const P: usize, M>(
     cs_state: &XCState<T>,
 ) -> Option<(T, T)>
 where
-    T: fXX,
+    T: Copy + RealField,
     M: OcnusCoords<T, P, XCState<T>>,
 {
     // Extract parameters using their identifiers.
@@ -89,22 +84,22 @@ where
     let tau = M::param_value("tau", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     match mu.partial_cmp(&T::one()) {
         Some(ord) => match ord {
             Ordering::Greater => None,
             _ => {
-                let b_linearized = b / (T::one() - powi!(y_offset, 2));
+                let b_linearized = b / (T::one() - y_offset.powi(2));
 
                 if mu == T::zero() {
                     Some((T::zero(), b_linearized))
                 } else {
-                    let chi_ut = mu * powi!(radius_linearized, 2) * b_linearized * tau
-                        / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
+                    let chi_ut = mu * radius_linearized.powi(2) * b_linearized * tau
+                        / (T::one() + (tau * mu * radius_linearized).powi(2))
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
-                    let xi_ut = T::two_pi() * mu * powi!(radius_linearized, 2) * b_linearized
-                        / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
+                    let xi_ut = T::two_pi() * mu * radius_linearized.powi(2) * b_linearized
+                        / (T::one() + (tau * mu * radius_linearized).powi(2))
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
 
                     Some((chi_ut, xi_ut))
@@ -122,7 +117,7 @@ pub fn ec_hybrid_obs<T, const P: usize, M>(
     cs_state: &XCState<T>,
 ) -> Option<(T, T)>
 where
-    T: fXX,
+    T: Copy + RealField,
     M: OcnusCoords<T, P, XCState<T>>,
 {
     // Extract parameters using their identifiers.
@@ -147,8 +142,8 @@ where
         Some(ord) => match ord {
             Ordering::Greater => None,
             _ => {
-                let b_linearized = b / (T::one() - powi!(y_offset, 2));
-                let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+                let b_linearized = b / (T::one() - y_offset.powi(2));
+                let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
                 if mu == T::zero() {
                     Some((T::zero(), b_linearized))
@@ -161,17 +156,17 @@ where
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
                     let xi_lff: T = T::two_pi()
                         * mu
-                        * powi!(radius_linearized, 2)
+                        * radius_linearized.powi(2)
                         * b_linearized
                         * bessel_jn(alpha * mu * radius_linearized, 0)
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
 
                     // UT terms.
-                    let chi_ut = mu * powi!(radius_linearized, 2) * b_linearized * tau
-                        / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
+                    let chi_ut = mu * radius_linearized.powi(2) * b_linearized * tau
+                        / (T::one() + (tau * mu * radius_linearized).powi(2))
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
-                    let xi_ut = T::two_pi() * mu * powi!(radius_linearized, 2) * b_linearized
-                        / (T::one() + powi!(tau, 2) * powi!(mu * radius_linearized, 2))
+                    let xi_ut = T::two_pi() * mu * radius_linearized.powi(2) * b_linearized
+                        / (T::one() + (tau * mu * radius_linearized).powi(2))
                         / M::detg(&Vector3::new(mu, nu, z).as_view(), params, cs_state).unwrap();
 
                     Some((
@@ -191,13 +186,13 @@ macro_rules! impl_cylm_forward_model {
         #[derive(Debug)]
         pub struct $model<T, D>(D, PhantomData<T>)
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            T: Copy + RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            T: Copy + RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -211,8 +206,9 @@ macro_rules! impl_cylm_forward_model {
         impl<T, D> OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, XCState<T>>
             for $model<T, D>
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            T: Copy + RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            Self: Send + Sync,
         {
             const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($coords::<f64>::PARAMS, $params);
@@ -302,7 +298,7 @@ macro_rules! impl_cylm_forward_model {
         }
 
         impl<T, D>
-            OcnusFSM<
+            OcnusModel<
                 T,
                 ObserVec<T, 3>,
                 { $coords::<f64>::PARAMS.len() + $params.len() },
@@ -310,15 +306,15 @@ macro_rules! impl_cylm_forward_model {
                 XCState<T>,
             > for $model<T, D>
         where
-            T: fXX,
+            T: Copy + RealField,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, XCState<T>>,
         {
             const RCS: usize = 128;
 
-            fn fsm_forward(
+            fn forward(
                 &self,
                 time_step: T,
                 params: &VectorView<
@@ -329,16 +325,16 @@ macro_rules! impl_cylm_forward_model {
                 >,
                 _fm_state: &mut (),
                 cs_state: &mut XCState<T>,
-            ) -> Result<(), FSMError<T>> {
+            ) -> Result<(), ModelError<T>> {
                 // Extract parameters using their identifiers.
-                let vel = Self::param_value("velocity", params).unwrap() / T!(1.496e8);
+                let vel = Self::param_value("velocity", params).unwrap() / T::from_f64(1.496e8).unwrap();
 
                 cs_state.x += vel * time_step as T;
 
                 Ok(())
             }
 
-            fn fsm_initialize_states(&self,
+            fn initialize_states(&self,
                 _series: &ScObsSeries<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
@@ -354,7 +350,7 @@ macro_rules! impl_cylm_forward_model {
                 Ok(())
             }
 
-            fn fsm_observe(
+            fn observe(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
@@ -397,7 +393,7 @@ macro_rules! impl_cylm_forward_model {
                 }
             }
 
-            fn fsm_observe_ics_plus_basis(
+            fn observe_ics_plus_basis(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
@@ -433,7 +429,7 @@ macro_rules! impl_cylm_forward_model {
                 (&self.0)
                     .get_valid_range()
                     .iter()
-                    .map(|(min, max)| (*max - *min) * T!(128.0) * T::epsilon())
+                    .map(|(min, max)| (*max - *min) * T::from_usize(128).unwrap() * T::from_f64(5e-7).unwrap())
                     .collect::<Vec<T>>()
                     .try_into()
                     .unwrap()
@@ -441,74 +437,13 @@ macro_rules! impl_cylm_forward_model {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
 
-        impl<T, D>
-            ParticleFilter<
-                T,
-                ObserVec<T, 3>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                (),
-                XCState<T>,
-            > for $model<T, D>
-        where
-            T: fXX,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
 
-        impl<T, D>
-            ABCParticleFilter<
-                T,
-                ObserVec<T, 3>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                (),
-                XCState<T>,
-            > for $model<T, D>
-        where
-            T: fXX + SampleUniform,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
 
-        impl<T, D>
-            SIRParticleFilter<
-                T,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                3,
-                (),
-                XCState<T>,
-            > for $model<T, D>
-        where
-            T: fXX + SampleUniform,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, D>
-            FisherInformation<
-                T,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                3,
-                (),
-                XCState<T>,
-            > for $model<T, D>
-        where
-            T: fXX,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
     };
 }
 
@@ -539,7 +474,7 @@ impl_cylm_forward_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{forward::FSMEnsbl, math::abs, obser::NoNoise};
+    use crate::{OcnusEnsbl, obser::NullNoise};
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
     use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 
@@ -566,7 +501,7 @@ mod tests {
             )
         }));
 
-        let mut ensbl = FSMEnsbl {
+        let mut ensbl = OcnusEnsbl {
             params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fm_states: vec![(); 1],
             cs_states: vec![XCState::<f64>::default(); 1],
@@ -590,20 +525,20 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-6);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-6);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-6);
+        assert!((output[(0, 0)][1] - 19.562870351).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 20.085491851).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 1.7143621590).abs() < 1e-6);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
     }
 
@@ -626,7 +561,7 @@ mod tests {
             (0..2).map(|i| ScObs::new(0.0, ScObsConf::Distance(i as f64), None)),
         );
 
-        let mut ensbl = FSMEnsbl {
+        let mut ensbl = OcnusEnsbl {
             params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fm_states: vec![(); 1],
             cs_states: vec![XCState::<f64>::default(); 1],
@@ -650,22 +585,22 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
-        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-6);
-        assert!(abs!(output[(0, 0)][2]) < 1e-6);
+        assert!((output[(0, 0)][1] - 20.0).abs() < 1e-6);
+        assert!(output[(0, 0)][2].abs() < 1e-6);
 
-        assert!(abs!(output[(1, 0)][1]) < 1e-6);
-        assert!(abs!(output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0) < 1e-6);
+        assert!(output[(1, 0)][1].abs() < 1e-6);
+        assert!((output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0).abs() < 1e-6);
     }
 
     #[test]
@@ -691,7 +626,7 @@ mod tests {
             )
         }));
 
-        let mut ensbl = FSMEnsbl {
+        let mut ensbl = OcnusEnsbl {
             params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fm_states: vec![(); 1],
             cs_states: vec![XCState::default(); 1],
@@ -715,15 +650,15 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
@@ -752,7 +687,7 @@ mod tests {
             (0..2).map(|i| ScObs::new(0.0, ScObsConf::Distance(i as f64), None)),
         );
 
-        let mut ensbl = FSMEnsbl {
+        let mut ensbl = OcnusEnsbl {
             params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
             fm_states: vec![(); 1],
             cs_states: vec![XCState::<f64>::default(); 1],
@@ -776,22 +711,22 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
-        assert!(abs!(output[(0, 0)][1] - 20.0) < 1e-6);
-        assert!(abs!(output[(0, 0)][2]) < 1e-6);
+        assert!((output[(0, 0)][1] - 20.0).abs() < 1e-6);
+        assert!(output[(0, 0)][2].abs() < 1e-6);
 
-        assert!(abs!(output[(1, 0)][1] - 10.0) < 1e-6);
-        assert!(abs!(output[(1, 0)][2] - 10.0) < 1e-6);
+        assert!((output[(1, 0)][1] - 10.0).abs() < 1e-6);
+        assert!((output[(1, 0)][2] - 10.0).abs() < 1e-6);
     }
 
     #[test]
@@ -821,7 +756,7 @@ mod tests {
             )
         }));
 
-        let mut ensbl = FSMEnsbl {
+        let mut ensbl = OcnusEnsbl {
             params_array: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
             fm_states: vec![(); 1],
             cs_states: vec![XCState::default(); 1],
@@ -851,15 +786,15 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
@@ -889,21 +824,21 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
-        assert!((output[(0, 0)][1] - 19.562872).abs() < 1e-6);
-        assert!((output[(2, 0)][1] - 20.085493).abs() < 1e-6);
-        assert!((output[(4, 0)][2] + 1.7143655).abs() < 1e-6);
+        assert!((output[(0, 0)][1] - 19.562870351).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 20.085491851).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 1.7143621590).abs() < 1e-6);
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
     }
 }

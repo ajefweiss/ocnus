@@ -1,9 +1,10 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
+    OcnusEnsbl, OcnusModel,
     coords::XCState,
-    forward::{CCLFFModel, FSMEnsbl, OcnusFSM},
-    obser::{NoNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
+    models::CCLFFModel,
+    obser::{NullNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
 };
 use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 use std::{hint::black_box, time::Duration};
@@ -49,7 +50,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     let mut group = c.benchmark_group("cylm_lff_bench");
 
     // Create temporary simulation data and out arrays, if necessary.
-    let mut data = FSMEnsbl {
+    let mut data = OcnusEnsbl {
         params_array: Matrix::<f32, Const<8>, Dyn, VecStorage<f32, Const<8>, Dyn>>::zeros(
             ENSEMBLE_SIZE,
         ),
@@ -69,7 +70,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     group.bench_function("cylm_lff_initialize", |b| {
         b.iter(|| {
             model
-                .fsm_initialize_ensbl(
+                .initialize_ensbl(
                     black_box(&sc),
                     black_box(&mut data),
                     black_box(None::<&UnivariateND<f32, 8>>),
@@ -83,7 +84,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     group.bench_function("cylm_lff_simulate", |b| {
         b.iter(|| {
             model
-                .fsm_initialize_ensbl(
+                .initialize_ensbl(
                     black_box(&sc),
                     black_box(&mut data),
                     black_box(None::<&UnivariateND<f32, 8>>),
@@ -91,11 +92,11 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 )
                 .unwrap();
             model
-                .fsm_simulate_ensbl(
+                .simulate_ensbl(
                     &sc,
                     &mut data,
                     &mut output.as_view_mut(),
-                    None::<&mut NoNoise<f32>>,
+                    None::<&mut NullNoise<f32>>,
                 )
                 .unwrap();
         });

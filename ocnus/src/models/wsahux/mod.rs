@@ -3,28 +3,22 @@ mod types;
 pub use types::*;
 
 use crate::{
-    OcnusError,
-    coords::{CNSPHGeometry, CoordsError, OcnusCoords},
-    fXX,
-    forward::{
-        FSMError, FisherInformation, OcnusFSM,
-        filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
-        models::concat_arrays,
-    },
-    math::{T, abs, exp, powf},
+    ModelError, OcnusError, OcnusModel,
+    coords::{CoordsError, OcnusCoords, USPHGeometry},
+    models::concat_arrays,
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
 };
-use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
-use num_traits::Float;
-use ocnus_stats::OcnusPDF;
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use nalgebra::{Const, Dim, RealField, SVectorView, U1, Vector3, VectorView, VectorView3};
+use num_traits::AsPrimitive;
+use ocnus_stats::Density;
+use rand_distr::{Distribution, StandardNormal};
 use serde::Deserialize;
 use std::{fs, io, path::Path};
 
 /// Standard WSA model
 pub fn wsa_map<T, const P: usize, M>((efs, dist): (T, T), params: &SVectorView<T, P>) -> T
 where
-    T: fXX,
+    T: Copy + RealField,
     M: OcnusCoords<T, P, ()>,
 {
     // Extract parameters using their identifiers.
@@ -37,11 +31,8 @@ where
     let a7 = M::param_value("a7", params).unwrap();
     let a8 = M::param_value("a8", params).unwrap();
 
-    a1 + a2 / powf!(T::one() + efs, a3)
-        * powf!(
-            a4 - a5 * exp!(-powf!(T!(180.0) * dist / T::pi() / a6, a7)),
-            a8
-        )
+    a1 + a2 / (T::one() + efs).powf(a3)
+        * (a4 - a5 * (-(T::from_f64(180.0).unwrap() * dist / T::pi() / a6).powf(a7)).exp()).powf(a8)
 }
 
 macro_rules! impl_wsa_model {
@@ -50,13 +41,13 @@ macro_rules! impl_wsa_model {
         #[derive(Debug)]
         pub struct $model<T, const R: usize, D>(D, pub WSAInputData<T>, pub (T, T, T))
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            T: Copy + RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, const R: usize, D> $model<T, R, D>
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            T: Copy + RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = "Limits the latitude to the given value."]
             pub fn limit_latitude(&mut self, max_lat: T) {
@@ -66,7 +57,7 @@ macro_rules! impl_wsa_model {
                     .iter()
                     .enumerate()
                     .filter_map(|(idx, lat)| {
-                        if abs!(*lat) <= abs!(max_lat.to_radians()) {
+                        if lat.abs() <= (max_lat * T::pi() / T::from_usize(180).unwrap()).abs() {
                             Some(idx)
                         } else {
                             None
@@ -86,7 +77,7 @@ macro_rules! impl_wsa_model {
             #[doc = concat!("Create a new [`", stringify!($model), "`] from a JSON5 file.")]
             pub fn from_file<P>(pdf: D, path: P, radial_resolution: T) -> io::Result<Self>
             where
-                T: fXX + for<'x> Deserialize<'x>,
+                T: Copy + RealField + for<'x> Deserialize<'x>,
                 P: AsRef<Path>,
             {
                 let data = serde_json5::from_str::<WSAInputData<T>>(&fs::read_to_string(path)?)
@@ -105,8 +96,9 @@ macro_rules! impl_wsa_model {
         impl<T, const R: usize, D>
             OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, ()> for $model<T, R, D>
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            T: Copy + RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            Self: Send + Sync,
         {
             const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($coords::<f64>::PARAMS, $params);
@@ -196,7 +188,7 @@ macro_rules! impl_wsa_model {
         }
 
         impl<T, const R: usize, D>
-            OcnusFSM<
+            OcnusModel<
                 T,
                 ObserVec<T, 1>,
                 { $coords::<f64>::PARAMS.len() + $params.len() },
@@ -204,15 +196,15 @@ macro_rules! impl_wsa_model {
                 (),
             > for $model<T, R, D>
         where
-            T: fXX,
+            T: AsPrimitive<usize> + Copy + RealField,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, ()>,
         {
             const RCS: usize = 128;
 
-            fn fsm_forward(
+            fn forward(
                 &self,
                 time_step: T,
                 _params: &VectorView<
@@ -223,13 +215,13 @@ macro_rules! impl_wsa_model {
                 >,
                 fm_state: &mut WSAState<T, R>,
                 _cs_state: &mut (),
-            ) -> Result<(), FSMError<T>> {
-                fm_state.angle += time_step * T::two_pi() / T!(27.2753 * 86400.0);
+            ) -> Result<(), ModelError<T>> {
+                fm_state.angle += time_step * T::two_pi() / T::from_f64(27.2753 * 86400.0).unwrap();
 
                 Ok(())
             }
 
-            fn fsm_initialize_states(
+            fn initialize_states(
                 &self,
                 _series: &ScObsSeries<T, ObserVec<T, 1>>,
                 params: &VectorView<
@@ -274,16 +266,16 @@ macro_rules! impl_wsa_model {
                         // NaN interpolation, we use a for loop as it is guaranteed
                         // that NaN values are solitary.
                         for i in 0..slice.ncols() {
-                            if slice[(0, i)].is_nan() {
+                            if !slice[(0, i)].is_finite() {
                                 if i == 0 {
-                                    slice[(0, i)] =
-                                        (slice[(0, slice.ncols() - 1)] + slice[(0, 1)]) / T!(2.0);
+                                    slice[(0, i)] = (slice[(0, slice.ncols() - 1)] + slice[(0, 1)])
+                                        / T::from_usize(2).unwrap();
                                 } else if i == slice.ncols() - 1 {
-                                    slice[(0, i)] =
-                                        (slice[(0, slice.ncols() - 2)] + slice[(0, 0)]) / T!(2.0);
+                                    slice[(0, i)] = (slice[(0, slice.ncols() - 2)] + slice[(0, 0)])
+                                        / T::from_usize(2).unwrap();
                                 } else {
-                                    slice[(0, i)] =
-                                        (slice[(0, i + 1)] + slice[(0, i - 1)]) / T!(2.0);
+                                    slice[(0, i)] = (slice[(0, i + 1)] + slice[(0, i - 1)])
+                                        / T::from_usize(2).unwrap();
                                 }
                             }
                         }
@@ -298,7 +290,9 @@ macro_rules! impl_wsa_model {
                                     let f1 = (slice[(r_i, phi_i + 1)] - slice[(r_i, phi_i)])
                                         / slice[(r_i, phi_i)];
 
-                                    let f2 = T::two_pi() / T!(25.38 * 86400.0) * dr * T!(695700.0)
+                                    let f2 = T::two_pi() / T::from_f64(25.38 * 86400.0).unwrap()
+                                        * dr
+                                        * T::from_f64(695700.0).unwrap()
                                         / dphi;
 
                                     slice[(r_i + 1, phi_i)] = slice[(r_i, phi_i)] + f1 * f2
@@ -310,7 +304,7 @@ macro_rules! impl_wsa_model {
                 Ok(())
             }
 
-            fn fsm_observe(
+            fn observe(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 1>>,
                 params: &VectorView<
@@ -329,18 +323,21 @@ macro_rules! impl_wsa_model {
 
                 let q = Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state)?;
 
-                let r_index: usize = Float::round((q[0] * T!(R as f64) - T!(2.5)) / self.2.0).as_();
+                let r_index: usize =
+                    ((q[0] * T::from_usize(R).unwrap() - T::from_f64(2.5).unwrap()) / self.2.0)
+                        .round()
+                        .as_();
 
-                let (lon, lat) = (T::two_pi() - q[1] - fm_state.angle, T::half_pi() - q[2]);
+                let (lon, lat) = (T::two_pi() - q[1] - fm_state.angle, T::frac_pi_2() - q[2]);
 
                 let lon_index = self
                     .1
                     .lon_1d
                     .iter()
                     .enumerate()
-                    .fold((0, Float::max_value()), |acc, (idx, next)| {
-                        if abs!(*next - lon) < acc.1 {
-                            (idx, abs!(*next - lon))
+                    .fold((0, T::max_value().unwrap()), |acc, (idx, next)| {
+                        if (*next - lon).abs() < acc.1 {
+                            (idx, (*next - lon).abs())
                         } else {
                             acc
                         }
@@ -352,11 +349,11 @@ macro_rules! impl_wsa_model {
                         .lat_indices
                         .iter()
                         .enumerate()
-                        .fold((0, Float::max_value()), |acc, (idx, next)| {
-                            if (abs!(self.1.lat_1d[*next] - lat) < acc.1)
+                        .fold((0, T::max_value().unwrap()), |acc, (idx, next)| {
+                            if ((self.1.lat_1d[*next] - lat).abs() < acc.1)
                                 && self.1.lat_indices.contains(&idx.clone())
                             {
-                                (idx, abs!(self.1.lat_1d[*next] - lat))
+                                (idx, (self.1.lat_1d[*next] - lat).abs())
                             } else {
                                 acc
                             }
@@ -367,9 +364,9 @@ macro_rules! impl_wsa_model {
                         .lat_1d
                         .iter()
                         .enumerate()
-                        .fold((0, Float::max_value()), |acc, (idx, next)| {
-                            if abs!(*next - lat) < acc.1 {
-                                (idx, abs!(*next - lat))
+                        .fold((0, T::max_value().unwrap()), |acc, (idx, next)| {
+                            if (*next - lat).abs() < acc.1 {
+                                (idx, (*next - lat).abs())
                             } else {
                                 acc
                             }
@@ -382,7 +379,7 @@ macro_rules! impl_wsa_model {
                 ]))
             }
 
-            fn fsm_observe_ics_plus_basis(
+            fn observe_ics_plus_basis(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 1>>,
                 params: &VectorView<
@@ -418,7 +415,9 @@ macro_rules! impl_wsa_model {
                 (&self.0)
                     .get_valid_range()
                     .iter()
-                    .map(|(min, max)| (*max - *min) * T!(128.0) * T::epsilon())
+                    .map(|(min, max)| {
+                        (*max - *min) * T::from_usize(128).unwrap() * T::from_f64(5e-7).unwrap()
+                    })
                     .collect::<Vec<T>>()
                     .try_into()
                     .unwrap()
@@ -426,80 +425,16 @@ macro_rules! impl_wsa_model {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
-        }
-
-        impl<T, const R: usize, D>
-            ParticleFilter<
-                T,
-                ObserVec<T, 1>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                WSAState<T, R>,
-                (),
-            > for $model<T, R, D>
-        where
-            T: fXX,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, const R: usize, D>
-            ABCParticleFilter<
-                T,
-                ObserVec<T, 1>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                WSAState<T, R>,
-                (),
-            > for $model<T, R, D>
-        where
-            T: fXX + SampleUniform,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, const R: usize, D>
-            SIRParticleFilter<
-                T,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                1,
-                WSAState<T, R>,
-                (),
-            > for $model<T, R, D>
-        where
-            T: fXX + SampleUniform,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, const R: usize, D>
-            FisherInformation<
-                T,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                1,
-                WSAState<T, R>,
-                (),
-            > for $model<T, R, D>
-        where
-            T: fXX,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
         }
     };
 }
 
 impl_wsa_model!(
     WSAHUXModel,
-    CNSPHGeometry,
+    USPHGeometry,
     ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"],
     wsa_map,
     "Standard WSA solar wind model."
@@ -508,7 +443,7 @@ impl_wsa_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{forward::FSMEnsbl, obser::NoNoise};
+    use crate::{OcnusEnsbl, obser::NullNoise};
     use nalgebra::DMatrix;
     use ocnus_stats::{Constant1D, UnivariateND};
 
@@ -542,28 +477,28 @@ mod tests {
 
         model.limit_latitude(1.0);
 
-        let mut ensbl = FSMEnsbl::new(1);
+        let mut ensbl = OcnusEnsbl::new(1);
         let mut output = DMatrix::<ObserVec<_, 1>>::zeros(sc.len(), 1);
 
         model
-            .fsm_initialize_ensbl(&sc, &mut ensbl, None::<&UnivariateND<f32, 8>>, 41)
+            .initialize_ensbl(&sc, &mut ensbl, None::<&UnivariateND<f32, 8>>, 41)
             .unwrap();
 
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f32>>,
+                None::<&mut NullNoise<f32>>,
             )
             .unwrap();
 
         let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|v| v[0] as f32));
 
-        assert!(abs!(speed[0] - 298.2084) < 1e-6);
-        assert!(abs!(speed[25] - 440.25708) < 1e-6);
-        assert!(abs!(speed[50] - 442.22626) < 1e-6);
-        assert!(abs!(speed[75] - 435.19177) < 1e-6);
-        assert!(abs!(speed[99] - 320.37265) < 1e-6);
+        assert!((speed[0] - 298.2084).abs() < 1e-6);
+        assert!((speed[25] - 440.25708).abs() < 1e-6);
+        assert!((speed[50] - 442.22626).abs() < 1e-6);
+        assert!((speed[75] - 435.19177).abs() < 1e-6);
+        assert!((speed[99] - 320.37265).abs() < 1e-6);
     }
 }

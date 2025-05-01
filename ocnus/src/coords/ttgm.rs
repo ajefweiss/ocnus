@@ -1,9 +1,5 @@
-use crate::{
-    coords::{CoordsError, OcnusCoords},
-    fXX,
-    math::{T, atan2, cos, powf, powi, quaternion_rot, sin, sqrt},
-};
-use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3};
+use crate::coords::{CoordsError, OcnusCoords, quaternion_rot};
+use nalgebra::{Const, Dim, RealField, U1, UnitQuaternion, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
@@ -11,7 +7,7 @@ use std::{fmt::Debug, marker::PhantomData};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TTState<T>
 where
-    T: fXX,
+    T: RealField,
 {
     /// Major torus radius
     pub major_radius: T,
@@ -26,11 +22,11 @@ where
 /// Tapered torus flux rope geometry.
 pub struct TTGeometry<T>(PhantomData<T>)
 where
-    T: fXX;
+    T: RealField;
 
 impl<T> Default for TTGeometry<T>
 where
-    T: fXX,
+    T: RealField,
 {
     fn default() -> Self {
         Self(PhantomData::<T>)
@@ -39,7 +35,7 @@ where
 
 impl<T> OcnusCoords<T, 6, TTState<T>> for TTGeometry<T>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     const PARAMS: [&'static str; 6] = [
         "longitude",
@@ -69,37 +65,37 @@ where
         let psi_half = T::pi() * ics[2];
 
         let omega = T::two_pi() * nu;
-        let com = cos!(omega);
-        let som = sin!(omega);
+        let com = omega.cos();
+        let som = omega.sin();
 
-        let radius_eff = minor_radius * powi!(sin!(psi_half), 2);
-        let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+        let radius_eff = minor_radius * psi_half.sin().powi(2);
+        let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
         let dmu =
-            Vector3::from([-cos!(psi) * com, sin!(psi) * com, som]) * radius_eff * delta / denom;
+            Vector3::from([-psi.cos() * com, psi.sin() * com, som]) * radius_eff * delta / denom;
 
         let dnu = Vector3::from([
-            cos!(psi) * powi!(delta, 2) * som,
-            -sin!(psi) * powi!(delta, 2) * som,
+            psi.cos() * delta.powi(2) * som,
+            -psi.sin() * delta.powi(2) * som,
             com,
         ]) * T::two_pi()
-            / powf!(denom, T!(3.0))
+            / denom.powi(3)
             * mu
             * radius_eff
             * delta;
 
         let ds = Vector3::from([
             -T::two_pi() * mu * minor_radius * delta / denom
-                * (sin!(psi_half) * cos!(psi_half) * cos!(psi)
-                    - powi!(sin!(psi_half), 2) * sin!(psi))
+                * (psi_half.sin() * psi_half.cos() * psi.cos()
+                    - psi_half.sin().powi(2) * psi.sin())
                 * com
-                + T::two_pi() * major_radius * sin!(psi),
+                + T::two_pi() * major_radius * psi.sin(),
             T::two_pi() * mu * minor_radius * delta / denom
-                * (sin!(psi_half) * cos!(psi_half) * sin!(psi)
-                    + powi!(sin!(psi_half), 2) * cos!(psi))
+                * (psi_half.sin() * psi_half.cos() * psi.sin()
+                    + psi_half.sin().powi(2) * psi.cos())
                 * com
-                + T::two_pi() * major_radius * cos!(psi),
-            T::two_pi() * mu * minor_radius * delta / denom * sin!(psi_half) * cos!(psi_half) * som,
+                + T::two_pi() * major_radius * psi.cos(),
+            T::two_pi() * mu * minor_radius * delta / denom * psi_half.sin() * psi_half.cos() * som,
         ]);
 
         Ok([
@@ -128,16 +124,19 @@ where
 
         let omega = T::two_pi() * nu;
 
-        let radius_eff = minor_radius * powi!(sin!(psi_half), 2);
-        let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+        let radius_eff = minor_radius * psi_half.sin().powi(2);
+        let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
-        let detg = mu * minor_radius * delta * (cos!(T!(2.0) * psi) - cos!(T!(3.0) * psi))
-            / T!(2.0)
-            * cos!(omega)
+        let detg = mu
+            * minor_radius
+            * delta
+            * ((T::from_usize(2).unwrap() * psi).cos() - (T::from_usize(3).unwrap() * psi).cos())
+            / T::from_usize(2).unwrap()
+            * omega.cos()
             + major_radius * denom;
 
         Ok(
-            T::two_pi() * detg * radius_eff * delta * T::two_pi() / powf!(denom, T!(3.0))
+            T::two_pi() * detg * radius_eff * delta * T::two_pi() / denom.powi(3)
                 * mu
                 * radius_eff
                 * delta,
@@ -149,16 +148,18 @@ where
         cs_state: &mut TTState<T>,
     ) -> Result<(), CoordsError> {
         // Extract parameters using their identifiers.
-        let distance_0 = Self::param_value("distance_0", params).unwrap() * T!(695510.0);
+        let distance_0 =
+            Self::param_value("distance_0", params).unwrap() * T::from_usize(695510).unwrap();
         let diameter_1au = Self::param_value("diameter_1au", params).unwrap();
         let longitude = Self::param_value("longitude", params).unwrap();
         let latitude = Self::param_value("latitude", params).unwrap();
         let inclination = Self::param_value("inclination", params).unwrap();
 
-        let rt = distance_0 / T!(1.496e8);
+        let rt = distance_0 / T::from_f64(1.496e8).unwrap();
 
-        cs_state.minor_radius = diameter_1au * powf!(rt, T!(1.14)) / T!(2.0);
-        cs_state.major_radius = (rt - cs_state.minor_radius) / T!(2.0);
+        cs_state.minor_radius =
+            diameter_1au * rt.powf(T::from_f64(1.14).unwrap()) / T::from_usize(2).unwrap();
+        cs_state.major_radius = (rt - cs_state.minor_radius) / T::from_usize(2).unwrap();
 
         cs_state.q = quaternion_rot(longitude, latitude, inclination);
 
@@ -184,16 +185,16 @@ where
         let psi_half = T::pi() * ics[2];
 
         let omega = T::two_pi() * nu;
-        let com = cos!(omega);
-        let som = sin!(omega);
+        let com = omega.cos();
+        let som = omega.sin();
 
-        let radius_eff = minor_radius * powi!(sin!(psi_half), 2);
-        let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+        let radius_eff = minor_radius * psi_half.sin().powi(2);
+        let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
         let mu_offset = mu * radius_eff * delta / denom;
 
         Ok(quaternion.transform_vector(&Vector3::new(
-            major_radius - (major_radius + mu_offset * com) * cos!(psi),
-            (major_radius + mu_offset * com) * sin!(psi),
+            major_radius - (major_radius + mu_offset * com) * psi.cos(),
+            (major_radius + mu_offset * com) * psi.sin(),
             mu_offset * som,
         )))
     }
@@ -217,17 +218,17 @@ where
 
         let psi = if x == major_radius {
             if y > T::zero() {
-                T::half_pi()
+                T::frac_pi_2()
             } else {
-                T::pi() * T!(1.5)
+                T::pi() * T::from_f64(1.5).unwrap()
             }
         } else {
-            atan2!(-y, x - major_radius) + T::pi()
+            (-y).atan2(x - major_radius) + T::pi()
         };
 
         let on_axis = Vector3::new(
-            major_radius - major_radius * cos!(psi),
-            major_radius * sin!(psi),
+            major_radius - major_radius * psi.cos(),
+            major_radius * psi.sin(),
             T::zero(),
         );
 
@@ -235,18 +236,18 @@ where
         let torus_center = Vector3::new(major_radius, T::zero(), T::zero());
 
         let dl = if (ecs_norot - torus_center).norm() >= (on_axis - torus_center).norm() {
-            sqrt!(powi!(axis_delta[0], 2) + powi!(axis_delta[1], 2))
+            (axis_delta[0].powi(2) + axis_delta[1].powi(2)).sqrt()
         } else {
-            -sqrt!(powi!(axis_delta[0], 2) + powi!(axis_delta[1], 2))
+            -(axis_delta[0].powi(2) + axis_delta[1].powi(2)).sqrt()
         };
 
         // Compute internal coordinates (mu, nu).
-        let r = sqrt!(powi!(dl, 2) + powi!(z, 2));
-        let omega = atan2!(z, dl);
+        let r = (dl.powi(2) + z.powi(2)).sqrt();
+        let omega = z.atan2(dl);
         let mut nu = omega / T::two_pi();
 
-        let radius_eff = minor_radius * powi!(sin!(psi / T!(2.0)), 2);
-        let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+        let radius_eff = minor_radius * (psi / T::from_usize(2).unwrap()).sin().powi(2);
+        let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
         let mu = r / delta / radius_eff * denom;
 
@@ -265,7 +266,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::coords::{OcnusCoords, TTGeometry, TTState};
+    use super::*;
     use nalgebra::{SVector, Vector3};
 
     #[test]

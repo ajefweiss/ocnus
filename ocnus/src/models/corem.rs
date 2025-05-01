@@ -1,18 +1,12 @@
 use crate::{
-    OcnusError,
+    ModelError, OcnusError, OcnusModel,
     coords::{CoordsError, OcnusCoords, TTGeometry, TTState},
-    fXX,
-    forward::{
-        FSMError, FisherInformation, OcnusFSM,
-        filters::{ABCParticleFilter, ParticleFilter, SIRParticleFilter},
-        models::concat_arrays,
-    },
-    math::{T, ln, powf, powi},
+    models::concat_arrays,
     obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
 };
-use nalgebra::{Const, Dim, SVectorView, U1, Vector3, VectorView, VectorView3};
-use ocnus_stats::OcnusPDF;
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use nalgebra::{Const, Dim, RealField, SVectorView, U1, Vector3, VectorView, VectorView3};
+use ocnus_stats::Density;
+use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, marker::PhantomData};
 
@@ -33,7 +27,7 @@ pub fn core_obs<T, const P: usize, M>(
     cs_state: &TTState<T>,
 ) -> Option<(T, T)>
 where
-    T: fXX,
+    T: Copy + RealField,
     M: OcnusCoords<T, P, TTState<T>>,
 {
     // Extract parameters using their identifiers.
@@ -50,24 +44,31 @@ where
                     Some((T::zero(), magnetic_field))
                 } else {
                     let chi = mu * radius * magnetic_field * tau
-                        / (T::one() + powi!(tau, 2) * powi!(mu * radius, 2))
+                        / (T::one() + (tau * mu * radius).powi(2))
                         * M::detg(&Vector3::new(mu, T::zero(), s).as_view(), params, cs_state)
                             .unwrap()
                         / M::detg(&Vector3::new(mu, nu, s).as_view(), params, cs_state).unwrap();
 
-                    let xi = if ((nu % T::one()) < T!(0.25)) || ((nu % T::one()) > T!(0.75)) {
-                        magnetic_field / (T::one() + powi!(tau, 2) * powi!(mu * radius, 2))
+                    let xi = if ((nu % T::one()) < T::from_f64(0.25).unwrap())
+                        || ((nu % T::one()) > T::from_f64(0.75).unwrap())
+                    {
+                        magnetic_field / (T::one() + (tau * mu * radius).powi(2))
                             * M::detg(
-                                &Vector3::new(mu, T::zero(), T!(0.5)).as_view(),
+                                &Vector3::new(mu, T::zero(), T::from_f64(0.5).unwrap()).as_view(),
                                 params,
                                 cs_state,
                             )
                             .unwrap()
                             / M::detg(&Vector3::new(mu, nu, s).as_view(), params, cs_state).unwrap()
                     } else {
-                        magnetic_field / (T::one() + powi!(tau, 2) * powi!(mu * radius, 2))
+                        magnetic_field / (T::one() + (tau * mu * radius).powi(2))
                             * M::detg(
-                                &Vector3::new(mu, T!(0.5), T!(0.5)).as_view(),
+                                &Vector3::new(
+                                    mu,
+                                    T::from_f64(0.5).unwrap(),
+                                    T::from_f64(0.5).unwrap(),
+                                )
+                                .as_view(),
                                 params,
                                 cs_state,
                             )
@@ -89,13 +90,13 @@ macro_rules! impl_core_forward_model {
         #[derive(Debug)]
         pub struct $model<T, D>(D, PhantomData<T>)
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            T: Copy+ RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
 
         impl<T, D> $model<T, D>
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            T: Copy+RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`]")]
             pub fn new(pdf: D) -> Self {
@@ -109,8 +110,9 @@ macro_rules! impl_core_forward_model {
         impl<T, D> OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, TTState<T>>
             for $model<T, D>
         where
-            T: fXX,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            T:Copy+ RealField,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            Self: Send + Sync,
         {
             const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
                 concat_arrays!($coords::<f64>::PARAMS, $params);
@@ -200,7 +202,7 @@ macro_rules! impl_core_forward_model {
         }
 
         impl<T, D>
-            OcnusFSM<
+            OcnusModel<
                 T,
                 ObserVec<T, 3>,
                 { $coords::<f64>::PARAMS.len() + $params.len() },
@@ -208,15 +210,15 @@ macro_rules! impl_core_forward_model {
                 TTState<T>,
             > for $model<T, D>
         where
-            T: fXX,
+            T:Copy+ RealField,
             D: Sync,
             StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
+            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, TTState<T>>,
         {
             const RCS: usize = 128;
 
-            fn fsm_forward(
+            fn forward(
                 &self,
                 time_step: T,
                 params: &VectorView<
@@ -227,15 +229,15 @@ macro_rules! impl_core_forward_model {
                 >,
                 fm_state: &mut COREState<T>,
                 cs_state: &mut TTState<T>,
-            ) -> Result<(), FSMError<T>> {
+            ) -> Result<(), ModelError<T>> {
                 // Extract parameters using their identifiers.
-                let distance_0 = Self::param_value("distance_0", params).unwrap() * T!(695510.0);
+                let distance_0 = Self::param_value("distance_0", params).unwrap() * T::from_f64(695510.0).unwrap();
                 let diameter_1au = Self::param_value("diameter_1au", params).unwrap();
 
                 let b_scale = Self::param_value("b_scale", params).unwrap();
                 let v_0 = Self::param_value("velocity", params).unwrap();
                 let v_sw = Self::param_value("sw_velocity", params).unwrap();
-                let gamma = Self::param_value("sw_gamma", params).unwrap() * T!(1e-7);
+                let gamma = Self::param_value("sw_gamma", params).unwrap() * T::from_f64(1e-7).unwrap();
 
                 fm_state.time += time_step;
 
@@ -246,23 +248,23 @@ macro_rules! impl_core_forward_model {
                     _ => T::neg(T::one()),
                 };
 
-                let rt = (sign / gamma * ln!(T::one() + sign * gamma * delta_v * fm_state.time)
+                let rt = (sign / gamma * (T::one() + sign * gamma * delta_v * fm_state.time).ln()
                     + v_sw * fm_state.time
                     + distance_0)
-                    / T!(1.496e8);
+                    / T::from_f64(1.496e8).unwrap();
                 let vt = delta_v / (T::one() + sign * gamma * delta_v * fm_state.time) + v_sw;
 
-                cs_state.minor_radius = diameter_1au * powf!(rt, T!(1.14)) / T!(2.0);
-                cs_state.major_radius = (rt - cs_state.minor_radius) / T!(2.0);
+                cs_state.minor_radius = diameter_1au * rt.powf(T::from_f64(1.14).unwrap()) / T::from_usize(2).unwrap();
+                cs_state.major_radius = (rt - cs_state.minor_radius) / T::from_usize(2).unwrap();
 
                 fm_state.magnetic_field =
-                    b_scale * powf!(T!(2.0) * cs_state.major_radius, T!(-1.68));
+                    b_scale * (T::from_usize(2).unwrap() * cs_state.major_radius).powf(T::from_f64(-1.68).unwrap());
                 fm_state.velocity = vt;
 
                 Ok(())
             }
 
-            fn fsm_initialize_states(&self,
+            fn initialize_states(&self,
                 _series: &ScObsSeries<T, ObserVec<T, 3>>,
                 params: &VectorView<
                     T,
@@ -281,13 +283,13 @@ macro_rules! impl_core_forward_model {
 
                 fm_state.time = T::zero();
                 fm_state.magnetic_field =
-                    b_scale * powf!(T!(2.0) * cs_state.major_radius, T!(-1.68));
+                    b_scale * (T::from_usize(2).unwrap() * cs_state.major_radius).powf(T::from_f64(-1.68).unwrap());
                 fm_state.velocity = v_0;
 
                 Ok(())
             }
 
-            fn fsm_observe(
+            fn observe(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
@@ -330,7 +332,7 @@ macro_rules! impl_core_forward_model {
                 }
             }
 
-            fn fsm_observe_ics_plus_basis(
+            fn observe_ics_plus_basis(
                 &self,
                 scobs: &ScObs<T, ObserVec<T, 3>>,
                 params: &VectorView<
@@ -362,11 +364,11 @@ macro_rules! impl_core_forward_model {
                 ]))
             }
 
-            fn param_step_sizes(&self) -> [T; { $coords::<f64>::PARAMS.len() + $params.len() }] {
+            fn param_step_sizes(&self) -> [T; { $coords::<f64>::PARAMS.len() + $params.len() }]  {
                 (&self.0)
                     .get_valid_range()
                     .iter()
-                    .map(|(min, max)| (*max - *min) * T!(128.0) * T::epsilon())
+                    .map(|(min, max)| (*max - *min) * T::from_usize(128).unwrap() * T::from_f64(5e-7).unwrap())
                     .collect::<Vec<T>>()
                     .try_into()
                     .unwrap()
@@ -374,74 +376,11 @@ macro_rules! impl_core_forward_model {
 
             fn model_prior(
                 &self,
-            ) -> impl OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
                 &self.0
             }
         }
 
-        impl<T, D>
-            ParticleFilter<
-                T,
-                ObserVec<T, 3>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                COREState<T>,
-                TTState<T>,
-            > for $model<T, D>
-        where
-            T: fXX,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, D>
-            ABCParticleFilter<
-                T,
-                ObserVec<T, 3>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                COREState<T>,
-                TTState<T>,
-            > for $model<T, D>
-        where
-            T: fXX + SampleUniform,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, D>
-            SIRParticleFilter<
-                T,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                3,
-                COREState<T>,
-                TTState<T>,
-            > for $model<T, D>
-        where
-            T: fXX + SampleUniform,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
-
-        impl<T, D>
-            FisherInformation<
-                T,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
-                3,
-                COREState<T>,
-                TTState<T>,
-            > for $model<T, D>
-        where
-            T: fXX,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: OcnusPDF<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-        {
-        }
     };
 }
 
@@ -456,7 +395,7 @@ impl_core_forward_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{forward::FSMEnsbl, obser::NoNoise};
+    use crate::{OcnusEnsbl, obser::NullNoise};
     use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
     use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 
@@ -486,7 +425,7 @@ mod tests {
             )
         }));
 
-        let mut ensbl = FSMEnsbl {
+        let mut ensbl = OcnusEnsbl {
             params_array: Matrix::<f64, Const<11>, Dyn, VecStorage<f64, Const<11>, Dyn>>::zeros(1),
             fm_states: vec![COREState::default(); 1],
             cs_states: vec![TTState::default(); 1],
@@ -514,24 +453,24 @@ mod tests {
         );
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fsm_simulate_ensbl(
+            .simulate_ensbl(
                 &sc,
                 &mut ensbl,
                 &mut output.as_view_mut(),
-                None::<&mut NoNoise<f64>>,
+                None::<&mut NullNoise<f64>>,
             )
             .expect("simulation failed");
 
         model
-            .fsm_initialize_states_ensbl(&sc, &mut ensbl)
+            .initialize_states_ensbl(&sc, &mut ensbl)
             .expect("initialization failed");
 
         model
-            .fsm_simulate_ics_plus_basis_ensbl(&sc, &mut ensbl, &mut output_diag.as_view_mut())
+            .simulate_ics_plus_basis_ensbl(&sc, &mut ensbl, &mut output_diag.as_view_mut())
             .expect("simulation failed");
 
         println!("{}", output);

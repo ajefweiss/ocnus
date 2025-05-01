@@ -1,9 +1,10 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
 use ocnus::{
+    OcnusEnsbl, OcnusModel,
     coords::TTState,
-    forward::{COREModel, COREState, FSMEnsbl, OcnusFSM},
-    obser::{NoNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
+    models::{COREModel, COREState},
+    obser::{NullNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
 };
 use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
 use std::{hint::black_box, time::Duration};
@@ -52,7 +53,7 @@ fn benchmark_core_f32(c: &mut Criterion) {
     let mut group = c.benchmark_group("corem_bench");
 
     // Create temporary simulation data and out arrays, if necessary.
-    let mut data = FSMEnsbl {
+    let mut data = OcnusEnsbl {
         params_array: Matrix::<f32, Const<11>, Dyn, VecStorage<f32, Const<11>, Dyn>>::zeros(
             ENSEMBLE_SIZE,
         ),
@@ -72,7 +73,7 @@ fn benchmark_core_f32(c: &mut Criterion) {
     group.bench_function("core_initialize", |b| {
         b.iter(|| {
             model
-                .fsm_initialize_ensbl(
+                .initialize_ensbl(
                     black_box(&sc),
                     black_box(&mut data),
                     black_box(None::<&UnivariateND<f32, 11>>),
@@ -86,7 +87,7 @@ fn benchmark_core_f32(c: &mut Criterion) {
     group.bench_function("core_simulate", |b| {
         b.iter(|| {
             model
-                .fsm_initialize_ensbl(
+                .initialize_ensbl(
                     black_box(&sc),
                     black_box(&mut data),
                     black_box(None::<&UnivariateND<f32, 11>>),
@@ -94,11 +95,11 @@ fn benchmark_core_f32(c: &mut Criterion) {
                 )
                 .unwrap();
             model
-                .fsm_simulate_ensbl(
+                .simulate_ensbl(
                     &sc,
                     &mut data,
                     &mut output.as_view_mut(),
-                    None::<&mut NoNoise<f32>>,
+                    None::<&mut NullNoise<f32>>,
                 )
                 .unwrap();
         });

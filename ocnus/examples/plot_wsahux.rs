@@ -3,8 +3,9 @@ use env_logger::Builder;
 use log::warn;
 use nalgebra::DMatrix;
 use ocnus::{
-    forward::{FSMEnsbl, OcnusFSM, WSAHUXModel},
-    obser::{NoNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
+    OcnusEnsbl, OcnusModel,
+    models::WSAHUXModel,
+    obser::{NullNoise, ObserVec, ScObs, ScObsConf, ScObsSeries},
 };
 use ocnus_stats::{Constant1D, UnivariateND};
 use plotters::prelude::*;
@@ -111,21 +112,21 @@ fn main() {
 
     model.limit_latitude(1.0);
 
-    let mut ensbl = FSMEnsbl::new(ENSEMBLE_SIZE);
+    let mut ensbl = OcnusEnsbl::new(ENSEMBLE_SIZE);
 
     // Create synthetic output.
     let mut output = DMatrix::<ObserVec<_, 1>>::zeros(sc.len(), 1);
 
     model
-        .fsm_initialize_ensbl(&sc, &mut ensbl, None::<&UnivariateND<f32, 8>>, 41)
+        .initialize_ensbl(&sc, &mut ensbl, None::<&UnivariateND<f32, 8>>, 41)
         .unwrap();
 
     model
-        .fsm_simulate_ensbl(
+        .simulate_ensbl(
             &sc,
             &mut ensbl,
             &mut output.as_view_mut(),
-            None::<&mut NoNoise<f32>>,
+            None::<&mut NullNoise<f32>>,
         )
         .unwrap();
 

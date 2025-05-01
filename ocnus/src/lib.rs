@@ -1,71 +1,35 @@
 #![doc = include_str!("../../README.md")]
 #![deny(missing_docs)]
 
-pub mod coords;
-pub mod forward;
-pub mod math;
-pub mod obser;
-
-use coords::CoordsError;
-use forward::{FSMError, filters::ParticleFilterError};
-use math::MathError;
-use nalgebra::{RealField, Scalar};
-use num_traits::{AsPrimitive, Float, FromPrimitive, float::TotalOrder};
-use ocnus_stats::StatsError;
-use std::{
-    fmt::{Debug, Display},
-    iter::Sum,
-};
-use thiserror::Error;
-
 pub use ocnus_stats as stats;
 
-/// Generic container type for errors.
+pub mod coords;
+mod ensbl;
+mod math;
+pub mod methods;
+mod model;
+pub mod models;
+pub mod obser;
+
+pub use ensbl::OcnusEnsbl;
+pub use model::OcnusModel;
+
+use coords::CoordsError;
+use methods::ParticleFilterError;
+use model::ModelError;
+use stats::StatsError;
+use thiserror::Error;
+
+/// Generic container for all error types in the **ocnus** framework.
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
 pub enum OcnusError<T> {
-    #[error("forward error")]
+    #[error("coords error")]
     Coords(#[from] CoordsError),
-    #[error("forward error")]
-    FSM(#[from] FSMError<T>),
-    #[error("math error")]
-    Math(#[from] MathError<T>),
     #[error("particle filter error")]
-    ParticleFilter(#[from] ParticleFilterError<T>),
+    FilterError(#[from] ParticleFilterError<T>),
+    #[error("model error")]
+    Model(#[from] ModelError<T>),
     #[error("stats error")]
-    ProDeF(#[from] StatsError<T>),
+    Stats(#[from] StatsError<T>),
 }
-
-/// A trait that describes a generic floating point numbers within the **ocnus** crate. In practical
-/// terms this trait is only used for the f32/f64 types.
-#[allow(non_camel_case_types)]
-pub trait fXX:
-    'static
-    + AsPrimitive<usize>
-    + Copy
-    + Debug
-    + Default
-    + Display
-    + Float
-    + FromPrimitive
-    + RealField
-    + Scalar
-    + Send
-    + Sum
-    + for<'x> Sum<&'x Self>
-    + Sync
-    + TotalOrder
-{
-    /// Returns 4π.
-    fn four_pi() -> Self {
-        Self::two_pi() + Self::two_pi()
-    }
-
-    /// Returns π/2.
-    fn half_pi() -> Self {
-        RealField::frac_pi_2()
-    }
-}
-
-impl fXX for f32 {}
-impl fXX for f64 {}

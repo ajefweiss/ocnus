@@ -1,9 +1,5 @@
-use crate::{
-    coords::{CoordsError, OcnusCoords},
-    fXX,
-    math::{T, atan2, cos, powi, quaternion_rot, sin, sqrt},
-};
-use nalgebra::{Const, Dim, U1, UnitQuaternion, Vector3, VectorView, VectorView3};
+use crate::coords::{CoordsError, OcnusCoords, quaternion_rot};
+use nalgebra::{Const, Dim, RealField, U1, UnitQuaternion, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
@@ -11,7 +7,7 @@ use std::{fmt::Debug, marker::PhantomData};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct XCState<T>
 where
-    T: fXX,
+    T: Copy + RealField,
 {
     /// Offset along the x-axis.
     pub x: T,
@@ -32,17 +28,17 @@ pub fn cc_basis<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> [Vector3<T>; 3]
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let y_offset = M::param_value("y", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
     let omega = T::two_pi() * nu;
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
-    let dr = Vector3::from([cos!(omega), T::zero(), sin!(omega)]) * radius_linearized;
+    let dr = Vector3::from([omega.cos(), T::zero(), omega.sin()]) * radius_linearized;
     let dnu =
-        Vector3::from([-sin!(omega), T::zero(), cos!(omega)]) * T::two_pi() * r * radius_linearized;
+        Vector3::from([-omega.sin(), T::zero(), omega.cos()]) * T::two_pi() * r * radius_linearized;
     let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
 
     [dr, dnu, dz]
@@ -57,19 +53,19 @@ pub fn ec_basis<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> [Vector3<T>; 3]
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let y_offset = M::param_value("y", params).unwrap();
     let delta = M::param_value("delta", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     let omega = T::two_pi() * nu;
-    let com = cos!(omega);
-    let som = sin!(omega);
+    let com = omega.cos();
+    let som = omega.sin();
 
-    let denom = sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+    let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
     let nu_nom = T::two_pi() * delta * mu * radius_linearized;
 
@@ -80,9 +76,9 @@ where
     ]);
 
     let dnu = Vector3::from([
-        -nu_nom * powi!(delta, 2) * som / powi!(denom, 3),
+        -nu_nom * delta.powi(2) * som / denom.powi(3),
         T::zero(),
-        nu_nom * com / powi!(denom, 3),
+        nu_nom * com / denom.powi(3),
     ]);
 
     let ds = Vector3::from([T::zero(), T::one(), T::zero()]);
@@ -99,14 +95,14 @@ pub fn cc_detg<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> T
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let y_offset = M::param_value("y", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
-    T::two_pi() * r * powi!(radius_linearized, 2)
+    T::two_pi() * r * radius_linearized.powi(2)
 }
 
 /// The elliptic-cylindric metric determinant
@@ -118,15 +114,15 @@ pub fn ec_detg<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> T
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let y_offset = M::param_value("y", params).unwrap();
     let delta = M::param_value("delta", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
-    T::two_pi() * mu * powi!(delta, 2) * powi!(radius_linearized, 2)
+    T::two_pi() * mu * delta.powi(2) * radius_linearized.powi(2)
 }
 
 /// The circular-cylindric coordinate transformation (ecs -> ics).
@@ -137,20 +133,20 @@ pub fn cc_ecs_to_ics<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let radius = M::param_value("radius", params).unwrap();
     let y_offset = M::param_value("y", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     // Compute polar coordinates (r, omega).
-    let r = sqrt!(powi!(x, 2) + powi!(z, 2)) / radius_linearized;
+    let r = (x.powi(2) + z.powi(2)).sqrt() / radius_linearized;
 
     let mut nu = if r == T::zero() {
         T::zero()
     } else {
-        atan2!(z, x) / T::two_pi()
+        z.atan2(x) / T::two_pi()
     };
 
     // Force nu into [0, 1].
@@ -173,23 +169,23 @@ pub fn ec_ecs_to_ics<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let y_offset = M::param_value("y", params).unwrap();
     let delta = M::param_value("delta", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     // Compute internal coordinates (mu, nu).
-    let r = sqrt!(powi!(x, 2) + powi!(z, 2));
+    let r = (x.powi(2) + z.powi(2)).sqrt();
 
     let (mu, mut nu) = if r == T::zero() {
         (T::zero(), T::zero())
     } else {
         (
-            r * sqrt!(powi!(x, 2) + powi!(z, 2) * powi!(delta, 2)) / r / delta / radius_linearized,
-            atan2!(z, x) / T!(2.0) / T::pi(),
+            r * (x.powi(2) + z.powi(2) * delta.powi(2)).sqrt() / r / delta / radius_linearized,
+            z.atan2(x) / T::from_usize(2).unwrap() / T::pi(),
         )
     };
 
@@ -213,17 +209,17 @@ pub fn cc_ics_to_ecs<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let radius = M::param_value("radius", params).unwrap();
     let y_offset = M::param_value("y", params).unwrap();
 
     let omega = T::two_pi() * nu;
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     // Compute cartesian coordinates (x, y, z).
-    let x = cos!(omega) * r * radius_linearized;
-    let z = sin!(omega) * r * radius_linearized;
+    let x = omega.cos() * r * radius_linearized;
+    let z = omega.sin() * r * radius_linearized;
 
     Vector3::new(x, y, z)
 }
@@ -236,22 +232,22 @@ pub fn ec_ics_to_ecs<T, const P: usize, M, CSST, CStride: Dim>(
 ) -> Vector3<T>
 where
     M: OcnusCoords<T, P, CSST>,
-    T: fXX,
+    T: Copy + RealField,
 {
     let y_offset = M::param_value("y", params).unwrap();
     let delta = M::param_value("delta", params).unwrap();
     let radius = M::param_value("radius", params).unwrap();
 
-    let radius_linearized = radius * sqrt!(T::one() - powi!(y_offset, 2));
+    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     let omega = T::two_pi() * nu;
 
     let df = mu * delta * radius_linearized
-        / sqrt!(powi!(cos!(omega), 2) + powi!(delta * sin!(omega), 2));
+        / (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
     // Compute cartesian coordinates (x, y, z).
-    let x = cos!(omega) * df;
-    let y = sin!(omega) * df;
+    let x = omega.cos() * df;
+    let y = omega.sin() * df;
 
     Vector3::new(x, s, y)
 }
@@ -263,11 +259,11 @@ macro_rules! impl_xcgm_geom {
         #[derive(Debug)]
         pub struct $model<T>(PhantomData<T>)
         where
-            T: fXX;
+            T: RealField;
 
         impl<T> Default for $model<T>
         where
-            T: fXX,
+            T: Copy + RealField,
         {
             fn default() -> Self {
                 Self(PhantomData::<T>)
@@ -276,7 +272,7 @@ macro_rules! impl_xcgm_geom {
 
         impl<T> OcnusCoords<T, { $params.len() }, XCState<T>> for $model<T>
         where
-            T: fXX,
+            T: Copy + RealField,
         {
             const PARAMS: [&'static str; { $params.len() }] = $params;
 
@@ -325,9 +321,9 @@ macro_rules! impl_xcgm_geom {
                 let y = Self::param_value("y", params).unwrap();
 
                 cs_state.x = x_init;
-                cs_state.z = radius * y * sqrt!(T::one() - powi!(sin!(phi) * sin!(theta), 2))
-                    / cos!(phi)
-                    / cos!(theta);
+                cs_state.z = radius * y * (T::one() - (phi.sin() * theta.sin()).powi(2)).sqrt()
+                    / phi.cos()
+                    / theta.cos();
 
                 cs_state.q = quaternion_rot(phi, psi, theta);
 
@@ -396,7 +392,7 @@ impl_xcgm_geom!(
 
 #[cfg(test)]
 mod tests {
-    use crate::coords::{CCGeometry, ECGeometry, OcnusCoords, XCState};
+    use super::*;
     use nalgebra::{SVector, Vector3};
 
     #[test]

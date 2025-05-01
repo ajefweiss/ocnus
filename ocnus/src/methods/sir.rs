@@ -1,30 +1,25 @@
 use crate::{
-    OcnusError, fXX,
-    forward::{
-        FSMEnsbl,
-        filters::{
-            ParticleFilter, ParticleFilterError, ParticleFilterResults, ParticleFilterSettings,
-        },
-    },
-    math::{T, exp, powi},
+    OcnusEnsbl, OcnusError,
+    methods::{ParticleFilter, ParticleFilterError, ParticleFilterResults, ParticleFilterSettings},
     obser::{ObserVec, ObserVecNoise, ScObsSeries},
 };
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::DMatrix;
-use ocnus_stats::{OcnusPDF, ParticlesND};
+use nalgebra::{DMatrix, RealField};
+use num_traits::AsPrimitive;
+use ocnus_stats::{Density, ParticlesND};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use std::{cmp::Ordering, time::Instant};
+use std::{cmp::Ordering, iter::Sum, time::Instant};
 
 /// A trait that enables the use of a sequential importance resampling (SIR) particle filter method
-/// for a [`OcnusFSM`](crate::forward::OcnusFSM) with a [`ObserVec`] observable.
+/// for a [`OcnusModel`](`crate::OcnusModel`) with an [`ObserVec`] observable.
 pub trait SIRParticleFilter<T, const P: usize, const N: usize, FMST, CSST>:
     ParticleFilter<T, ObserVec<T, N>, P, FMST, CSST>
 where
-    T: fXX + SampleUniform,
-    FMST: Default + Clone + Send,
-    CSST: Default + Clone + Send,
+    T: AsPrimitive<usize> + Copy + RealField + SampleUniform + Sum + for<'x> Sum<&'x T>,
+    FMST: Clone + Default + Send,
+    CSST: Clone + Default + Send,
     StandardNormal: Distribution<T>,
     Self: Sync,
 {
@@ -32,7 +27,7 @@ where
     fn pf_sir_iter(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        ensbl: &FSMEnsbl<T, P, FMST, CSST>,
+        ensbl: &OcnusEnsbl<T, P, FMST, CSST>,
         ensemble_sizes: (usize, usize),
         settings: &mut ParticleFilterSettings<T>,
         noise: &mut ObserVecNoise<T, N>,
@@ -44,18 +39,18 @@ where
         let mut counter = 0;
         let mut iteration = 0;
 
-        let mut target_ensbl = FSMEnsbl::new(ensemble_size);
+        let mut target_ensbl = OcnusEnsbl::new(ensemble_size);
         let mut target_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), ensemble_size);
 
-        let mut temp_ensbl = FSMEnsbl::new(sim_ensemble_size);
+        let mut temp_ensbl = OcnusEnsbl::new(sim_ensemble_size);
         let mut temp_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
-        let mut interim_ensbl = FSMEnsbl::<T, P, FMST, CSST>::new(sim_ensemble_size);
+        let mut interim_ensbl = OcnusEnsbl::<T, P, FMST, CSST>::new(sim_ensemble_size);
         let mut interim_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), sim_ensemble_size);
 
         let ensbl_params_view = ensbl.params_array.as_view();
 
-        // Create a Particle OcnusPDF from input and multiply by the exploration factor.
+        // Create a Particle Density from input and multiply by the exploration factor.
         let density_old = ParticlesND::from_particles(
             &ensbl_params_view,
             self.model_prior().get_valid_range(),
@@ -65,7 +60,7 @@ where
             * settings.expl_factor;
 
         while counter != sim_ensemble_size {
-            self.fsm_initialize_ensbl(
+            self.initialize_ensbl(
                 series,
                 &mut temp_ensbl,
                 Some(&density_old),
@@ -73,7 +68,7 @@ where
             )?;
 
             let mut indices_valid = self
-                .fsm_simulate_ensbl(
+                .simulate_ensbl(
                     series,
                     &mut temp_ensbl,
                     &mut temp_output.as_view_mut(),
@@ -108,7 +103,7 @@ where
 
             iteration += 1;
 
-            if T!(start.elapsed().as_millis() as f64 / 1e3) > settings.sim_time_limit {
+            if start.elapsed().as_millis() as f64 / 1e3 > settings.sim_time_limit {
                 info!(
                     "pf_sir_iter aborted, time limit exceeded\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
                     (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
@@ -118,7 +113,7 @@ where
                 );
 
                 return Err(ParticleFilterError::TimeLimitExceeded {
-                    elapsed: T!(start.elapsed().as_millis() as f64 / 1e3),
+                    elapsed: start.elapsed().as_millis() as f64,
                     limit: settings.sim_time_limit,
                 }
                 .into());
@@ -131,7 +126,7 @@ where
             .map(|mut chunks| {
                 chunks
                     .iter_mut()
-                    .map(|out| noise.multivariate_likelihood(out, series))
+                    .map(|out| noise.multivariate_likelihood(out, series).unwrap())
                     .collect::<Vec<T>>()
             })
             .flatten()
@@ -144,7 +139,7 @@ where
 
         let mut weights = likelihoods
             .iter()
-            .map(|lh| exp!(*lh - lh_max))
+            .map(|lh| (*lh - lh_max).exp())
             .collect::<Vec<T>>();
 
         weights
@@ -158,7 +153,7 @@ where
 
         let interim_params_view = interim_ensbl.params_array.as_view();
 
-        // Create a Particle OcnusPDF from the temporary simulations.
+        // Create a Particle Density from the temporary simulations.
         let density_new = ParticlesND::from_particles(
             &interim_params_view,
             self.model_prior().get_valid_range(),
@@ -166,16 +161,16 @@ where
         )
         .unwrap();
 
-        let kld = density_new.kullback_leibler_divergence_mvpdf_estimate(&density_old);
+        let kld = density_new.kullback_leibler_divergence_estimate(&density_old);
 
         let effective_sample_size = T::one()
             / density_new
                 .weights()
                 .iter()
-                .map(|v| powi!(*v, 2))
+                .map(|value| value.powi(2))
                 .sum::<T>();
 
-        self.fsm_resample_ensbl(series, &mut target_ensbl, &density_new, settings.rseed + 21)?;
+        self.resample_ensbl(series, &mut target_ensbl, &density_new, settings.rseed + 21)?;
 
         let uniques = target_ensbl
             .params_array
@@ -187,7 +182,7 @@ where
             .collect::<Vec<T>>()
             .len();
 
-        self.fsm_simulate_ensbl(
+        self.simulate_ensbl(
             series,
             &mut target_ensbl,
             &mut target_output.as_view_mut(),

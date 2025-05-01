@@ -1,3 +1,4 @@
+use crate::StatsError;
 use derive_more::Deref;
 use itertools::{Itertools, zip_eq};
 use log::error;
@@ -165,18 +166,22 @@ where
 
     /// Compute the multivariate likelihood from two iterators over `T`.
     /// The length of both iterators must be equal and also a multiple
-    /// of the dimension of the covariance matrix (panic otherwise).
+    /// of the dimension of the covariance matrix.
     pub fn multivariate_likelihood(
         &self,
         x: impl IntoIterator<Item = T>,
         mu: impl IntoIterator<Item = T>,
-    ) -> T {
+    ) -> Result<T, StatsError<T>> {
         let delta = DVector::from(zip_eq(x, mu).map(|(i, j)| i - j).collect::<Vec<T>>());
 
         let ndim = delta.len() / self.ndim();
 
         if delta.len() % self.ndim() != 0 {
-            panic!("iterator length must be a multiple of the covariance matrix dimension")
+            return Err(StatsError::InvalidCovMatrix {
+                msg: "iterator length must be a multiple of the covariance matrix dimension",
+                covm_ndim: self.ndim(),
+                expd_ndim: delta.len(),
+            });
         }
 
         let mut lh = -(self.determinant.ln() + T::from_usize(ndim).unwrap() * (T::two_pi()))
@@ -193,7 +198,7 @@ where
                 / T::from_usize(2).unwrap();
         }
 
-        lh
+        Ok(lh)
     }
 
     /// Returns the number of dimensions of the covariance matrix.

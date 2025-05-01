@@ -4,14 +4,12 @@ use env_logger::Builder;
 use log::warn;
 use ocnus::{
     OcnusError,
-    forward::{
-        WSAHUXModel,
-        filters::{
-            ABCParticleFilter, ABCParticleFilterSettings, ParticleFilter, ParticleFilterError,
-            ParticleFilterSettingsBuilder, root_mean_square_metric,
-        },
+    methods::{
+        ABCParticleFilter, ABCSettings, ParticleFilter, ParticleFilterError,
+        ParticleFilterSettingsBuilder,
     },
-    obser::{ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries},
+    models::WSAHUXModel,
+    obser::{ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries, observec_rmse},
 };
 use ocnus_stats::{Uniform1D, UnivariateND};
 use std::{fs, io::prelude::*, path::Path};
@@ -128,9 +126,8 @@ fn main() {
     let init_result = model
         .pf_initialize_ensemble(
             &sc,
-            ENSEMBLE_SIZE,
-            4096,
-            Some((&root_mean_square_metric, 96.0)),
+            (ENSEMBLE_SIZE, 4096),
+            Some((&observec_rmse, 96.0)),
             &mut pf_settings,
         )
         .unwrap();
@@ -175,11 +172,8 @@ fn main() {
     let mut noise = ObserVecNoise::Gaussian(1.0, 0);
 
     for _ in 1..20 {
-        let mut abc_settings = ABCParticleFilterSettings::Threshold((
-            pf_settings.clone(),
-            &root_mean_square_metric,
-            epsilon,
-        ));
+        let mut abc_settings =
+            ABCSettings::Threshold((pf_settings.clone(), &observec_rmse, epsilon));
 
         let run = model.pf_abc_iter(
             &sc,
@@ -195,7 +189,7 @@ fn main() {
                 result
             }
             Err(err) => match err {
-                OcnusError::ParticleFilter(pferr) => match pferr {
+                OcnusError::FilterError(pferr) => match pferr {
                     ParticleFilterError::TimeLimitExceeded { .. } => break,
                     _ => {
                         abort_counter += 1;

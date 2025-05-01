@@ -1,30 +1,30 @@
+use std::iter::Sum;
+
 use crate::{
-    OcnusError, fXX,
-    forward::{FSMEnsbl, OcnusFSM},
-    math::{CovMatrix, T, abs},
+    OcnusEnsbl, OcnusError, OcnusModel,
     obser::{ObserVec, ObserVecNoise, ScObsSeries},
+    stats::CovMatrix,
 };
-use nalgebra::{Const, DMatrix, Dyn, Matrix, SMatrix, VecStorage};
+use nalgebra::{Const, DMatrix, Dyn, Matrix, RealField, SMatrix, VecStorage};
 use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
 
-/// A trait that enables the calculation of the Fisher Information Matrix (FIM) for a [`OcnusFSM`]
-/// with a [`ObserVec`] as observable type.
-pub trait FisherInformation<T, const P: usize, const N: usize, FS, CSST>:
-    OcnusFSM<T, ObserVec<T, N>, P, FS, CSST>
+/// A trait that is shared by all models from which one can calculate the Fisher Information Matrix (FIM).
+pub trait FisherInformation<T, const P: usize, const N: usize, FMST, CSST>:
+    OcnusModel<T, ObserVec<T, N>, P, FMST, CSST>
 where
-    T: fXX,
-    FS: Clone + Default + Send,
+    T: Copy + RealField + Sum,
+    FMST: Clone + Default + Send,
     CSST: Clone + Default + Send,
-    Self: Sync,
     StandardNormal: Distribution<T>,
+    Self: Sync,
 {
     /// Compute the Fisher information matrix (FIM) for an array of model parameters using a
     /// time and distance based auto-correlation function `acfunc`.
     fn fischer_information_matrix<C>(
         &self,
         series: &ScObsSeries<T, ObserVec<T, N>>,
-        ensbl: &FSMEnsbl<T, P, FS, CSST>,
+        ensbl: &OcnusEnsbl<T, P, FMST, CSST>,
         acfunc: &C,
     ) -> Result<Vec<SMatrix<T, P, P>>, OcnusError<T>>
     where
@@ -41,22 +41,22 @@ where
             .chunks(Self::RCS / 4)
             .try_for_each(|mut chunks| {
                 chunks.iter_mut().try_for_each(|(params_ref, fim)| {
-                    let mut pos = FSMEnsbl {
+                    let mut pos = OcnusEnsbl {
                         params_array:
                             Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(
                                 &[*params_ref; P],
                             ),
-                        fm_states: vec![FS::default(); P],
+                        fm_states: vec![FMST::default(); P],
                         cs_states: vec![CSST::default(); P],
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
 
-                    let mut neg = FSMEnsbl {
+                    let mut neg = OcnusEnsbl {
                         params_array:
                             Matrix::<T, Const<P>, Dyn, VecStorage<T, Const<P>, Dyn>>::from_columns(
                                 &[*params_ref; P],
                             ),
-                        fm_states: vec![FS::default(); P],
+                        fm_states: vec![FMST::default(); P],
                         cs_states: vec![CSST::default(); P],
                         weights: vec![T::one() / T::from_usize(P).unwrap(); P],
                     };
@@ -73,16 +73,16 @@ where
                     let mut pos_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), P);
                     let mut neg_output = DMatrix::<ObserVec<T, N>>::zeros(series.len(), P);
 
-                    self.fsm_initialize_states_ensbl(series, &mut pos)?;
-                    self.fsm_initialize_states_ensbl(series, &mut neg)?;
+                    self.initialize_states_ensbl(series, &mut pos)?;
+                    self.initialize_states_ensbl(series, &mut neg)?;
 
-                    self.fsm_simulate_ensbl(
+                    self.simulate_ensbl(
                         series,
                         &mut pos,
                         &mut pos_output.as_view_mut(),
                         None::<&mut ObserVecNoise<T, N>>,
                     )?;
-                    self.fsm_simulate_ensbl(
+                    self.simulate_ensbl(
                         series,
                         &mut neg,
                         &mut neg_output.as_view_mut(),
@@ -100,7 +100,7 @@ where
                                             &pos_col[rdx] - &neg_col[rdx]
                                         } else {
                                             (&pos_col[rdx] - &neg_col[rdx])
-                                                * (T!(0.5) / step_sizes[rdx])
+                                                / (T::from_usize(2).unwrap() * step_sizes[rdx])
                                         }
                                     })
                                     .collect::<Vec<ObserVec<T, N>>>();
@@ -113,7 +113,7 @@ where
                                             &pos_col[rdx] - &neg_col[rdx]
                                         } else {
                                             (&pos_col[cdx] - &neg_col[cdx])
-                                                * (T!(0.5) / step_sizes[cdx])
+                                                / (T::from_usize(2).unwrap() * step_sizes[cdx])
                                         }
                                     })
                                     .collect::<Vec<ObserVec<T, N>>>();
@@ -166,10 +166,9 @@ where
                                                 |(j, scobs_j)| {
                                                     if valid_indices[j] {
                                                         Some(acfunc(
-                                                            abs!(
-                                                                *scobs_i.get_timestamp()
-                                                                    - *scobs_j.get_timestamp()
-                                                            ),
+                                                            (*scobs_i.get_timestamp()
+                                                                - *scobs_j.get_timestamp())
+                                                            .abs(),
                                                             scobs_i.distance(&scobs_j),
                                                         ))
                                                     } else {
