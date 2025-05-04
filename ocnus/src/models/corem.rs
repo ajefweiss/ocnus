@@ -110,7 +110,7 @@ macro_rules! impl_core_forward_model {
         impl<T, D> OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, TTState<T>>
             for $model<T, D>
         where
-            T:Copy+ RealField,
+            T: Copy + RealField,
             for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
             Self: Send + Sync,
         {
@@ -210,7 +210,7 @@ macro_rules! impl_core_forward_model {
                 TTState<T>,
             > for $model<T, D>
         where
-            T:Copy+ RealField,
+            T: Copy + RealField,
             D: Sync,
             StandardNormal: Distribution<T>,
             for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,

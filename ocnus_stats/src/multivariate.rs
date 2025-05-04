@@ -80,10 +80,26 @@ where
         T: Sum + for<'x> Sum<&'x T>,
     {
         let covmat = CovMatrix::from_particles(&particles.as_view(), weights)?;
+        let mut mean = particles.column_mean();
+
+        // Set mean to first particle value if covariance is zero.
+        // This fixes numerical issues where taking the mean over many
+        // particles does not equal the constant value.
+        covmat
+            .ref_matrix()
+            .diagonal()
+            .iter()
+            .zip(mean.iter_mut())
+            .enumerate()
+            .for_each(|(idx, (cov, value))| {
+                if cov.eq(&T::zero()) {
+                    *value = particles[(idx, 0)];
+                }
+            });
 
         Some(Self {
             covmat,
-            mean: particles.column_mean(),
+            mean,
             range,
         })
     }

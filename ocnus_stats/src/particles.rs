@@ -1,5 +1,5 @@
 use crate::{CovMatrix, Density, MultivariateND, StatsError};
-use log::{debug, error};
+use log::error;
 use nalgebra::{
     Const, Dyn, Matrix, MatrixView, RealField, SMatrix, SVector, SVectorView, Scalar, ViewStorage,
 };
@@ -357,8 +357,6 @@ where
                     "ParticlesND::draw_sample has failed to draw a valid sample after {} tries",
                     attempts,
                 );
-
-                debug!();
 
                 return Err(StatsError::InefficientSampling {
                     name: "ParticleND",

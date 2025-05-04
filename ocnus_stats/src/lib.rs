@@ -98,13 +98,31 @@ where
             .iter()
             .zip(self.get_valid_range().iter())
             .zip(self.constant_values())
-            .fold(true, |acc, ((c, range), opt_constant)| {
+            .fold(true, |acc, ((value, range), opt_constant)| {
                 if let Some(constant) = opt_constant {
-                    acc & (*c == constant)
+                    acc & (*value == constant)
                 } else {
-                    acc & ((&range.0 <= c) & (c <= &range.1))
+                    acc & ((&range.0 <= value) & (value <= &range.1))
                 }
             })
+    }
+
+    /// Validate a single sample by each individual dimension.
+    fn validate_sample_values(&self, sample: &SVectorView<T, N>) -> [bool; N] {
+        sample
+            .iter()
+            .zip(self.get_valid_range().iter())
+            .zip(self.constant_values())
+            .map(|((value, range), opt_constant)| {
+                if let Some(constant) = opt_constant {
+                    *value == constant
+                } else {
+                    (&range.0 <= value) & (value <= &range.1)
+                }
+            })
+            .collect::<Vec<bool>>()
+            .try_into()
+            .unwrap()
     }
 
     /// Returns the valid range for parameter vector samples.
