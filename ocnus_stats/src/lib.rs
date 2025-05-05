@@ -1,4 +1,4 @@
-//! # Statistics module for the **ocnus** framework.
+//! # The statistics module for the **ocnus** framework.
 //!
 //! This module primarily provides the [`Density`] trait, and related implementations, to describes probability density functions and associated functionality.
 //! It is important to note that the sampling function [`Density::draw_sample`] can fail if the number of sampling attempts crosses a hard-coded limit.
@@ -81,7 +81,7 @@ where
     T: Copy + RealField,
     Self: Send + Sync,
 {
-    /// Returns an array of optional values, with Some(value) for dimensions that are constant.
+    /// Returns an array with the constant values, returns None for dimensions that are non-constant.
     fn constant_values(&self) -> [Option<T>; N];
 
     /// Calculates or estimates a relative density value at a specific position `x`.
@@ -89,10 +89,10 @@ where
     /// If the position `x` is outside the valid range, this function returns NaN.
     fn density_rel(&self, x: &SVectorView<T, N>) -> T;
 
-    /// Draw a single parameter vector from the underlying density.
+    /// Draws a single random parameter vector from the underlying density.
     fn draw_sample(&self, rng: &mut impl Rng) -> Result<SVector<T, N>, StatsError<T>>;
 
-    /// Validate a single sample by checking for values that are out of the valid parameter range.
+    /// Validate a sample by checking for values that are outside the valid parameter range.
     fn validate_sample(&self, sample: &SVectorView<T, N>) -> bool {
         sample
             .iter()
@@ -107,7 +107,7 @@ where
             })
     }
 
-    /// Validate a single sample by each individual dimension.
+    /// Checks each dimension of a sample for values that are outside the valid parameter range.
     fn validate_sample_values(&self, sample: &SVectorView<T, N>) -> [bool; N] {
         sample
             .iter()

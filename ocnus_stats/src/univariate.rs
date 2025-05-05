@@ -5,7 +5,7 @@ use nalgebra::{MatrixView, RealField, SVector, SVectorView, Scalar, U1};
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal, Uniform, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, usize};
+use std::fmt::Debug;
 
 /// A joint probability density function for `N` independent variables.
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, IntoIterator, Serialize)]
@@ -77,7 +77,7 @@ where
     }
 }
 
-/// The algebraic data type for representing univariate probability density functions.
+/// The algebraic data type for univariate probability density functions.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "content")]
@@ -137,6 +137,7 @@ pub struct Constant1D<T>(T);
 
 impl<T> Constant1D<T> {
     /// Create a new [`Univariate1D`].
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(constant: T) -> Univariate1D<T> {
         Univariate1D::Constant(Self(constant))
     }
@@ -178,6 +179,7 @@ where
     T: Copy + RealField,
 {
     /// Create a new [`Univariate1D`].
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(range: (T, T)) -> Result<Univariate1D<T>, StatsError<T>> {
         let (minv, maxv) = range;
 
@@ -237,6 +239,7 @@ where
     T: Copy + RealField,
 {
     /// Create a new [`Univariate1D`].
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(mean: T, std_dev: T, range: (T, T)) -> Result<Univariate1D<T>, StatsError<T>> {
         let (minv, maxv) = range;
 
@@ -322,6 +325,7 @@ where
     T: Copy + RealField + SampleUniform,
 {
     /// Create a new [`Univariate1D`].
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(range: (T, T)) -> Result<Univariate1D<T>, StatsError<T>> {
         let (minv, maxv) = range;
 
@@ -390,6 +394,7 @@ where
     T: Copy + RealField,
 {
     /// Create a new [`Univariate1D`].
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(range: (T, T)) -> Result<Univariate1D<T>, StatsError<T>> {
         let (minv, maxv) = range;
 
@@ -443,7 +448,7 @@ mod tests {
     fn test_univariatend() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
 
-        let uvpdf = UnivariateND::new([
+        let uvpdf = &UnivariateND::new([
             Constant1D::new(1.0),
             Cosine1D::new((0.1, 0.2)).unwrap(),
             Normal1D::new(0.1, 0.25, (-0.5, 1.5)).unwrap(),
@@ -452,8 +457,8 @@ mod tests {
         ]);
 
         assert!(
-            ((&uvpdf).density_rel(&SVector::from([1.0, 0.15, 0.15, 0.2, 1.5]).as_view())
-                - 0.06143580130038274f32)
+            (uvpdf.density_rel(&SVector::from([1.0, 0.15, 0.15, 0.2, 1.5]).as_view())
+                - 0.0614358f32)
                 .abs()
                 < 1e-6
         );
@@ -466,13 +471,7 @@ mod tests {
 
         assert!(
             ((&uvpdf).draw_sample(&mut rng).unwrap()
-                - SVector::from([
-                    1.0,
-                    0.1810371254631513,
-                    0.2788901781826483,
-                    0.11749042572818454,
-                    1.7462168706168106,
-                ]))
+                - SVector::from([1.0, 0.1810371, 0.2788901, 0.1174904, 1.7462168,]))
             .norm()
                 < 1e-6
         );

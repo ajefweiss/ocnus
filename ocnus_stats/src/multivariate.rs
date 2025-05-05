@@ -162,10 +162,7 @@ where
             };
         });
 
-        let y = l_1
-            .clone()
-            .solve_lower_triangular(&(&mu_1 - &mu_0))
-            .unwrap();
+        let y = l_1.clone().solve_lower_triangular(&(mu_1 - mu_0)).unwrap();
 
         Ok((m.iter().sum::<T>() - T::from_usize(p_nonzero).unwrap()
             + y.norm()
@@ -188,17 +185,17 @@ where
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition
     /// of the covariance matrix.
     pub fn ref_cholesky_ltm(&self) -> &DMatrix<T> {
-        &self.covmat.ref_cholesky_ltm()
+        self.covmat.ref_cholesky_ltm()
     }
 
     /// Returns a reference to the inverse of the underlying covariance matrix.
     pub fn ref_matrix_inverse(&self) -> &DMatrix<T> {
-        &self.covmat.ref_matrix_inverse()
+        self.covmat.ref_matrix_inverse()
     }
 
     /// Returns a reference to the underlying covariance matrix.
     pub fn ref_matrix(&self) -> &DMatrix<T> {
-        &self.covmat.ref_matrix()
+        self.covmat.ref_matrix()
     }
 
     /// Returns the center of the multivariate normal density.
@@ -378,7 +375,7 @@ mod tests {
 
         let covmat = CovMatrix::from_particles(array_view, None).unwrap();
 
-        let mvpdf = MultivariateND::from_covmat(
+        let mvpdf = &MultivariateND::from_covmat(
             covmat,
             SVector::from([0.1, 0.0, 0.25]),
             [(-0.75, 0.75); 3],
@@ -389,18 +386,18 @@ mod tests {
         );
 
         assert!(
-            (&mvpdf)
+            mvpdf
                 .density_rel(&SVector::from([0.2, 0.1, 0.35]).as_view())
                 .is_nan()
         );
 
         assert!(
-            ((&mvpdf).draw_sample(&mut rng).unwrap() - SVector::from([-0.4150916, 0.0, 0.4898513]))
+            (mvpdf.draw_sample(&mut rng).unwrap() - SVector::from([-0.4150916, 0.0, 0.4898513]))
                 .norm()
                 < 1e-6
         );
 
-        assert!((&mvpdf).validate_sample(&(&mvpdf).draw_sample(&mut rng).unwrap().as_view()));
+        assert!(mvpdf.validate_sample(&mvpdf.draw_sample(&mut rng).unwrap().as_view()));
 
         let mvpdf_ensbl =
             MultivariateND::from_particles(array_view, [(-0.75, 0.75); 3], None).unwrap();

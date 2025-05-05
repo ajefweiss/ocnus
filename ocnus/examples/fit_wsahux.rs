@@ -12,7 +12,7 @@ use ocnus::{
     obser::{ObserVec, ObserVecNoise, ScObs, ScObsConf, ScObsSeries, observec_rmse},
 };
 use ocnus_stats::{Uniform1D, UnivariateND};
-use std::{fs, io::prelude::*, path::Path};
+use std::{fs::create_dir_all, io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -110,7 +110,7 @@ fn main() {
         ScObs::new(
             (REF_STEP * i) as f32 * 3600.0,
             ScObsConf::Position([1.0, 0.0, 0.0]),
-            Some(ObserVec::from([refobs[REF_STEP * i].clone()])),
+            Some(ObserVec::from([refobs[REF_STEP * i]])),
         )
     }));
 
@@ -139,19 +139,17 @@ fn main() {
 
     let base_dir_opt = if path.exists() {
         Some(path)
+    } else if path.parent().unwrap().parent().unwrap().exists() {
+        create_dir_all(&path).expect("failed to create output directory");
+
+        Some(path)
     } else {
-        if path.parent().unwrap().parent().unwrap().exists() {
-            fs::create_dir(&path).expect("failed to create output directory");
+        warn!(
+            "path {} not found, results will not be saved",
+            path.into_os_string().into_string().unwrap()
+        );
 
-            Some(path)
-        } else {
-            warn!(
-                "path {} not found, results will not be saved",
-                path.into_os_string().into_string().unwrap()
-            );
-
-            None
-        }
+        None
     };
 
     if let Some(base_dir) = &base_dir_opt {

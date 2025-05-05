@@ -91,7 +91,7 @@ where
         Ok(basis
             .iter()
             .zip(components.iter())
-            .map(|(b, c)| b.clone() * *c)
+            .map(|(basis, component)| basis * *component)
             .sum())
     }
 
@@ -107,7 +107,7 @@ where
         Ok(basis
             .iter()
             .zip(components.iter())
-            .map(|(b, c)| b.clone() * *c)
+            .map(|(basis, component)| basis * *component)
             .sum())
     }
 
@@ -137,12 +137,7 @@ where
     where
         T: Clone,
     {
-        if let Some(index) = Self::param_index(name) {
-            // Explicit clone as T is a primitive.
-            Some(params[index].clone())
-        } else {
-            None
-        }
+        Self::param_index(name).map(|index| params[index])
     }
 
     /// Transform external coordinates `ecs` into the internal coordinates `ics`.

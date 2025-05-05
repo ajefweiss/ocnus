@@ -29,7 +29,7 @@ where
     Threshold((ParticleFilterSettings<T>, &'a E, T)),
 }
 
-impl<'a, T, E> Deref for ABCSettings<'a, T, E>
+impl<T, E> Deref for ABCSettings<'_, T, E>
 where
     T: RealField,
 {
@@ -43,7 +43,7 @@ where
     }
 }
 
-impl<'a, T, E> DerefMut for ABCSettings<'a, T, E>
+impl<T, E> DerefMut for ABCSettings<'_, T, E>
 where
     T: RealField,
 {

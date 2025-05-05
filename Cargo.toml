@@ -1,10 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = [
-    "ocnus",
-    "ocnus_stats"
-]
+members = ["ocnus", "ocnus_python", "ocnus_stats"]
 
 [profile.bench]
 opt-level = 3

@@ -18,7 +18,7 @@ use ocnus::{
     stats::CovMatrix,
 };
 use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
-use std::{fs::create_dir, io::prelude::*, path::Path};
+use std::{fs::create_dir_all, io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -55,7 +55,7 @@ fn main() {
 
     let sc = ScObsSeries::<_, ObserVec<_, 3>>::from_iterator((0..(SCOUNT)).map(|i| {
         ScObs::new(
-            i as f64 * 3.5 * 3600.0 as f64 + 9.0 * 3600.0,
+            i as f64 * 3.5 * 3600.0 + 9.0 * 3600.0,
             ScObsConf::Position([1.0, 0.0, 0.0]),
             None,
         )
@@ -161,19 +161,17 @@ fn main() {
 
     let base_dir_opt = if path.exists() {
         Some(path)
+    } else if path.parent().unwrap().parent().unwrap().exists() {
+        create_dir_all(&path).expect("failed to create output directory");
+
+        Some(path)
     } else {
-        if path.parent().unwrap().parent().unwrap().exists() {
-            create_dir(&path).expect("failed to create output directory");
+        warn!(
+            "path {} not found, results will not be saved",
+            path.into_os_string().into_string().unwrap()
+        );
 
-            Some(path)
-        } else {
-            warn!(
-                "path {} not found, results will not be saved",
-                path.into_os_string().into_string().unwrap()
-            );
-
-            None
-        }
+        None
     };
 
     if let Some(base_dir) = &base_dir_opt {
@@ -244,11 +242,11 @@ fn main() {
         epsilon = run_abc_result.get_quantiles().unwrap()[0];
     }
 
-    let iter_var = vec![
+    let iter_var = [
         100.0, 75.0, 50.0, 25.0, 15.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, NOISE_VAR,
     ];
 
-    for idx in 0..iter_var.len() {
+    for (idx, covariance) in iter_var.iter().enumerate() {
         let mut sir_settings = ParticleFilterSettingsBuilder::default()
             .expl_factor(1.0)
             .build()
@@ -256,7 +254,7 @@ fn main() {
 
         let mut noise = ObserVecNoise::Multivariate(
             CovMatrix::from_matrix(
-                &DMatrix::from_diagonal_element(sc_synth.len(), sc_synth.len(), iter_var[idx])
+                &DMatrix::from_diagonal_element(sc_synth.len(), sc_synth.len(), *covariance)
                     .as_view(),
             )
             .unwrap(),

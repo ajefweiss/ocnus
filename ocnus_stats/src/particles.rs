@@ -203,8 +203,8 @@ where
             }
         });
 
-        let m = l_1.solve_lower_triangular(&l_0).unwrap();
-        let y = l_1.solve_lower_triangular(&(&mu_1 - &mu_0)).unwrap();
+        let m = l_1.solve_lower_triangular(l_0).unwrap();
+        let y = l_1.solve_lower_triangular(&(mu_1 - mu_0)).unwrap();
 
         l_1.iter_mut().step_by(N + 1).for_each(|value| {
             if *value == T::one() / T::zero() {
@@ -437,13 +437,9 @@ mod tests {
         let mvpdf_0 =
             MultivariateND::from_particles(&array_view_0, [(-0.75, 0.75); 2], None).unwrap();
 
-        assert!(
-            ((&mvpdf_0).density(&SVector::from([0.2, 0.35]).as_view()) - 0.16128483).abs() < 1e-6
-        );
+        assert!((mvpdf_0.density(&SVector::from([0.2, 0.35]).as_view()) - 0.16128483).abs() < 1e-6);
 
-        assert!(
-            ((&ptpdf_0).density(&SVector::from([0.2, 0.35]).as_view()) - 0.15514816).abs() < 1e-6
-        );
+        assert!((ptpdf_0.density(&SVector::from([0.2, 0.35]).as_view()) - 0.15514816).abs() < 1e-6);
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
 
@@ -462,25 +458,26 @@ mod tests {
 
         let array_view = &array.as_view();
 
-        let ptpdf =
-            ParticlesND::from_particles(array_view, [(-0.75, 0.75); 3], vec![1.0 / 10000.0; 10000])
-                .unwrap();
+        let ptpdf = &ParticlesND::from_particles(
+            array_view,
+            [(-0.75, 0.75); 3],
+            vec![1.0 / 10000.0; 10000],
+        )
+        .unwrap();
 
         assert!(
-            (&ptpdf)
+            ptpdf
                 .density(&SVector::from([0.2, -0.15, 0.35]).as_view())
                 .is_nan()
         );
 
         assert!(
-            ((&ptpdf).density(&SVector::from([0.2, 0.0, 0.35]).as_view()) - 0.15514816).abs()
-                < 1e-6
+            (ptpdf.density(&SVector::from([0.2, 0.0, 0.35]).as_view()) - 0.15514816).abs() < 1e-6
         );
 
         assert!(
-            ((&ptpdf).draw_sample(&mut rng).unwrap()
-                - SVector::from([-0.5104247, 0.0, -0.25135577]))
-            .norm()
+            (ptpdf.draw_sample(&mut rng).unwrap() - SVector::from([-0.5104247, 0.0, -0.25135577]))
+                .norm()
                 < 1e-6
         );
     }

@@ -14,7 +14,7 @@ use ocnus::{
     stats::CovMatrix,
 };
 use ocnus_stats::{Constant1D, Uniform1D, UnivariateND};
-use std::{fs::create_dir, io::prelude::*, path::Path};
+use std::{fs::create_dir_all, io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -89,19 +89,17 @@ fn main() {
 
     let base_dir_opt = if path.exists() {
         Some(path)
+    } else if path.parent().unwrap().parent().unwrap().exists() {
+        create_dir_all(&path).expect("failed to create output directory");
+
+        Some(path)
     } else {
-        if path.parent().unwrap().parent().unwrap().exists() {
-            create_dir(&path).expect("failed to create output directory");
+        warn!(
+            "path {} not found, results will not be saved",
+            path.into_os_string().into_string().unwrap()
+        );
 
-            Some(path)
-        } else {
-            warn!(
-                "path {} not found, results will not be saved",
-                path.into_os_string().into_string().unwrap()
-            );
-
-            None
-        }
+        None
     };
 
     if let Some(base_dir) = &base_dir_opt {

@@ -542,6 +542,17 @@ where
         / T::from_usize(series.count_observations()).unwrap()
 }
 
+/// Mean square error (MSE) percentage for the [`ObserVec`] type.
+pub fn observec_msep<T, const N: usize>(
+    out: &DVectorView<ObserVec<T, N>>,
+    series: &ScObsSeries<T, ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_mse(out, series) / observec_mse(&DVector::zeros(series.len()).as_view(), series)
+}
+
 /// Root mean square error (RMSE) for the [`ObserVec`] type.
 pub fn observec_rmse<T, const N: usize>(
     out: &DVectorView<ObserVec<T, N>>,
@@ -551,6 +562,17 @@ where
     T: Copy + RealField + Sum,
 {
     observec_mse(out, series).sqrt()
+}
+
+/// Root mean square error (RMSE) percentage for the [`ObserVec`] type.
+pub fn observec_rmsep<T, const N: usize>(
+    out: &DVectorView<ObserVec<T, N>>,
+    series: &ScObsSeries<T, ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_rmse(out, series).sqrt()
 }
 
 #[cfg(test)]

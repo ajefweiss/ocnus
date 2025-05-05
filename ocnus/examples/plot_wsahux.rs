@@ -9,7 +9,7 @@ use ocnus::{
 };
 use ocnus_stats::{Constant1D, UnivariateND};
 use plotters::prelude::*;
-use std::{fs::create_dir, io::prelude::*, path::Path};
+use std::{fs::create_dir_all, io::prelude::*, path::Path};
 
 fn main() {
     Builder::new()
@@ -88,7 +88,7 @@ fn main() {
             ScObs::new(
                 (STEP * i) as f32 * 3600.0,
                 ScObsConf::Position([1.0, 0.0, 0.0]),
-                Some(ObserVec::from([refobs[STEP * i].clone()])),
+                Some(ObserVec::from([refobs[STEP * i]])),
             )
         }));
 
@@ -130,9 +130,9 @@ fn main() {
         )
         .unwrap();
 
-    let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|v| v[0] as f32));
-    let t_0 = *sc.first_scobs().unwrap().get_timestamp() as f32;
-    let t_1 = *sc.last_scobs().unwrap().get_timestamp() as f32;
+    let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|value| value[0]));
+    let t_0 = *sc.first_scobs().unwrap().get_timestamp();
+    let t_1 = *sc.last_scobs().unwrap().get_timestamp();
 
     let path = Path::new("ocnus")
         .join("examples")
@@ -141,19 +141,17 @@ fn main() {
 
     let base_dir_opt = if path.exists() {
         Some(path)
+    } else if path.parent().unwrap().parent().unwrap().exists() {
+        create_dir_all(&path).expect("failed to create output directory");
+
+        Some(path)
     } else {
-        if path.parent().unwrap().parent().unwrap().exists() {
-            create_dir(&path).expect("failed to create output directory");
+        warn!(
+            "path {} not found, results will not be saved",
+            path.into_os_string().into_string().unwrap()
+        );
 
-            Some(path)
-        } else {
-            warn!(
-                "path {} not found, results will not be saved",
-                path.into_os_string().into_string().unwrap()
-            );
-
-            None
-        }
+        None
     };
 
     if let Some(base_dir) = base_dir_opt {
@@ -176,28 +174,28 @@ fn main() {
             .draw_series(LineSeries::new(
                 speed
                     .iter()
-                    .zip(sc.clone().into_iter())
-                    .map(|(v, scobs)| (*scobs.get_timestamp() as f32, *v)),
+                    .zip(sc.clone())
+                    .map(|(v, scobs)| (*scobs.get_timestamp(), *v)),
                 &RED,
             ))
             .unwrap()
             .label("WSA-HUX Output")
-            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED));
 
         chart
             .draw_series(LineSeries::new(
                 sc.into_iter()
-                    .map(|scobs| (*scobs.get_timestamp() as f32, scobs.get_observation()[0])),
-                &BLACK,
+                    .map(|scobs| (*scobs.get_timestamp(), scobs.get_observation()[0])),
+                BLACK,
             ))
             .unwrap()
             .label("Bulk Speed Measurements")
-            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &BLACK));
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLACK));
 
         chart
             .configure_series_labels()
-            .background_style(&WHITE.mix(0.8))
-            .border_style(&BLACK)
+            .background_style(WHITE.mix(0.8))
+            .border_style(BLACK)
             .draw()
             .unwrap();
 

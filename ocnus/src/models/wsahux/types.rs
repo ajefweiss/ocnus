@@ -62,7 +62,7 @@ where
 
         self.angle = T::zero();
 
-        self.wsahux = if input.lat_indices.len() == 0 {
+        self.wsahux = if input.lat_indices.is_empty() {
             vec![WSASlice::new(dr, shape.0); shape.1]
         } else {
             vec![WSASlice::new(dr, shape.0); input.lat_indices.len()]

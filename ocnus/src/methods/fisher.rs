@@ -169,7 +169,7 @@ where
                                                             (*scobs_i.get_timestamp()
                                                                 - *scobs_j.get_timestamp())
                                                             .abs(),
-                                                            scobs_i.distance(&scobs_j),
+                                                            scobs_i.distance(scobs_j),
                                                         ))
                                                     } else {
                                                         None

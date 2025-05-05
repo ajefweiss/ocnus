@@ -181,8 +181,7 @@ where
                 eps_1,
                 eps_2,
                 eps_3,
-                T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
-                    .unwrap(),
+                T::from_f64((iteration * sim_ensemble_size * series.len()) as f64 / 1e6).unwrap(),
                 T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
             );
 
@@ -207,8 +206,7 @@ where
             info!(
                 "pf_initialize_data\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
                 0.0,
-                T::from_f64((iteration as usize * sim_ensemble_size * series.len()) as f64 / 1e6)
-                    .unwrap(),
+                T::from_f64((iteration * sim_ensemble_size * series.len()) as f64 / 1e6).unwrap(),
                 T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
             );
 

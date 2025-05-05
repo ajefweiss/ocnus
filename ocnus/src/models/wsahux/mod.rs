@@ -493,7 +493,7 @@ mod tests {
             )
             .unwrap();
 
-        let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|v| v[0] as f32));
+        let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|value| value[0]));
 
         assert!((speed[0] - 298.2084).abs() < 1e-6);
         assert!((speed[25] - 440.25708).abs() < 1e-6);
