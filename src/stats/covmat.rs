@@ -1,14 +1,21 @@
 use derive_more::Deref;
 use itertools::{Itertools, zip_eq};
 use log::{error, warn};
-use nalgebra::{Const, DMatrix, DMatrixView, DVector, Dyn, MatrixView, RealField, Scalar};
+use nalgebra::{
+    Const, DMatrix, DMatrixView, DVector, DVectorView, Dim, Dyn, MatrixView, RealField, Scalar,
+};
+use rand::Rng;
+use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     iter::Sum,
-    ops::{Mul, MulAssign},
+    ops::{Div, DivAssign, Mul, MulAssign},
 };
 
-/// A dynamically sized covariance matrix.
+/// A dynamically sized covariance matrix, implemented as a wrapper around `DMatrix<T>`.
+///
+/// This type can be constructed directly from a positive semi-definite matrix or from an ensemble of vectors.
 #[derive(Clone, Debug, Deref, Deserialize, Serialize)]
 pub struct CovMatrix<T>
 where
@@ -21,82 +28,71 @@ where
     #[deref]
     matrix: DMatrix<T>,
 
-    /// The inverse of the covariance matrix.
-    matrix_inverse: DMatrix<T>,
-
     /// The pseudo-determinant of the covariance matrix.
-    determinant: T,
+    pseudo_determinant: T,
+
+    /// The pseudo inverse of the covariance matrix.
+    pseudo_inverse: DMatrix<T>,
 }
 
 impl<T> CovMatrix<T>
 where
     T: Copy + RealField + Scalar,
 {
-    /// Returns the (pseudo-)determinant of the covariance matrix.
-    pub fn determinant(&self) -> T {
-        self.determinant
+    /// Draw a random sample from the covariance matrix.
+    pub fn draw_sample(&self, rng: &mut impl Rng) -> DVector<T>
+    where
+        StandardNormal: Distribution<T>,
+    {
+        self.ref_cholesky_ltm()
+            * DVector::<T>::from_iterator(
+                self.ndim(),
+                (0..self.ndim()).map(|_| rng.sample(StandardNormal)),
+            )
     }
 
     /// Create a [`CovMatrix`] from a positive semi-definite square matrix.
     pub fn from_matrix(matrix: &DMatrixView<T>) -> Option<Self> {
-        let mut matrix_owned = matrix.into_owned();
+        let svd = matrix.svd(true, false);
 
-        // Detect zero'd columns/rows that need to be modified.
-        let zero_variance_indices = (0..matrix_owned.nrows())
-            .filter(|idx| {
-                match matrix_owned[(*idx, *idx)].eq(&T::zero()) {
-                    true => {
-                        matrix_owned[(*idx, *idx)] = T::one();
+        println!("{}", &svd.clone().u.unwrap());
+        let qr_r = svd.u.as_ref().unwrap().clone();
 
-                        // Set off diagonals to zero.
-                        for jdx in 0..matrix.ncols() {
-                            if jdx != *idx {
-                                matrix_owned[(*idx, jdx)] = T::zero();
-                                matrix_owned[(jdx, *idx)] = T::zero();
-                            }
-                        }
+        // println!("{}", &sym_eigen.eigenvectors);
+        // println!("{}", &sym_eigen.eigenvectors.clone().qr().r().transpose());
 
-                        true
-                    }
-                    false => false,
-                }
-            })
-            .collect::<Vec<usize>>();
+        let cholesky_ltm = qr_r
+            * DMatrix::from_diagonal(&DVector::from_iterator(
+                matrix.nrows(),
+                svd.singular_values.iter().map(|value| value.sqrt()),
+            ));
 
-        let (mut cholesky_ltm, determinant) = match matrix_owned.clone().cholesky() {
-            Some(result) => (result.l(), result.determinant()),
-            None => {
-                error!(
-                    "CovMatrix::from_matrix: failed to perform the cholesky decomposition: {}",
-                    matrix
-                );
-                return None;
+        // Compute pseudo determinant by multiplying all non-zero eigenvalues.
+        let pseudo_determinant = svd.singular_values.iter().fold(T::one(), |acc, next| {
+            if !matches!(next.partial_cmp(&T::zero()).unwrap(), Ordering::Equal) {
+                acc * *next
+            } else {
+                acc
             }
-        };
+        });
 
-        let mut matrix_inverse = match matrix_owned.clone().try_inverse() {
+        let pseudo_inverse = match matrix.try_inverse() {
             Some(result) => result,
             None => {
                 error!(
                     "CovMatrix::from_matrix input matrix is singular: {}",
                     matrix
                 );
+
                 return None;
             }
         };
 
-        // Reset zero variance columns/rows to zero.
-        for idx in zero_variance_indices.iter() {
-            cholesky_ltm[(*idx, *idx)] = T::zero();
-            matrix_inverse[(*idx, *idx)] = T::zero();
-            matrix_owned[(*idx, *idx)] = T::zero();
-        }
-
         Some(Self {
             cholesky_ltm,
-            matrix_inverse,
-            matrix: matrix_owned,
-            determinant,
+            matrix: matrix.clone_owned(),
+            pseudo_determinant,
+            pseudo_inverse,
         })
     }
 
@@ -119,9 +115,13 @@ where
                     let x = vectors.row(jdx);
                     let y = vectors.row(kdx);
 
-                    match opt_weights {
-                        Some(w) => covariance_with_weights(x, y, w),
-                        None => covariance(x, y),
+                    if !x.iter().all_equal() && !y.iter().all_equal() {
+                        match opt_weights {
+                            Some(w) => covariance_with_weights(x, y, w),
+                            None => covariance(x, y),
+                        }
+                    } else {
+                        T::zero()
                     }
                 } else {
                     T::zero()
@@ -132,75 +132,51 @@ where
         // Fill up the other side of the matrix.
         matrix += matrix.transpose() - DMatrix::<T>::from_diagonal(&matrix.diagonal());
 
-        // Detect zero'd columns/rows that need to be modified.
-        let zero_variance_indices = (0..vectors.nrows())
-            .filter(|idx| {
-                let row = vectors.row(*idx);
-
-                match row.iter().all_equal() {
-                    true => {
-                        matrix[(*idx, *idx)] = T::one();
-
-                        // Set off diagonals to zero.
-                        for jdx in 0..matrix.ncols() {
-                            if jdx != *idx {
-                                matrix[(*idx, jdx)] = T::zero();
-                                matrix[(jdx, *idx)] = T::zero();
-                            }
-                        }
-
-                        true
-                    }
-                    false => false,
-                }
-            })
-            .collect::<Vec<usize>>();
-
-        let mut result = Self::from_matrix(&matrix.as_view())?;
-
-        // Reset zero variance columns/rows to zero.
-        for idx in zero_variance_indices.iter() {
-            result.cholesky_ltm[(*idx, *idx)] = T::zero();
-            result.matrix_inverse[(*idx, *idx)] = T::zero();
-            result.matrix[(*idx, *idx)] = T::zero();
-        }
-
-        Some(result)
+        Some(Self::from_matrix(&matrix.as_view())?)
     }
 
-    /// Compute the multivariate likelihood from two iterators over `T`.
-    /// The length of both iterators must be equal and also a multiple
-    /// of the dimension of the covariance matrix.
-    pub fn multivariate_likelihood(
+    /// Compute the squared Mahalanobis distance.
+    pub fn mahalanobis_distance_squared<RStride, CStride>(
         &self,
-        x: impl IntoIterator<Item = T>,
-        mu: impl IntoIterator<Item = T>,
-    ) -> Option<T> {
-        let delta = DVector::from(zip_eq(x, mu).map(|(i, j)| i - j).collect::<Vec<T>>());
+        x: &DVectorView<T, RStride, CStride>,
+    ) -> T
+    where
+        RStride: Dim,
+        CStride: Dim,
+    {
+        (&x.transpose() * self.pseudo_inverse.view((0, 0), (x.nrows(), x.nrows())) * x)[(0, 0)]
+    }
 
-        let ndim = delta.len() / self.ndim();
+    /// Compute the multivariate likelihood from two slices over `T`.
+    /// The length of both slices must be equal and also a multiple
+    /// of the dimension of the covariance matrix.
+    pub fn multivariate_likelihood(&self, x: &[T], mu: &[T]) -> Option<T> {
+        let ndim = x.len() / self.ndim();
 
-        if delta.len() % self.ndim() != 0 {
+        if (x.len() != mu.len()) || (x.len() % self.ndim()) != 0 {
             warn!(
-                "failed to compute the multivariate likelihood, 
-                iterator length must be a multiple of the covariance matrix dimension"
+                "failed to compute the multivariate likelihood, slice 
+                lengths either do not match each other or are not a 
+                multiple of the dimension of the covariance matrix"
             );
 
             return None;
         }
 
-        let mut lh = -(self.determinant.ln() + T::from_usize(ndim).unwrap() * T::two_pi())
+        let delta = DVector::from(x.iter().zip(mu).map(|(i, j)| *i - *j).collect::<Vec<T>>());
+
+        let mut lh = -(self.pseudo_determinant.ln() + T::from_usize(ndim).unwrap() * T::two_pi())
             / T::from_usize(2).unwrap();
 
         for idx in 0..ndim {
-            let view = delta.rows_with_step(idx, self.ndim(), ndim - 1);
+            let view: nalgebra::Matrix<
+                T,
+                Dyn,
+                Const<1>,
+                nalgebra::ViewStorage<'_, T, Dyn, Const<1>, Dyn, Dyn>,
+            > = delta.rows_with_step(idx, self.ndim(), ndim - 1);
 
-            lh -= (&view.transpose()
-                * self
-                    .matrix_inverse
-                    .view((0, 0), (view.nrows(), view.nrows()))
-                * view)[(0, 0)]
-                / T::from_usize(2).unwrap();
+            lh -= self.mahalanobis_distance_squared(&view) / T::from_usize(2).unwrap();
         }
 
         Some(lh)
@@ -211,14 +187,19 @@ where
         self.matrix.nrows()
     }
 
+    /// Returns the (pseudo-)determinant of the covariance matrix.
+    pub fn pseudo_determinant(&self) -> T {
+        self.pseudo_determinant
+    }
+
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition.
     pub fn ref_cholesky_ltm(&self) -> &DMatrix<T> {
         &self.cholesky_ltm
     }
 
     /// Returns a reference to the inverse of the covariance matrix.
-    pub fn ref_matrix_inverse(&self) -> &DMatrix<T> {
-        &self.matrix_inverse
+    pub fn ref_pseudo_inverse(&self) -> &DMatrix<T> {
+        &self.pseudo_inverse
     }
 
     /// Returns a reference to the covariance matrix.
@@ -260,6 +241,38 @@ where
     }
 }
 
+impl<T> Div<T> for CovMatrix<T>
+where
+    T: Copy + RealField,
+{
+    type Output = CovMatrix<T>;
+
+    fn div(self, rhs: T) -> Self::Output {
+        let dim = self.matrix.ncols() as i32;
+
+        Self::Output {
+            cholesky_ltm: self.cholesky_ltm / rhs.sqrt(),
+            matrix: self.matrix / rhs,
+            pseudo_determinant: self.pseudo_determinant / rhs.powi(dim),
+            pseudo_inverse: self.pseudo_inverse * rhs,
+        }
+    }
+}
+
+impl<T> DivAssign<T> for CovMatrix<T>
+where
+    T: Copy + RealField,
+{
+    fn div_assign(&mut self, rhs: T) {
+        let dim = self.matrix.ncols() as i32;
+
+        self.cholesky_ltm /= rhs.sqrt();
+        self.matrix /= rhs;
+        self.pseudo_determinant /= rhs.powi(dim);
+        self.pseudo_inverse *= rhs;
+    }
+}
+
 impl<T> Mul<T> for CovMatrix<T>
 where
     T: Copy + RealField,
@@ -271,9 +284,9 @@ where
 
         Self::Output {
             cholesky_ltm: self.cholesky_ltm * rhs.sqrt(),
-            matrix_inverse: self.matrix_inverse / rhs,
             matrix: self.matrix * rhs,
-            determinant: self.determinant * rhs.powi(dim),
+            pseudo_determinant: self.pseudo_determinant * rhs.powi(dim),
+            pseudo_inverse: self.pseudo_inverse / rhs,
         }
     }
 }
@@ -286,9 +299,9 @@ where
         let dim = self.matrix.ncols() as i32;
 
         self.cholesky_ltm *= rhs.sqrt();
-        self.matrix_inverse /= rhs;
         self.matrix *= rhs;
-        self.determinant *= rhs.powi(dim);
+        self.pseudo_determinant *= rhs.powi(dim);
+        self.pseudo_inverse /= rhs;
     }
 }
 
@@ -399,11 +412,14 @@ mod tests {
 
         let covmat = CovMatrix::from_vectors(array_view, None).unwrap();
 
+        println!("{}", &covmat.matrix);
+        println!("{}", &covmat.cholesky_ltm);
+
         assert!((covmat.cholesky_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
         assert!((covmat.cholesky_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);
 
-        assert!((covmat.matrix_inverse[(0, 0)] - 6.915894).abs() < f32::EPSILON);
-        assert!((covmat.matrix_inverse[(2, 0)] + 4.5933948).abs() < f32::EPSILON);
+        assert!((covmat.pseudo_inverse[(0, 0)] - 6.915894).abs() < f32::EPSILON);
+        assert!((covmat.pseudo_inverse[(2, 0)] + 4.5933948).abs() < f32::EPSILON);
 
         assert!((covmat.determinant() - 0.0069507807).abs() < f32::EPSILON);
     }

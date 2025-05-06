@@ -1,4 +1,5 @@
 //! # The statistics sub-module for the **ocnus** framework.
+
 //!
 //!
 //! #### Covariance Matrix
