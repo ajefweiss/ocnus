@@ -31,7 +31,19 @@ criterion = "*"
 directories = "*"
 dyn-fmt = "*"
 env_logger = "*"
-plotters = "*"
+
+[profile.bench]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+
+[profile.test]
+opt-level = 1
+
 
 [[bench]]
 name = "cylm"
