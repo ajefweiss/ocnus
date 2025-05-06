@@ -14,7 +14,7 @@ derive_builder = "*"
 derive_more = { version = "*", features = ["full"] }
 itertools = "*"
 log = "*"
-nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
+nalgebra = { path = "../nalgebra", features = ["rayon", "serde-serialize"] }
 num-traits = "*"
 rand = "*"
 rand_distr = "*"

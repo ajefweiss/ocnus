@@ -16,7 +16,7 @@ where
     T: Scalar,
 {
     /// The lower triangular matrix from the Cholesky decomposition.
-    cholesky_ltm: DMatrix<T>,
+    chol_ltm: DMatrix<T>,
 
     /// The inverse of the covariance matrix.
     matrix_inverse: DMatrix<T>,
@@ -59,7 +59,7 @@ where
             })
             .collect::<Vec<usize>>();
 
-        let (mut cholesky_ltm, determinant) = match matrix_owned.clone().cholesky() {
+        let (mut chol_ltm, determinant) = match matrix_owned.clone().cholesky() {
             Some(result) => (result.l(), result.determinant()),
             None => {
                 error!(
@@ -83,13 +83,13 @@ where
 
         // Reset zero variance columns/rows to zero.
         for idx in zero_variance_indices.iter() {
-            cholesky_ltm[(*idx, *idx)] = T::zero();
+            chol_ltm[(*idx, *idx)] = T::zero();
             matrix_inverse[(*idx, *idx)] = T::zero();
             matrix_owned[(*idx, *idx)] = T::zero();
         }
 
         Some(Self {
-            cholesky_ltm,
+            chol_ltm,
             matrix_inverse,
             matrix: matrix_owned,
             determinant,
@@ -156,7 +156,7 @@ where
 
         // Reset zero variance columns/rows to zero.
         for idx in zero_variance_indices.iter() {
-            result.cholesky_ltm[(*idx, *idx)] = T::zero();
+            result.chol_ltm[(*idx, *idx)] = T::zero();
             result.matrix_inverse[(*idx, *idx)] = T::zero();
             result.matrix[(*idx, *idx)] = T::zero();
         }
@@ -212,8 +212,8 @@ where
     }
 
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition.
-    pub fn ref_cholesky_ltm(&self) -> &DMatrix<T> {
-        &self.cholesky_ltm
+    pub fn ref_chol_ltm(&self) -> &DMatrix<T> {
+        &self.chol_ltm
     }
 
     /// Returns a reference to the inverse of the covariance matrix.
@@ -270,7 +270,7 @@ where
         let dim = self.matrix.ncols() as i32;
 
         Self::Output {
-            cholesky_ltm: self.cholesky_ltm * rhs.sqrt(),
+            chol_ltm: self.chol_ltm * rhs.sqrt(),
             matrix_inverse: self.matrix_inverse / rhs,
             matrix: self.matrix * rhs,
             determinant: self.determinant * rhs.powi(dim),
@@ -285,7 +285,7 @@ where
     fn mul_assign(&mut self, rhs: T) {
         let dim = self.matrix.ncols() as i32;
 
-        self.cholesky_ltm *= rhs.sqrt();
+        self.chol_ltm *= rhs.sqrt();
         self.matrix_inverse /= rhs;
         self.matrix *= rhs;
         self.determinant *= rhs.powi(dim);
@@ -399,8 +399,8 @@ mod tests {
 
         let covmat = CovMatrix::from_particles(array_view, None).unwrap();
 
-        assert!((covmat.cholesky_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
-        assert!((covmat.cholesky_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);
+        assert!((covmat.chol_ltm[(0, 0)] - 0.40718567).abs() < f32::EPSILON);
+        assert!((covmat.chol_ltm[(2, 0)] - 0.07841061).abs() < f32::EPSILON);
 
         assert!((covmat.matrix_inverse[(0, 0)] - 6.915894).abs() < f32::EPSILON);
         assert!((covmat.matrix_inverse[(2, 0)] + 4.5933948).abs() < f32::EPSILON);

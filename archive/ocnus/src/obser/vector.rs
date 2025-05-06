@@ -494,7 +494,7 @@ where
                 );
 
                 for i in 0..N {
-                    let values = covmat.ref_cholesky_ltm()
+                    let values = covmat.ref_chol_ltm()
                         * DVector::from_iterator(size, (0..size).map(|_| rng.sample(normal)));
 
                     result

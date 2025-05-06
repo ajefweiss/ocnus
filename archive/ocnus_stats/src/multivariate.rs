@@ -120,10 +120,10 @@ where
             });
         }
 
-        let mut l_0 = self.covmat.ref_cholesky_ltm().clone();
+        let mut l_0 = self.covmat.ref_chol_ltm().clone();
         let mu_0 = self.mean;
 
-        let mut l_1 = other.covmat.ref_cholesky_ltm().clone();
+        let mut l_1 = other.covmat.ref_chol_ltm().clone();
         let mu_1 = other.mean;
 
         let mut p_nonzero = N;
@@ -184,8 +184,8 @@ where
 
     /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition
     /// of the covariance matrix.
-    pub fn ref_cholesky_ltm(&self) -> &DMatrix<T> {
-        self.covmat.ref_cholesky_ltm()
+    pub fn ref_chol_ltm(&self) -> &DMatrix<T> {
+        self.covmat.ref_chol_ltm()
     }
 
     /// Returns a reference to the inverse of the underlying covariance matrix.
@@ -242,7 +242,7 @@ where
         let normal = StandardNormal;
 
         let mut proposal = self.mean
-            + self.covmat.ref_cholesky_ltm()
+            + self.covmat.ref_chol_ltm()
                 * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
@@ -250,7 +250,7 @@ where
 
         while !self.validate_sample(&proposal.as_view()) {
             proposal = self.mean
-                + self.covmat.ref_cholesky_ltm()
+                + self.covmat.ref_chol_ltm()
                     * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
 
             attempts += 1;

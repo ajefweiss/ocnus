@@ -178,10 +178,10 @@ where
     where
         T: Sum,
     {
-        let l_0 = self.mvpdf.ref_cholesky_ltm();
+        let l_0 = self.mvpdf.ref_chol_ltm();
         let mu_0 = self.particles.column_mean();
 
-        let mut l_1 = other.mvpdf.ref_cholesky_ltm().clone();
+        let mut l_1 = other.mvpdf.ref_chol_ltm().clone();
         let mu_1 = other.particles.column_mean();
 
         let k = l_1
@@ -339,7 +339,7 @@ where
         };
 
         let mut proposal = offset
-            + self.mvpdf.ref_cholesky_ltm()
+            + self.mvpdf.ref_chol_ltm()
                 * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
@@ -347,7 +347,7 @@ where
 
         while !self.validate_sample(&proposal.as_view()) {
             proposal = offset
-                + self.mvpdf.ref_cholesky_ltm()
+                + self.mvpdf.ref_chol_ltm()
                     * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
 
             attempts += 1;
