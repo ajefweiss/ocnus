@@ -760,6 +760,7 @@ dependencies = [
 name = "ocnus"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "chrono",
  "criterion",
  "derive_builder",
