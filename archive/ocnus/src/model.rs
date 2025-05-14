@@ -1,24 +1,22 @@
 use crate::{
-    OcnusEnsbl, OcnusError,
     coords::OcnusCoords,
-    obser::{ObserVec, OcnusNoise, OcnusObser, ScObs, ScObsSeries},
-    stats::{Density, ParticlesND, StatsError},
+    // obser::{ObserVec, OcnusNoise, OcnusObser, ScObs, ScObsSeries},
+    stats::ParticleDensity,
 };
-use itertools::zip_eq;
-use log::debug;
-use nalgebra::{DMatrixViewMut, Dim, RealField, SVectorView, SVectorViewMut, Scalar};
-use rand::{Rng, SeedableRng};
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
-use rand_xoshiro::Xoshiro256PlusPlus;
-use rayon::prelude::*;
-use std::{ops::AddAssign, time::Instant};
+// use itertools::zip_eq;
+// use log::debug;
+use nalgebra::RealField;
+// use rand::{Rng, SeedableRng};
+// use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+// use rand_xoshiro::Xoshiro256PlusPlus;
+// use rayon::prelude::*;
+// use std::{ops::AddAssign, time::Instant};
 use thiserror::Error;
 
-/// A trait that is shared by all forward simulation models.
-pub trait OcnusModel<T, O, const P: usize, FMST, CSST>: OcnusCoords<T, P, CSST>
+/// A trait that is shared by all models within the **ocnus** framework.
+pub trait OcnusModel<T, const P: usize, FMST, CSST>: OcnusCoords<T, P, CSST>
 where
     T: Copy + RealField,
-    O: OcnusObser,
     StandardNormal: Distribution<T>,
 {
     /// The base rayon chunk size that is used for any parallel iterators.
@@ -33,7 +31,7 @@ where
         params: &SVectorView<T, P>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
-    ) -> Result<(), ModelError<T>>;
+    );
 
     /// Initialize the model parameters, the coordinate system and forward model states.
     fn initialize<D>(
@@ -334,7 +332,7 @@ where
         ensbl: &mut OcnusEnsbl<T, P, FMST, CSST>,
         out_array: &mut DMatrixViewMut<O>,
         opt_noise: Option<&mut N>,
-    ) -> Result<Vec<bool>, OcnusError<T>>
+    ) -> Option<Vec<bool>, OcnusError<T>>
     where
         O: AddAssign + Scalar,
         N: OcnusNoise<T, O> + Sync,
@@ -552,7 +550,7 @@ pub enum ModelError<T> {
     #[error("observation is unexpecteedly not valid")]
     InvalidObservation,
     #[error(
-        "invalid output array shape: found {output_rows} x {output_cols} 
+        "invalid output array shape: found {output_rows} x {output_cols}
         but expected {expected_rows} x {expected_cols}"
     )]
     InvalidOutputShape {

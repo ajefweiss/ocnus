@@ -3,18 +3,19 @@ name = "ocnus"
 version = "0.1.0"
 edition = "2024"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "ocnus"
 crate-type = ["lib"]
 
-
 [dependencies]
 chrono = "*"
+covmatrix = { path = "../rs-covmat" }
 derive_builder = "*"
 derive_more = { version = "*", features = ["full"] }
 itertools = "*"
 log = "*"
-nalgebra = { path = "../nalgebra", features = ["rayon", "serde-serialize"] }
+nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
 num-traits = "*"
 rand = "*"
 rand_distr = "*"

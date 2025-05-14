@@ -1,9 +1,9 @@
-use crate::stats::{CovarianceMatrix, Density, DensityRange};
+use crate::stats::{Density, DensityRange};
+use covmatrix::CovMatrix;
 use log::error;
 use nalgebra::{
-    DMatrix, DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn, MatrixView,
-    OMatrix, OVector, RealField, SVector, SVectorView, Scalar, U1, VectorView,
-    allocator::Allocator,
+    DefaultAllocator, Dim, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn, MatrixView, OMatrix,
+    OVector, RealField, Scalar, U1, VectorView, allocator::Allocator,
 };
 use num_traits::AsPrimitive;
 use rand::Rng;
@@ -16,20 +16,23 @@ use std::{
 
 /// A multivariate normal probability density function.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound(
-    serialize = "T: Serialize, OVector<T, D>: Serialize, OVector<DensityRange<T>, D>: Serialize, OMatrix<T, D, D>: Serialize"
-))]
-#[serde(bound(
-    deserialize = "T: Deserialize<'de>, OVector<T, D>: Deserialize<'de>, OVector<DensityRange<T>, D>: Deserialize<'de>, OMatrix<T, D, D>: Deserialize<'de>"
-))]
+#[serde(bound(serialize = "
+    T: Serialize, 
+    OVector<T, D>: Serialize, 
+    OVector<DensityRange<T>, D>: Serialize, 
+    OMatrix<T, D, D>: Serialize"))]
+#[serde(bound(deserialize = "T: Deserialize<'de>, 
+    OVector<T, D>: Deserialize<'de>, 
+    OVector<DensityRange<T>, D>: Deserialize<'de>, 
+    OMatrix<T, D, D>: Deserialize<'de>"))]
 pub struct MultivariateNormalDensity<T, D>
 where
     T: Scalar,
-    D: DimName,
+    D: Dim + DimName,
     DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
-    /// A [`CovarianceMatrix`] that describes the underlying multivariate normal probability density function.
-    covmat: CovarianceMatrix<T, D>,
+    /// A [`CovMatrix`] that describes the underlying multivariate normal probability density function.
+    covm: CovMatrix<T, D>,
 
     /// The mean parameter of the multivariate normal distribution.
     mean: OVector<T, D>,
@@ -53,75 +56,133 @@ where
         + Allocator<DimMinimum<D, D>>
         + Allocator<DimDiff<DimMinimum<D, D>, U1>>,
     StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
 {
+    /// Returns a reference to the underlying [`CovMatrix`].
+    pub fn covmatrix(&self) -> &CovMatrix<T, D> {
+        &self.covm
+    }
+
     /// Calculates the exact density at a specific position `x`.
     pub fn density(&self, x: &VectorView<T, D>) -> T {
         if !self.validate_sample(x) {
             return (-T::one()).sqrt();
         }
 
-        let diff = x - self.mean;
-        let value = (diff.transpose() * self.covmat.pseudo_inverse() * diff)[(0, 0)];
+        let diff = x - &self.mean;
+        let value = (diff.transpose() * self.covm.pseudo_inverse() * diff)[(0, 0)];
 
-        let p_nonzero: usize = self.covmat.matrix().diagonal().iter().fold(0, |acc, next| {
+        let p_nonzero: usize = self.covm.matrix().diagonal().iter().fold(0, |acc, next| {
             if next.abs() > T::zero() { acc + 1 } else { acc }
         });
 
         (-value / T::from_usize(2).unwrap()).exp()
-            / ((T::two_pi()).powi(p_nonzero as i32) * self.covmat.pseudo_determinant()).sqrt()
+            / ((T::two_pi()).powi(p_nonzero as i32) * self.covm.pseudo_determinant().unwrap())
+                .sqrt()
     }
 
-    /// Returns the pseudo-determinant of the covariance matrix.
-    pub fn determinant(&self) -> T {
-        self.covmat.pseudo_determinant()
+    /// Draw a random sample vector from the underlying density using a custom offset instead of the mean.
+    pub fn draw_sample_with_offset<const A: usize, RStride, CStride>(
+        &self,
+        offset: &VectorView<T, D, RStride, CStride>,
+        rng: &mut impl Rng,
+    ) -> Option<OVector<T, D>>
+    where
+        RStride: Dim,
+        CStride: Dim,
+    {
+        let normal = StandardNormal;
+
+        let mut proposal = offset
+            + self.covm.l().unwrap()
+                * OVector::<T, D>::from_iterator((0..D::USIZE).map(|_| rng.sample(normal)));
+
+        // Counter for rejected proposals.
+        let mut attempts = 0;
+
+        while !self.validate_sample(&proposal.as_view()) {
+            proposal = offset
+                + self.covm.l().unwrap()
+                    * OVector::<T, D>::from_iterator((0..D::USIZE).map(|_| rng.sample(normal)));
+
+            attempts += 1;
+
+            if attempts > A {
+                error!(
+                    "MultivariateNormalDensity::draw_sample_with_offset has failed to draw a valid sample after {} tries",
+                    attempts
+                );
+
+                return None;
+            }
+        }
+
+        Some(proposal)
     }
 
-    /// Create a [`MultivariateNormalDensity`] from a covariance matrix.
-    pub fn from_covmat(
-        covmat: CovarianceMatrix<T, D>,
+    /// Create a [`MultivariateNormalDensity`] from a [`CovMatrix`].
+    pub fn from_covmatrix(
+        covm: CovMatrix<T, D>,
         mean: OVector<T, D>,
         range: OVector<DensityRange<T>, D>,
     ) -> Self {
-        Self {
-            covmat,
-            mean,
-            range,
-        }
+        Self { covm, mean, range }
     }
 
     /// Create a [`MultivariateNormalDensity`] from an ensemble of particles.
-    pub fn from_vectors<'a>(
-        particles: &MatrixView<'a, T, D, Dyn>,
+    pub fn from_vectors<'a, RStride, CStride>(
+        vectors: &MatrixView<T, D, Dyn, RStride, CStride>,
         range: OVector<DensityRange<T>, D>,
-        weights: Option<&[T]>,
+        opt_weights: Option<&[T]>,
     ) -> Option<Self>
     where
-        T: Sum + for<'x> Sum<&'x T>,
+        T: for<'x> Mul<&'x T, Output = T>
+            + for<'x> Sub<&'x T, Output = T>
+            + Sum
+            + for<'x> Sum<&'x T>,
+        for<'x> &'x T: Mul<&'x T, Output = T>,
+        RStride: Dim,
+        CStride: Dim,
+        usize: AsPrimitive<T>,
     {
-        let covmat = CovarianceMatrix::from_vectors(&particles.as_view(), weights)?;
-        let mut mean = particles.column_mean();
+        let covm = CovMatrix::from_vectors(vectors, opt_weights, true)?;
+        let mut mean = vectors.column_mean();
 
         // Set mean to first particle value if covariance is zero.
         // This fixes numerical issues where taking the mean over many
         // particles does not equal the constant value.
-        covmat
-            .matrix()
+        covm.matrix()
             .diagonal()
             .iter()
             .zip(mean.iter_mut())
             .enumerate()
             .for_each(|(idx, (cov, value))| {
                 if cov.eq(&T::zero()) {
-                    *value = particles[(idx, 0)];
+                    *value = vectors[(idx, 0)];
                 }
             });
 
-        Some(Self {
-            covmat,
-            mean,
-            range,
-        })
+        Some(Self { covm, mean, range })
+    }
+
+    /// Generate a [`CovMatrix`] for a kernel density estimator from a multivariate normal density.
+    pub fn generate_kde_covmatrix(&self, size: usize) -> CovMatrix<T, D> {
+        let variances = self.covm.matrix().diagonal();
+
+        let d_factor = (T::from_usize(4).unwrap() / T::from_usize(self.covm.rank() + 2).unwrap())
+            .powf(T::one() / T::from_usize(self.covm.rank() + 4).unwrap());
+
+        let n_factor = T::one()
+            / T::from_usize(size)
+                .unwrap()
+                .powf(T::one() / T::from_usize(self.covm.rank() + 4).unwrap());
+
+        let diagonal = OVector::<T, D>::from_iterator(
+            variances
+                .iter()
+                .map(|variance| (d_factor * n_factor).powi(2) * *variance),
+        );
+
+        CovMatrix::new(OMatrix::<T, D, D>::from_diagonal(&diagonal), true).unwrap()
     }
 
     /// Compute the Kullback-Leibler divergence between two [`MultivariateNormalDensity`].
@@ -129,11 +190,11 @@ where
     where
         T: Sum + for<'x> Sum<&'x T>,
     {
-        let mut l_0 = self.covmat.chol_ltm().clone();
-        let mu_0 = self.mean;
+        let mut l_0 = self.covm.l().unwrap().clone();
+        let mu_0 = &self.mean;
 
-        let mut l_1 = other.covmat.chol_ltm().clone();
-        let mu_1 = other.mean;
+        let mut l_1 = other.covm.l().unwrap().clone();
+        let mu_1 = &other.mean;
 
         let mut p_nonzero = D::USIZE;
 
@@ -193,20 +254,9 @@ where
         )
     }
 
-    /// Returns a reference to the lower triangular matrix L from the Cholesky decomposition
-    /// of the covariance matrix.
-    pub fn chol_ltm(&self) -> &OMatrix<T, D, D> {
-        self.covmat.chol_ltm()
-    }
-
     /// Returns a reference to the inverse of the underlying covariance matrix.
     pub fn pseudo_inverse(&self) -> &OMatrix<T, D, D> {
-        self.covmat.pseudo_inverse()
-    }
-
-    /// Returns a reference to the underlying covariance matrix.
-    pub fn matrix(&self) -> &OMatrix<T, D, D> {
-        self.covmat.matrix()
+        self.covm.pseudo_inverse()
     }
 
     /// Returns the center of the multivariate normal density.
@@ -218,142 +268,155 @@ where
 impl<T, D> Density<T, D> for &MultivariateNormalDensity<T, D>
 where
     T: Copy + RealField,
-    D: DimName,
+    D: DimName + DimMin<D>,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
     StandardNormal: Distribution<T>,
 {
-    fn constant_values(&self) -> [Option<T>; N] {
-        self.covmat
-            .ref_matrix()
-            .diagonal()
-            .iter()
-            .zip(self.mean.iter())
-            .map(|(cov, mean)| {
-                if cov.eq(&T::zero()) {
-                    Some(*mean)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<Option<T>>>()
-            .try_into()
-            .unwrap()
-    }
-
-    fn density_rel(&self, x: &VectorView<T, D>) -> T {
-        if !self.validate_sample(x) {
-            return (-T::one()).sqrt();
-        }
-
-        let diff = x - self.mean;
-        let value = (diff.transpose() * self.covmat.ref_matrix_inverse() * diff)[(0, 0)];
-
-        (-value / T::from_usize(2).unwrap()).exp()
-    }
-
-    fn draw_sample(&self, rng: &mut impl Rng) -> Result<OVector<T, D>, StatsError<T>> {
+    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<OVector<T, D>> where {
         let normal = StandardNormal;
 
-        let mut proposal = self.mean
-            + self.covmat.ref_chol_ltm()
-                * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
+        let mut proposal = &self.mean
+            + self.covm.l().unwrap()
+                * OVector::<T, D>::from_iterator((0..D::USIZE).map(|_| rng.sample(normal)));
 
         // Counter for rejected proposals.
         let mut attempts = 0;
 
         while !self.validate_sample(&proposal.as_view()) {
-            proposal = self.mean
-                + self.covmat.ref_chol_ltm()
-                    * SVector::<T, N>::from_iterator((0..N).map(|_| rng.sample(normal)));
+            proposal = &self.mean
+                + self.covm.l().unwrap()
+                    * OVector::<T, D>::from_iterator((0..D::USIZE).map(|_| rng.sample(normal)));
 
             attempts += 1;
 
-            if attempts > 499 {
+            if attempts > A {
                 error!(
                     "MultivariateNormalDensity::draw_sample has failed to draw a valid sample after {} tries",
                     attempts
                 );
 
-                return Err(StatsError::InefficientSampling {
-                    name: "Normal1D",
-                    count: 500,
-                });
+                return None;
             }
         }
 
-        Ok(proposal)
+        Some(proposal)
     }
 
-    fn get_valid_range(&self) -> OVector<DensityRange<T>, D> {
-        self.range
+    fn get_constants(&self) -> OVector<T, D> {
+        OVector::from_iterator(
+            self.covm
+                .matrix()
+                .diagonal()
+                .iter()
+                .zip(self.mean.iter())
+                .map(|(cov, mean)| {
+                    if cov.eq(&T::zero()) {
+                        *mean
+                    } else {
+                        (-T::one()).sqrt()
+                    }
+                }),
+        )
+    }
+
+    fn get_range(&self) -> OVector<DensityRange<T>, D> {
+        self.range.clone()
+    }
+
+    fn relative_density<RStride, CStride>(&self, x: &VectorView<T, D, RStride, CStride>) -> T
+    where
+        RStride: Dim,
+        CStride: Dim,
+    {
+        if !self.validate_sample(x) {
+            return (-T::one()).sqrt();
+        }
+
+        let diff = x - &self.mean;
+        let value = (diff.transpose() * self.covm.pseudo_inverse() * diff)[(0, 0)];
+
+        (-value / T::from_usize(2).unwrap()).exp()
     }
 }
 
-impl<T, D> Add<&OVector<T, D>> for MultivariateNormalDensity<T, N>
+impl<T, D> Add<&OVector<T, D>> for MultivariateNormalDensity<T, D>
 where
-    T: Clone + RealField + Scalar,
+    T: Copy + RealField + Scalar,
+    D: DimName,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
-    type Output = MultivariateNormalDensity<T, N>;
+    type Output = MultivariateNormalDensity<T, D>;
 
     fn add(self, rhs: &OVector<T, D>) -> Self::Output {
         Self {
-            covmat: self.covmat,
+            covm: self.covm,
             mean: self.mean + rhs,
             range: self.range,
         }
     }
 }
 
-impl<T, D> AddAssign<&OVector<T, D>> for MultivariateNormalDensity<T, N>
+impl<T, D> AddAssign<&OVector<T, D>> for MultivariateNormalDensity<T, D>
 where
-    T: Clone + RealField + Scalar,
+    T: Copy + RealField + Scalar,
+    D: DimName,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
     fn add_assign(&mut self, rhs: &OVector<T, D>) {
         self.mean += rhs
     }
 }
 
-impl<T, D> Mul<T> for MultivariateNormalDensity<T, N>
+impl<T, D> Mul<T> for MultivariateNormalDensity<T, D>
 where
     T: Copy + RealField + Scalar,
+    D: DimName,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
-    type Output = MultivariateNormalDensity<T, N>;
+    type Output = MultivariateNormalDensity<T, D>;
 
     fn mul(self, rhs: T) -> Self::Output {
         Self {
-            covmat: self.covmat * rhs,
+            covm: self.covm * rhs,
             mean: self.mean,
             range: self.range,
         }
     }
 }
 
-impl<T, D> MulAssign<T> for MultivariateNormalDensity<T, N>
+impl<T, D> MulAssign<T> for MultivariateNormalDensity<T, D>
 where
     T: Copy + RealField + Scalar,
+    D: DimName,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
     fn mul_assign(&mut self, rhs: T) {
-        self.covmat *= rhs;
+        self.covm *= rhs;
     }
 }
 
-impl<T, D> Sub<&OVector<T, D>> for MultivariateNormalDensity<T, N>
+impl<T, D> Sub<&OVector<T, D>> for MultivariateNormalDensity<T, D>
 where
     T: Copy + RealField + Scalar,
+    D: DimName,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
-    type Output = MultivariateNormalDensity<T, N>;
+    type Output = MultivariateNormalDensity<T, D>;
 
     fn sub(self, rhs: &OVector<T, D>) -> Self::Output {
         Self {
-            covmat: self.covmat,
+            covm: self.covm,
             mean: self.mean - rhs,
             range: self.range,
         }
     }
 }
 
-impl<T, D> SubAssign<&OVector<T, D>> for MultivariateNormalDensity<T, N>
+impl<T, D> SubAssign<&OVector<T, D>> for MultivariateNormalDensity<T, D>
 where
     T: Copy + RealField + Scalar,
+    D: DimName,
+    DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
     fn sub_assign(&mut self, rhs: &OVector<T, D>) {
         self.mean -= rhs
@@ -363,12 +426,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nalgebra::{Matrix, U3, VecStorage};
+    use approx::ulps_eq;
+    use nalgebra::{Matrix, SVector, U3, VecStorage};
     use rand::{Rng, SeedableRng};
     use rand_xoshiro::Xoshiro256PlusPlus;
 
     #[test]
-    fn test_multivariatend() {
+    fn test_multivariate_normal_density() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let uniform = StandardNormal;
 
@@ -383,42 +447,49 @@ mod tests {
             }),
         );
 
-        let array_view = &array.as_view();
+        let covm = CovMatrix::from_vectors::<Dyn, U3>(&array.as_view(), None, true).unwrap();
 
-        let covmat = CovarianceMatrix::from_vectors(array_view, None).unwrap();
-
-        let mvpdf = &MultivariateNormalDensity::from_covmat(
-            covmat,
+        let mvpdf = &MultivariateNormalDensity::from_covmatrix(
+            covm,
             SVector::from([0.1, 0.0, 0.25]),
-            [(-0.75, 0.75); 3],
+            SVector::from([DensityRange::new((-0.75, 0.75)); 3]),
         );
 
-        assert!(
-            (mvpdf.density(&SVector::from([0.2, 0.0, 0.35]).as_view()) - 0.1611928).abs() < 1e-6
-        );
+        assert!(ulps_eq!(
+            mvpdf.density(&SVector::from([0.2, 0.0, 0.35]).as_view()),
+            0.1611928
+        ));
 
         assert!(
             mvpdf
-                .density_rel(&SVector::from([0.2, 0.1, 0.35]).as_view())
+                .relative_density::<U1, U3>(&SVector::from([0.2f32, 0.1, 0.35]).as_view())
                 .is_nan()
         );
 
+        assert!(ulps_eq!(
+            mvpdf.draw_sample::<100>(&mut rng).unwrap(),
+            SVector::from([-0.4150916, 0.0, 0.4898513])
+        ));
+
         assert!(
-            (mvpdf.draw_sample(&mut rng).unwrap() - SVector::from([-0.4150916, 0.0, 0.4898513]))
-                .norm()
-                < 1e-6
+            mvpdf.validate_sample::<U1, U3>(&mvpdf.draw_sample::<100>(&mut rng).unwrap().as_view())
         );
 
-        assert!(mvpdf.validate_sample(&mvpdf.draw_sample(&mut rng).unwrap().as_view()));
+        let mvpdf_ensbl = MultivariateNormalDensity::from_vectors::<Dyn, U3>(
+            &array.as_view(),
+            OVector::from([DensityRange::new((-0.75, 0.75)); 3]),
+            None,
+        )
+        .unwrap();
 
-        let mvpdf_ensbl =
-            MultivariateNormalDensity::from_vectors(array_view, [(-0.75, 0.75); 3], None).unwrap();
-
-        assert!(mvpdf.covmat.ref_matrix() == mvpdf_ensbl.covmat.ref_matrix());
+        assert!(ulps_eq!(
+            mvpdf.covm.l().unwrap(),
+            mvpdf_ensbl.covm.l().unwrap()
+        ));
     }
 
     #[test]
-    fn test_multivariate_kld() {
+    fn test_multivariate_normal_density_kld() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let uniform = StandardNormal;
 
@@ -444,12 +515,18 @@ mod tests {
             }),
         );
 
-        let mvpdf_1 =
-            MultivariateNormalDensity::from_vectors(&array_1.as_view(), [(-2.0, 2.0); 3], None)
-                .unwrap();
-        let mvpdf_2 =
-            MultivariateNormalDensity::from_vectors(&array_2.as_view(), [(-2.0, 2.0); 3], None)
-                .unwrap();
+        let mvpdf_1 = MultivariateNormalDensity::from_vectors::<Dyn, U3>(
+            &array_1.as_view(),
+            SVector::from([DensityRange::new((-2.0, 2.0)); 3]),
+            None,
+        )
+        .unwrap();
+        let mvpdf_2 = MultivariateNormalDensity::from_vectors::<Dyn, U3>(
+            &array_2.as_view(),
+            SVector::from([DensityRange::new((-2.0, 2.0)); 3]),
+            None,
+        )
+        .unwrap();
 
         assert!((mvpdf_1.kullback_leibler_divergence(&mvpdf_2).unwrap() - 0.20391017).abs() < 1e-6);
     }
