@@ -1,4 +1,4 @@
-use crate::obser::{OcnusObser, ScObsSeries};
+use crate::{base::ScObsSeries, obser::OcnusObser};
 use nalgebra::{DVector, Scalar};
 use num_traits::Zero;
 use rand::{Rng, SeedableRng};
@@ -12,7 +12,7 @@ where
     O: AddAssign + OcnusObser + Scalar,
 {
     /// Generate a random noise time-series.
-    fn generate_noise(&self, series: &ScObsSeries<T, O>, rng: &mut impl Rng) -> DVector<O>;
+    fn generate_noise(&self, series: &ScObsSeries<T>, rng: &mut impl Rng) -> DVector<O>;
 
     /// Get randon number seed.
     fn get_random_seed(&self) -> u64;
@@ -37,7 +37,7 @@ where
     T: PartialOrd,
     O: AddAssign + OcnusObser + Scalar + Zero,
 {
-    fn generate_noise(&self, series: &ScObsSeries<T, O>, _rng: &mut impl Rng) -> DVector<O> {
+    fn generate_noise(&self, series: &ScObsSeries<T>, _rng: &mut impl Rng) -> DVector<O> {
         DVector::zeros(series.len())
     }
 

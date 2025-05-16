@@ -800,6 +800,7 @@ dependencies = [
  "log",
  "nalgebra",
  "num-traits",
+ "paste",
  "rand",
  "rand_distr",
  "rand_xoshiro",

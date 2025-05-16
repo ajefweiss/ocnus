@@ -17,6 +17,7 @@ itertools = "*"
 log = "*"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
 num-traits = "*"
+paste = "1.0.15"
 rand = "*"
 rand_distr = "*"
 rand_xoshiro = "*"
@@ -45,9 +46,9 @@ opt-level = 3
 [profile.test]
 opt-level = 1
 
-#[[bench]]
-#name = "cylm"
-#harness = false
+[[bench]]
+name = "cylm"
+harness = false
 
 #[[bench]]
 #name = "corem"

@@ -62,7 +62,7 @@ where
 
 impl<T, D> ParticleDensity<T, D>
 where
-    T: Copy + RealField + Scalar,
+    T: Copy + RealField + SampleUniform + Scalar,
     D: DimName + DimMin<D>,
     DimMinimum<D, D>: DimSub<U1>,
     DefaultAllocator: Allocator<D>
@@ -190,6 +190,59 @@ where
             .for_each(|weight| *weight /= weights_total);
 
         Self::from_vectors(vectors, other.get_range(), Some(weights))
+    }
+
+    /// Returns true if the density contains no particles.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the number of particles, also referred to as its 'length'.
+    pub fn len(&self) -> usize {
+        self.particles.ncols()
+    }
+
+    /// Returns a reference to the particles matrix.
+    pub fn particles(&self) -> &OMatrix<T, D, Dyn> {
+        &self.particles
+    }
+
+    /// Returns a reference to the particles matrix.
+    pub fn particles_mut(&mut self) -> &mut OMatrix<T, D, Dyn> {
+        &mut self.particles
+    }
+
+    /// Resample from existing particles.
+    pub fn resample(&self, rng: &mut impl Rng) -> OVector<T, D> {
+        let uniform = Uniform::new(T::zero(), T::one()).unwrap();
+
+        let offset = {
+            let pdx = {
+                // Select particle index by weight.
+                let wdx: T = rng.sample(uniform);
+
+                // Here we abuse try_fold to return particle index early wrapped within Err().
+                match self
+                    .weights
+                    .iter()
+                    .enumerate()
+                    .try_fold(T::zero(), |acc, (idx, weight)| {
+                        let next_weight = acc + *weight;
+                        if wdx < next_weight {
+                            Err(idx)
+                        } else {
+                            Ok(next_weight)
+                        }
+                    }) {
+                    Ok(_) => self.weights.len() - 1,
+                    Err(idx) => idx,
+                }
+            };
+
+            self.particles.column(pdx)
+        };
+
+        offset.into_owned()
     }
 
     /// Set the kernel density estimator covariance matrix.

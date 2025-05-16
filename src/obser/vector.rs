@@ -1,10 +1,11 @@
-//! Implementation of a `N`-dimensional vector observable.
-
-use crate::base::OcnusObser;
+use crate::base::ScObsSeries;
+use crate::obser::{OcnusNoise, OcnusObser};
+use covmatrix::CovMatrix;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use nalgebra::{RealField, SVector};
+use nalgebra::{Const, DVector, OVector, RealField, SVector};
 use num_traits::Zero;
+use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 use std::ops::Div;
 use std::{
@@ -395,6 +396,82 @@ where
 
     fn zero() -> Self {
         Self([T::zero(); N])
+    }
+}
+
+/// Generic N-dimensional observation vector noise
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[allow(missing_docs)]
+pub enum ObserVecNoise<T, const N: usize>
+where
+    T: RealField,
+{
+    Gaussian(T, u64),
+    Multivariate(CovMatrix<T, Const<N>>, u64),
+}
+
+impl<T, const N: usize> OcnusNoise<T, ObserVec<T, N>> for ObserVecNoise<T, N>
+where
+    T: Copy + RealField,
+    StandardNormal: Distribution<T>,
+{
+    fn generate_noise(
+        &self,
+        series: &ScObsSeries<T>,
+        rng: &mut impl rand::Rng,
+    ) -> nalgebra::DVector<ObserVec<T, N>> {
+        match self {
+            ObserVecNoise::Gaussian(std_dev, ..) => {
+                let normal = StandardNormal;
+                let size = series.len();
+
+                DVector::from_iterator(
+                    size,
+                    (0..size).map(|_| ObserVec([rng.sample(normal) * *std_dev; N])),
+                )
+            }
+            ObserVecNoise::Multivariate(covmat, ..) => {
+                let normal = StandardNormal;
+                let size = series.len();
+
+                let mut result = DVector::from_iterator(
+                    size,
+                    (0..size).map(|_| ObserVec([rng.sample(normal); N])),
+                );
+
+                for i in 0..N {
+                    let values = covmat.l().unwrap()
+                        * OVector::<T, Const<N>>::from_iterator(
+                            (0..size).map(|_| rng.sample(normal)),
+                        );
+
+                    result
+                        .iter_mut()
+                        .zip(values.row_iter())
+                        .for_each(|(res, val)| res.0[i] = val[(0, 0)]);
+                }
+
+                result
+            }
+        }
+    }
+
+    fn get_random_seed(&self) -> u64 {
+        match self {
+            ObserVecNoise::Gaussian(.., seed) => *seed,
+            ObserVecNoise::Multivariate(.., seed) => *seed,
+        }
+    }
+
+    fn increment_random_seed(&mut self) {
+        match self {
+            ObserVecNoise::Gaussian(.., seed) => {
+                *seed += 1;
+            }
+            ObserVecNoise::Multivariate(.., seed) => {
+                *seed += 1;
+            }
+        }
     }
 }
 

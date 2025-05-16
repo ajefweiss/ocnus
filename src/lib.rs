@@ -5,4 +5,6 @@
 pub mod base;
 pub mod coords;
 mod math;
+pub mod models;
+pub mod obser;
 pub mod stats;

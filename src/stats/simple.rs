@@ -15,15 +15,15 @@ use std::fmt::Debug;
 /// It is generally recommended to use this density as a model prior, as one can easily fine tune parameters for each dimension.
 ///
 /// ```
-/// # use nalgebra::OVector;
+/// # use nalgebra::Const;
 /// # use ocnus::stats::{ConstantDensity, CosineDensity, NormalDensity, MultivariateDensity, ReciprocalDensity, UniformDensity};
-/// let prior = MultivariateDensity::new(OVector::from([
+/// let prior = MultivariateDensity::<f64, Const<5>>::new(&[
 ///     ConstantDensity::new(1.0),
 ///     CosineDensity::new((0.1, 0.2)).unwrap(),
 ///     NormalDensity::new(0.1, 0.25, (-0.5, 1.5)).unwrap(),
 ///     ReciprocalDensity::new((0.1, 0.5)).unwrap(),
 ///     UniformDensity::new((1.0, 2.0)).unwrap(),
-/// ]));
+/// ]);
 /// ```
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, IntoIterator, Serialize)]
 #[serde(bound(serialize = "OVector<UnivariateDensity<T>, D>: Serialize"))]
@@ -43,8 +43,13 @@ where
     DefaultAllocator: Allocator<D>,
 {
     /// Create a new [`MultivariateDensity`].
-    pub fn new(uvpdfs: OVector<UnivariateDensity<T>, D>) -> Self {
-        Self(uvpdfs)
+    pub fn new<'a, I>(uvpdfs: I) -> Self
+    where
+        I: IntoIterator<Item = &'a UnivariateDensity<T>>,
+    {
+        Self(OVector::<UnivariateDensity<T>, D>::from_iterator(
+            uvpdfs.into_iter().cloned(),
+        ))
     }
 }
 
@@ -497,7 +502,7 @@ where
 mod tests {
     use super::*;
     use approx::ulps_eq;
-    use nalgebra::U5;
+    use nalgebra::{Const, U5};
     use rand::SeedableRng;
     use rand_xoshiro::Xoshiro256PlusPlus;
 
@@ -505,16 +510,18 @@ mod tests {
     fn test_simple_density() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
 
-        let uvpdf = &MultivariateDensity::new(OVector::from([
+        let uvpdf = &MultivariateDensity::<f32, Const<5>>::new(&[
             ConstantDensity::new(1.0),
             CosineDensity::new((0.1, 0.2)).unwrap(),
             NormalDensity::new(0.1, 0.25, (-0.5, 1.5)).unwrap(),
             ReciprocalDensity::new((0.1, 0.5)).unwrap(),
             UniformDensity::new((1.0, 2.0)).unwrap(),
-        ]));
+        ]);
 
         assert!(ulps_eq!(
-            uvpdf.relative_density::<U1, U5>(&OVector::from([1.0, 0.15, 0.15, 0.2, 1.5]).as_view()),
+            uvpdf.relative_density::<U1, U5>(
+                &OVector::from([1.0f32, 0.15, 0.15, 0.2, 1.5]).as_view()
+            ),
             0.0614358f32
         ));
 

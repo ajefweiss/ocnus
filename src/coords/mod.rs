@@ -10,7 +10,7 @@
 //! - [`ECGeometry`] An elliptic-cylindrical geometry with internal coordinates (μ, ν, z) for flux
 //!   rope models.
 //! - [`TTGeometry`] A tapered-toroidal geometry with an elliptical cross-section and internal
-//!   coordinates (μ, ν, s) for flux rope models.
+//!   coordinates (μ, ν, ) for flux rope models.
 //! - [`SPHGeometry`] A spherical geometry with internal coordiantes (r, ϕ, θ) for spheromak models.
 //! - [`SPHUGeometry`] A unit sphere with internal coordiantes (r, ϕ, θ) for global heliospheric models.
 //!
@@ -21,59 +21,83 @@ mod sphgm;
 mod ttgm;
 mod xcgm;
 
+use std::iter::Sum;
+
 pub use sphgm::{SPHGeometry, SPHState, SPHUGeometry};
 pub use ttgm::{TTGeometry, TTState};
 pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
 use nalgebra::{
-    Const, Dim, RealField, Scalar, U1, Unit, UnitQuaternion, Vector3, VectorView, VectorView3,
+    DefaultAllocator, Dim, DimName, OVector, RealField, SVector, Scalar, ToTypenum, U3, Unit,
+    UnitQuaternion, Vector3, VectorView, VectorView3, allocator::Allocator,
 };
 
 /// A trait that is shared by all coordinate systems describing a model geometry.
 ///
 /// Each coordinate system is associated with a single coordinate system state type `CSST`.
-pub trait OcnusCoords<T, const P: usize, CSST>
+pub trait OcnusCoords<T, D, CSST>
 where
     T: Copy + RealField,
+    D: DimName,
     Self: Send + Sync,
+    DefaultAllocator: Allocator<D>,
 {
     /// Coordinate system parameter names.
-    const PARAMS: [&'static str; P];
+    const PARAMS: OVector<&'static str, D>;
+
+    /// Coordinate system parameter name count.
+    const PARAMS_LEN: usize = D::USIZE;
 
     /// Computes the local contravariant basis vectors.
-    fn contravariant_basis<CStride: Dim>(
+    fn contravariant_basis<RStride, CStride>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<[Vector3<T>; 3]>;
+    ) -> Option<[Vector3<T>; 3]>
+    where
+        RStride: Dim,
+        CStride: Dim;
 
     /// Computes the local contravariant basis vectors and returns the normalized vectors.
-    fn contravariant_basis_normalized<CStride: Dim>(
+    fn contravariant_basis_normalized<RStride, CStride>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<[Vector3<T>; 3]> {
+    ) -> Option<[Vector3<T>; 3]>
+    where
+        RStride: Dim,
+        CStride: Dim,
+    {
         let [dmu, dnu, ds] = Self::contravariant_basis(ics, params, cs_state)?;
 
         Some([dmu / dmu.norm(), dnu / dnu.norm(), ds / ds.norm()])
     }
 
     /// Computes the local covariant basis vectors.
-    fn covariant_basis<CStride: Dim>(
+    fn covariant_basis<RStride, CStride>(
         _ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<P>, U1, CStride>,
+        _params: &VectorView<T, D, RStride, CStride>,
         _state: &CSST,
-    ) -> Option<[Vector3<T>; 3]> {
+    ) -> Option<[Vector3<T>; 3]>
+    where
+        RStride: Dim,
+        CStride: Dim,
+    {
         unimplemented!("computation of the covariant basis vectors is currently not implemented")
     }
 
     /// Create a vector from contravariant components.
-    fn contravariant_vector<CStride: Dim>(
+    fn contravariant_vector<RStride, CStride>(
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<Vector3<T>> {
+    ) -> Option<Vector3<T>>
+    where
+        RStride: Dim,
+        CStride: Dim,
+        SVector<T, 3>: Sum,
+    {
         let basis = Self::contravariant_basis(ics, params, cs_state)?;
 
         Some(
@@ -86,12 +110,17 @@ where
     }
 
     /// Create a vector from contravariant components, using the normalized basis vectors.
-    fn contravariant_vector_normalized<CStride: Dim>(
+    fn contravariant_vector_normalized<RStride, CStride>(
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<Vector3<T>> {
+    ) -> Option<Vector3<T>>
+    where
+        RStride: Dim,
+        CStride: Dim,
+        SVector<T, 3>: Sum,
+    {
         let basis = Self::contravariant_basis_normalized(ics, params, cs_state)?;
 
         Some(
@@ -104,60 +133,83 @@ where
     }
 
     /// Compute the determinant of the metric tensor.
-    fn detg<CStride: Dim>(
+    fn detg<RStride, CStride>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<T>;
+    ) -> Option<T>
+    where
+        RStride: Dim,
+        CStride: Dim;
 
-    /// Initialize the coordinate cs_state.
-    fn initialize_cs<CStride: Dim>(
-        params: &VectorView<T, Const<P>, U1, CStride>,
+    /// Initialize the coordinate system state.
+    ///
+    /// This function may panic for invalid parameter inputs.
+    fn initialize_cs<RStride, CStride>(
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &mut CSST,
-    );
+    ) where
+        RStride: Dim,
+        CStride: Dim;
 
     /// Retrieve a model parameter index by name.
-    fn param_index(name: &str) -> Option<usize> {
-        Self::PARAMS.into_iter().position(|param| param == name)
+    fn param_index(name: &str) -> Option<usize>
+    where
+        DefaultAllocator: Allocator<D>,
+    {
+        Self::PARAMS.iter().position(|param| *param == name)
     }
 
     /// Retrieve a model parameter value by name.
-    fn param_value<CStride: Dim>(
+    fn param_value<RStride, CStride>(
         name: &str,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
     ) -> Option<T>
     where
         T: Clone,
+        RStride: Dim,
+        CStride: Dim,
+        DefaultAllocator: Allocator<D>,
     {
         Self::param_index(name).map(|index| params[index])
     }
 
     /// Transform external coordinates `ecs` into the internal coordinates `ics`.
-    fn transform_ics_to_ecs<CStride: Dim>(
+    fn transform_ics_to_ecs<RStride, CStride>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<Vector3<T>>;
+    ) -> Option<Vector3<T>>
+    where
+        RStride: Dim,
+        CStride: Dim;
 
     /// Transform internal coordinates `ics` into cartesian coordinates `ecs`.
-    fn transform_ecs_to_ics<CStride: Dim>(
+    fn transform_ecs_to_ics<RStride, CStride>(
         ecs: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<Vector3<T>>;
+    ) -> Option<Vector3<T>>
+    where
+        RStride: Dim,
+        CStride: Dim;
 
     /// Test the implemented trait functions.
-    #[cfg(test)]
-    fn test_implementation<CStride: Dim>(
+    // #[cfg(test)]
+    fn test_implementation<RStride, CStride>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<P>, U1, CStride>,
+        params: &VectorView<T, D, RStride, CStride>,
         delta_h: T,
     ) where
+        D: ToTypenum,
+        RStride: Dim,
+        CStride: Dim,
         CSST: Default,
+        DefaultAllocator: Allocator<U3>,
     {
         let mut cs_state = CSST::default();
 
-        Self::initialize_cs(&params.fixed_rows::<P>(0), &mut cs_state);
+        Self::initialize_cs(&params.as_view(), &mut cs_state);
 
         let ics_1p =
             ics + Vector3::<T>::x_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
@@ -174,33 +226,54 @@ where
         let ics_3m =
             ics - Vector3::<T>::z_axis().into_inner() * delta_h / T::from_usize(2).unwrap();
 
-        let basis =
-            Self::contravariant_basis(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let basis = Self::contravariant_basis(
+            &ics.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
-        let ecs_1p =
-            Self::transform_ics_to_ecs(&ics_1p.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let ecs_1p = Self::transform_ics_to_ecs(
+            &ics_1p.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
-        let ecs_1m =
-            Self::transform_ics_to_ecs(&ics_1m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let ecs_1m = Self::transform_ics_to_ecs(
+            &ics_1m.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
-        let ecs_2p =
-            Self::transform_ics_to_ecs(&ics_2p.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let ecs_2p = Self::transform_ics_to_ecs(
+            &ics_2p.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
-        let ecs_2m =
-            Self::transform_ics_to_ecs(&ics_2m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let ecs_2m = Self::transform_ics_to_ecs(
+            &ics_2m.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
-        let ecs_3p =
-            Self::transform_ics_to_ecs(&ics_3p.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let ecs_3p = Self::transform_ics_to_ecs(
+            &ics_3p.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
-        let ecs_3m =
-            Self::transform_ics_to_ecs(&ics_3m.as_view(), &params.fixed_rows::<P>(0), &cs_state)
-                .unwrap();
+        let ecs_3m = Self::transform_ics_to_ecs(
+            &ics_3m.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
         assert!(
             (basis[0] - (ecs_1p - ecs_1m) / delta_h).norm() < T::from_usize(10).unwrap() * delta_h
@@ -213,7 +286,12 @@ where
         );
 
         let detg_basis = (basis[0].cross(&basis[1]).dot(&basis[2])).abs();
-        let detg_analy = Self::detg(&ics.as_view(), &params.fixed_rows::<P>(0), &cs_state).unwrap();
+        let detg_analy = Self::detg(
+            &ics.as_view(),
+            &params.rows_generic(0, params.shape_generic().0),
+            &cs_state,
+        )
+        .unwrap();
 
         assert!((detg_basis / detg_analy - T::one()).abs() < T::from_f64(1e-6).unwrap());
     }

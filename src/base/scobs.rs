@@ -8,26 +8,23 @@ use std::{
     ops::{Add, AddAssign},
 };
 
-use super::OcnusObser;
-
-/// The configuration type of a single spacecraft observation, as used in [`ScObs`].
+/// The configuration of a single spacecraft observation, as used in [`ScObs`].
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum ScObsType<T> {
-    /// In situ observation in space, in an arbitrary Solar centric coordiante system.
-    InSitu([T; 3]),
+pub enum ScObsConf<T> {
+    /// Position in space, in an arbitrary Solar centric coordiante system.
+    Position([T; 3]),
 }
 
 /// Represents a single spacecraft observation in time, with an optional observation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ScObs<T, O> {
-    configuration: ScObsType<T>,
-    observation: O,
+pub struct ScObs<T> {
+    configuration: ScObsConf<T>,
     timestamp: T,
 }
 
-impl<T, O> ScObs<T, O> {
+impl<T> ScObs<T> {
     /// Access the configuration field.
-    pub fn configuration(&self) -> &ScObsType<T> {
+    pub fn configuration(&self) -> &ScObsConf<T> {
         &self.configuration
     }
 
@@ -40,7 +37,7 @@ impl<T, O> ScObs<T, O> {
         let conf_1 = &other.configuration;
 
         match (conf_0, conf_1) {
-            (ScObsType::InSitu(r_0), ScObsType::InSitu(r_1)) => {
+            (ScObsConf::Position(r_0), ScObsConf::Position(r_1)) => {
                 (Vector3::from(*r_1) - Vector3::from(*r_0)).norm()
             }
             #[allow(unreachable_patterns)]
@@ -48,62 +45,37 @@ impl<T, O> ScObs<T, O> {
         }
     }
 
-    /// Access the observation field.
-    pub fn get_observation(&self) -> &O {
-        &self.observation
-    }
-
     /// Access the timestamp field.
     pub fn get_timestamp(&self) -> &T {
         &self.timestamp
     }
 
-    /// Create a new [`ScObs`], with an optional observation.
-    pub fn new(timestamp: T, configuration: ScObsType<T>, opt_observation: Option<O>) -> Self
-    where
-        O: Default,
-    {
+    /// Create a new [`ScObs`], with fixed configuration.
+    pub fn new(timestamp: T, configuration: ScObsConf<T>) -> Self {
         Self {
             configuration,
-            observation: opt_observation.unwrap_or_default(),
+
             timestamp,
         }
-    }
-
-    /// Set the observation field.
-    pub fn set_observation(&mut self, observation: O) {
-        self.observation = observation;
     }
 }
 
 /// Represents a time series of spacecraft observations.
 #[derive(Clone, Debug, Deserialize, IntoIterator, Serialize)]
-pub struct ScObsSeries<T, O> {
+pub struct ScObsSeries<T> {
     /// Vector of spacecraft observations.
     #[into_iterator(ref)]
-    scobs: Vec<ScObs<T, O>>,
+    scobs: Vec<ScObs<T>>,
 
     /// The sorting indices that are used to recover the original [`ScObsSeries`]
     /// objects from a composite.
     sorti: Vec<usize>,
 }
 
-impl<T, O> ScObsSeries<T, O>
+impl<T> ScObsSeries<T>
 where
     T: PartialOrd,
 {
-    /// Returns the number of valid observations.
-    pub fn count_observations(&self) -> usize
-    where
-        O: OcnusObser,
-    {
-        self.into_iter()
-            .fold(0, |acc, next| match next.get_observation().is_valid() {
-                true => acc + 1,
-                false => acc,
-            })
-    }
-
     /// Returns the number of individual [`ScObsSeries`] contained within.
     ///
     /// This value corresponds to the length of the vector returned by
@@ -113,13 +85,13 @@ where
     }
 
     /// Returns the first [`ScObs`].
-    pub fn first_scobs(&self) -> Option<&ScObs<T, O>> {
+    pub fn first_scobs(&self) -> Option<&ScObs<T>> {
         self.scobs.first()
     }
 
     /// Create a [`ScObsSeries`] from an iterator over `ScObs`.
-    pub fn from_iterator<I: IntoIterator<Item = ScObs<T, O>>>(iter: I) -> Self {
-        let scobs = iter.into_iter().collect::<Vec<ScObs<T, O>>>();
+    pub fn from_iterator<I: IntoIterator<Item = ScObs<T>>>(iter: I) -> Self {
+        let scobs = iter.into_iter().collect::<Vec<ScObs<T>>>();
         let length = scobs.len();
 
         Self {
@@ -134,7 +106,7 @@ where
     }
 
     /// Returns last first [`ScObs`].
-    pub fn last_scobs(&self) -> Option<&ScObs<T, O>> {
+    pub fn last_scobs(&self) -> Option<&ScObs<T>> {
         self.scobs.last()
     }
 
@@ -147,7 +119,7 @@ where
     pub fn sort_by_timestamp(&mut self) {
         // Implements the bubble sort algorithm for re-ordering all vectors according to the
         // time stamp values.
-        let bubble_sort_closure = |scobs: &mut Vec<ScObs<T, O>>, sorti: &mut Vec<usize>| {
+        let bubble_sort_closure = |scobs: &mut Vec<ScObs<T>>, sorti: &mut Vec<usize>| {
             let mut counter = 0;
 
             for idx in 0..(scobs.len() - 1) {
@@ -172,10 +144,9 @@ where
     /// The reciprocal of [`ScObsSeries::sort_by_timestamp`].
     /// Calling this function consumes the [`ScObsSeries`] object and returns the original
     /// [`ScObsSeries`] objects in a vector.
-    pub fn split(self) -> Vec<ScObsSeries<T, O>>
+    pub fn split(self) -> Vec<ScObsSeries<T>>
     where
         T: Clone,
-        O: Clone,
     {
         (0..self.count_series())
             .map(|idx| {
@@ -184,7 +155,7 @@ where
                         Ordering::Equal => Some(obs.clone()),
                         _ => None,
                     })
-                    .collect::<Vec<ScObs<T, O>>>();
+                    .collect::<Vec<ScObs<T>>>();
 
                 let length = scobs.len();
 
@@ -197,7 +168,7 @@ where
     }
 }
 
-impl<T, O> Add for ScObsSeries<T, O> {
+impl<T> Add for ScObsSeries<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -228,7 +199,7 @@ impl<T, O> Add for ScObsSeries<T, O> {
     }
 }
 
-impl<T, O> AddAssign for ScObsSeries<T, O> {
+impl<T> AddAssign for ScObsSeries<T> {
     fn add_assign(&mut self, rhs: Self) {
         debug!(
             "merging two ScObs objects ({} + {})",
@@ -259,20 +230,17 @@ mod tests {
     fn test_scobs() {
         let sctc1 = ScObs {
             timestamp: 0.0,
-            configuration: ScObsType::InSitu([1.0, 0.0, 0.0]),
-            observation: 0.0,
+            configuration: ScObsConf::Position([1.0, 0.0, 0.0]),
         };
 
         let sctc2 = ScObs {
             timestamp: 1.0,
-            configuration: ScObsType::InSitu([1.0, 0.0, 0.0]),
-            observation: 0.0,
+            configuration: ScObsConf::Position([1.0, 0.0, 0.0]),
         };
 
         let sctc3 = ScObs {
             timestamp: 0.5,
-            configuration: ScObsType::InSitu([1.0, 0.0, 0.0]),
-            observation: 0.0,
+            configuration: ScObsConf::Position([1.0, 0.0, 0.0]),
         };
 
         let mut ts3 = ScObsSeries::from_iterator([sctc1, sctc2]);
