@@ -1,4 +1,4 @@
-//! # The core building blocks of the **ocnus** framework.
+//! # Core building blocks of the **ocnus** framework.
 //!
 //! # Spacecraft Observations
 //!

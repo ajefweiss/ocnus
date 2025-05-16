@@ -1,11 +1,10 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use nalgebra::{Const, DMatrix, Dyn, Matrix, VecStorage};
+use nalgebra::{Const, DMatrix};
 use ocnus::{
     base::{OcnusEnsbl, OcnusModel, ScObs, ScObsConf, ScObsSeries},
-    coords::XCState,
     models::CCLFFModel,
     obser::{NullNoise, ObserVec},
-    stats::{ConstantDensity, Density, MultivariateDensity, UniformDensity, UnivariateDensity},
+    stats::{ConstantDensity, Density, MultivariateDensity, UniformDensity},
 };
 use std::{hint::black_box, time::Duration};
 
@@ -86,7 +85,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 .simulate_ensbl(
                     &sc,
                     &mut data,
-                    CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag,
+                    &CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag,
                     &mut output.as_view_mut(),
                     None::<&mut NullNoise<f32>>,
                 )

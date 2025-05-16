@@ -1,4 +1,4 @@
-//! Model implementations.
+//! Implemented models and forward model state types.
 
 // mod corem;
 mod cylm;

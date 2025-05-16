@@ -141,6 +141,25 @@ where
         }
     }
 
+    /// Sorts a set of ordered data according to the order of observations.
+    ///
+    /// Note that this function clones the underlying observables (potentially slow).
+    pub fn sort_data_by_timestamp<OT>(&self, data: &[&[OT]]) -> Vec<OT>
+    where
+        OT: Clone,
+    {
+        let mut counters = vec![0; self.count_series()];
+        let mut vector = Vec::with_capacity(self.len());
+
+        for idx in &self.sorti {
+            vector.push(data[*idx][counters[*idx]].clone());
+
+            counters[*idx] += 1;
+        }
+
+        vector
+    }
+
     /// The reciprocal of [`ScObsSeries::sort_by_timestamp`].
     /// Calling this function consumes the [`ScObsSeries`] object and returns the original
     /// [`ScObsSeries`] objects in a vector.

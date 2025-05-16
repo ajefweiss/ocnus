@@ -15,7 +15,7 @@ use std::{
 /// A model ensemble.
 ///
 /// This is just a fancy [`ParticleDensity`].
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(bound(serialize = "
     T: Serialize, 
     OVector<T, D>: Serialize, 

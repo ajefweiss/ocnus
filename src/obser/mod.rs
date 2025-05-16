@@ -1,4 +1,4 @@
-//! # Model observable types and noise implementations..
+//! # Model observable types and noise implementations.
 //!
 //! This module provides the [`OcnusObser`] trait, that is shared for all model observable types.
 //!
@@ -18,11 +18,12 @@
 mod noise;
 mod vector;
 
+use nalgebra::Scalar;
 pub use noise::*;
 pub use vector::*;
 
 /// A trait that is shared by all model observable types.
-pub trait OcnusObser: Clone + Default + Send + Sync {
+pub trait OcnusObser: Clone + Default + Send + Sync + Scalar {
     /// Returns `true` if the observation is considered valid.
     fn is_valid(&self) -> bool;
 }

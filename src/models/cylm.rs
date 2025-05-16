@@ -611,7 +611,7 @@ mod tests {
         obser::NullNoise,
         stats::{ConstantDensity, MultivariateDensity, UniformDensity},
     };
-    use nalgebra::{DMatrix, Dyn, Matrix, SVector, VecStorage};
+    use nalgebra::{DMatrix, SVector};
 
     #[test]
     fn test_cclff_model() {
@@ -661,7 +661,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                CCLFFModel::<f64, MultivariateDensity<f64, Const<8>>>::observe_mag,
+                &CCLFFModel::<f64, MultivariateDensity<f64, Const<8>>>::observe_mag,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f64>>,
             )
@@ -673,303 +673,288 @@ mod tests {
         assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
     }
 
-    // #[test]
-    // fn test_cclff_model_twist() {
-    //     let prior = UnivariateND::new([
-    //         Uniform1D::new((-1.0, 1.0)).unwrap(),
-    //         Uniform1D::new((0.5, 1.0)).unwrap(),
-    //         Uniform1D::new((0.05, 0.1)).unwrap(),
-    //         Uniform1D::new((0.1, 0.5)).unwrap(),
-    //         Constant1D::new(1125.0),
-    //         Uniform1D::new((5.0, 100.0)).unwrap(),
-    //         Uniform1D::new((-2.4, 2.4)).unwrap(),
-    //         Uniform1D::new((0.0, 1.0)).unwrap(),
-    //     ]);
+    #[test]
+    fn test_cclff_model_twist() {
+        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+            UniformDensity::new((-1.0, 1.0)).unwrap(),
+            UniformDensity::new((0.5, 1.0)).unwrap(),
+            UniformDensity::new((0.05, 0.1)).unwrap(),
+            UniformDensity::new((0.1, 0.5)).unwrap(),
+            ConstantDensity::new(1125.0),
+            UniformDensity::new((5.0, 100.0)).unwrap(),
+            UniformDensity::new((-2.4, 2.4)).unwrap(),
+            UniformDensity::new((0.0, 1.0)).unwrap(),
+        ]);
 
-    //     let model = CCLFFModel::new(prior);
+        let range = (&prior).get_range();
+        let model = CCLFFModel::new(prior);
 
-    //     let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator(
-    //         (0..2).map(|i| ScObs::new(0.0, ScObsConf::Distance(i as f64), None)),
-    //     );
+        let sc = ScObsSeries::<f64>::from_iterator(
+            (0..2).map(|i| ScObs::new(0.0, ScObsConf::Position([i as f64, 0.0, 0.0]))),
+        );
 
-    //     let mut ensbl = OcnusEnsbl {
-    //         params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-    //         fm_states: vec![(); 1],
-    //         cs_states: vec![XCState::<f64>::default(); 1],
-    //         weights: vec![1.0; 1],
-    //     };
+        let mut ensbl = OcnusEnsbl::new(1, range);
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-    //     let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+        ensbl.ptpdf.particles_mut().set_column(
+            0,
+            &SVector::<f64, 8>::from([
+                0_f64.to_radians(),
+                0_f64.to_radians(),
+                0.0,
+                1.56,
+                0.0,
+                600.0,
+                20.0,
+                2.4048255576957,
+            ]),
+        );
 
-    //     ensbl.params_array.set_column(
-    //         0,
-    //         &SVector::<f64, 8>::from([
-    //             0_f64.to_radians(),
-    //             0_f64.to_radians(),
-    //             0.0,
-    //             1.56,
-    //             0.0,
-    //             600.0,
-    //             20.0,
-    //             2.4048255576957,
-    //         ]),
-    //     );
+        model
+            .initialize_states_ensbl(&mut ensbl)
+            .expect("initialization failed");
 
-    //     model
-    //         .initialize_states_ensbl(&sc, &mut ensbl)
-    //         .expect("initialization failed");
-    //     model
-    //         .simulate_ensbl(
-    //             &sc,
-    //             &mut ensbl,
-    //             &mut output.as_view_mut(),
-    //             None::<&mut NullNoise<f64>>,
-    //         )
-    //         .expect("simulation failed");
+        model
+            .simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &CCLFFModel::<f64, MultivariateDensity<f64, Const<8>>>::observe_mag,
+                &mut output.as_view_mut(),
+                None::<&mut NullNoise<f64>>,
+            )
+            .expect("simulation failed");
 
-    //     assert!((output[(0, 0)][1] - 20.0).abs() < 1e-6);
-    //     assert!(output[(0, 0)][2].abs() < 1e-6);
+        assert!((output[(0, 0)][1] - 20.0).abs() < 1e-6);
+        assert!(output[(0, 0)][2].abs() < 1e-6);
 
-    //     assert!(output[(1, 0)][1].abs() < 1e-6);
-    //     assert!((output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0).abs() < 1e-6);
-    // }
+        assert!(output[(1, 0)][1].abs() < 1e-6);
+        assert!((output[(1, 0)][2] / bessel_jn(2.4048255576957, 1) - 20.0).abs() < 1e-6);
+    }
 
-    // #[test]
-    // fn test_ccut_model() {
-    //     let prior = UnivariateND::new([
-    //         Uniform1D::new((-1.0, 1.0)).unwrap(),
-    //         Uniform1D::new((0.5, 1.0)).unwrap(),
-    //         Uniform1D::new((0.05, 0.1)).unwrap(),
-    //         Uniform1D::new((0.1, 0.5)).unwrap(),
-    //         Uniform1D::new((0.0, 1.0)).unwrap(),
-    //         Constant1D::new(1125.0),
-    //         Uniform1D::new((5.0, 100.0)).unwrap(),
-    //         Uniform1D::new((-10.0, 10.0)).unwrap(),
-    //     ]);
+    #[test]
+    fn test_ccut_model() {
+        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+            UniformDensity::new((-1.0, 1.0)).unwrap(),
+            UniformDensity::new((0.5, 1.0)).unwrap(),
+            UniformDensity::new((0.05, 0.1)).unwrap(),
+            UniformDensity::new((0.1, 0.5)).unwrap(),
+            UniformDensity::new((0.0, 1.0)).unwrap(),
+            ConstantDensity::new(1125.0),
+            UniformDensity::new((5.0, 100.0)).unwrap(),
+            UniformDensity::new((-10.0, 10.0)).unwrap(),
+        ]);
 
-    //     let model = CCUTModel::new(prior);
+        let range = (&prior).get_range();
+        let model = CCUTModel::new(prior);
 
-    //     let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
-    //         ScObs::new(
-    //             224640.0 + i as f64 * 3600.0 * 2.0,
-    //             ScObsConf::Distance(1.0),
-    //             None,
-    //         )
-    //     }));
+        let sc = ScObsSeries::<f64>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f64 * 3600.0 * 2.0,
+                ScObsConf::Position([1.0, 0.0, 0.0]),
+            )
+        }));
 
-    //     let mut ensbl = OcnusEnsbl {
-    //         params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-    //         fm_states: vec![(); 1],
-    //         cs_states: vec![XCState::default(); 1],
-    //         weights: vec![1.0; 1],
-    //     };
+        let mut ensbl = OcnusEnsbl::new(1, range);
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-    //     let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+        ensbl.ptpdf.particles_mut().set_column(
+            0,
+            &SVector::<f64, 8>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
+                0.1,
+                0.25,
+                0.0,
+                600.0,
+                20.0,
+                1.0 / 0.25,
+            ]),
+        );
 
-    //     ensbl.params_array.set_column(
-    //         0,
-    //         &SVector::<f64, 8>::from([
-    //             5.0_f64.to_radians(),
-    //             -3.0_f64.to_radians(),
-    //             0.1,
-    //             0.25,
-    //             0.0,
-    //             600.0,
-    //             20.0,
-    //             1.0 / 0.25,
-    //         ]),
-    //     );
+        model
+            .initialize_states_ensbl(&mut ensbl)
+            .expect("initialization failed");
 
-    //     model
-    //         .initialize_states_ensbl(&sc, &mut ensbl)
-    //         .expect("initialization failed");
+        model
+            .simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &CCUTModel::<f64, MultivariateDensity<f64, Const<8>>>::observe_mag,
+                &mut output.as_view_mut(),
+                None::<&mut NullNoise<f64>>,
+            )
+            .expect("simulation failed");
 
-    //     model
-    //         .simulate_ensbl(
-    //             &sc,
-    //             &mut ensbl,
-    //             &mut output.as_view_mut(),
-    //             None::<&mut NullNoise<f64>>,
-    //         )
-    //         .expect("simulation failed");
+        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
+    }
 
-    //     assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-6);
-    //     assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-6);
-    //     assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-6);
-    //     assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
-    // }
+    #[test]
+    fn test_ccut_model_twist() {
+        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+            UniformDensity::new((-1.0, 1.0)).unwrap(),
+            UniformDensity::new((0.5, 1.0)).unwrap(),
+            UniformDensity::new((0.05, 0.1)).unwrap(),
+            UniformDensity::new((0.1, 0.5)).unwrap(),
+            ConstantDensity::new(1125.0),
+            UniformDensity::new((5.0, 100.0)).unwrap(),
+            UniformDensity::new((-2.4, 2.4)).unwrap(),
+            UniformDensity::new((0.0, 1.0)).unwrap(),
+        ]);
 
-    // #[test]
-    // fn test_ccut_model_twist() {
-    //     let prior = UnivariateND::new([
-    //         Uniform1D::new((-1.0, 1.0)).unwrap(),
-    //         Uniform1D::new((0.5, 1.0)).unwrap(),
-    //         Uniform1D::new((0.05, 0.1)).unwrap(),
-    //         Uniform1D::new((0.1, 0.5)).unwrap(),
-    //         Constant1D::new(1125.0),
-    //         Uniform1D::new((5.0, 100.0)).unwrap(),
-    //         Uniform1D::new((-2.4, 2.4)).unwrap(),
-    //         Uniform1D::new((0.0, 1.0)).unwrap(),
-    //     ]);
+        let range = (&prior).get_range();
+        let model = CCUTModel::new(prior);
 
-    //     let model = CCUTModel::new(prior);
+        let sc = ScObsSeries::<f64>::from_iterator(
+            (0..2).map(|i| ScObs::new(0.0, ScObsConf::Position([i as f64, 0.0, 0.0]))),
+        );
 
-    //     let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator(
-    //         (0..2).map(|i| ScObs::new(0.0, ScObsConf::Distance(i as f64), None)),
-    //     );
+        let mut ensbl = OcnusEnsbl::new(1, range);
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-    //     let mut ensbl = OcnusEnsbl {
-    //         params_array: Matrix::<f64, Const<8>, Dyn, VecStorage<f64, Const<8>, Dyn>>::zeros(1),
-    //         fm_states: vec![(); 1],
-    //         cs_states: vec![XCState::<f64>::default(); 1],
-    //         weights: vec![1.0; 1],
-    //     };
+        ensbl.ptpdf.particles_mut().set_column(
+            0,
+            &SVector::<f64, 8>::from([
+                0_f64.to_radians(),
+                0_f64.to_radians(),
+                0.0,
+                1.56,
+                0.0,
+                600.0,
+                20.0,
+                1.0,
+            ]),
+        );
 
-    //     let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+        model
+            .initialize_states_ensbl(&mut ensbl)
+            .expect("initialization failed");
 
-    //     ensbl.params_array.set_column(
-    //         0,
-    //         &SVector::<f64, 8>::from([
-    //             0_f64.to_radians(),
-    //             0_f64.to_radians(),
-    //             0.0,
-    //             1.56,
-    //             0.0,
-    //             600.0,
-    //             20.0,
-    //             1.0,
-    //         ]),
-    //     );
+        model
+            .simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &CCUTModel::<f64, MultivariateDensity<f64, Const<8>>>::observe_mag,
+                &mut output.as_view_mut(),
+                None::<&mut NullNoise<f64>>,
+            )
+            .expect("simulation failed");
 
-    //     model
-    //         .initialize_states_ensbl(&sc, &mut ensbl)
-    //         .expect("initialization failed");
-    //     model
-    //         .simulate_ensbl(
-    //             &sc,
-    //             &mut ensbl,
-    //             &mut output.as_view_mut(),
-    //             None::<&mut NullNoise<f64>>,
-    //         )
-    //         .expect("simulation failed");
+        assert!((output[(0, 0)][1] - 20.0).abs() < 1e-6);
+        assert!(output[(0, 0)][2].abs() < 1e-6);
 
-    //     assert!((output[(0, 0)][1] - 20.0).abs() < 1e-6);
-    //     assert!(output[(0, 0)][2].abs() < 1e-6);
+        assert!((output[(1, 0)][1] - 10.0).abs() < 1e-6);
+        assert!((output[(1, 0)][2] - 10.0).abs() < 1e-6);
+    }
 
-    //     assert!((output[(1, 0)][1] - 10.0).abs() < 1e-6);
-    //     assert!((output[(1, 0)][2] - 10.0).abs() < 1e-6);
-    // }
+    #[test]
+    fn test_ech_model() {
+        let prior = MultivariateDensity::<_, Const<12>>::new(&[
+            UniformDensity::new((-1.0, 1.0)).unwrap(),
+            UniformDensity::new((-1.0, 1.0)).unwrap(),
+            UniformDensity::new((-1.0, 1.0)).unwrap(),
+            UniformDensity::new((0.05, 0.1)).unwrap(),
+            UniformDensity::new((0.1, 1.0)).unwrap(),
+            UniformDensity::new((0.1, 0.5)).unwrap(),
+            UniformDensity::new((0.0, 1.0)).unwrap(),
+            ConstantDensity::new(1125.0),
+            UniformDensity::new((5.0, 100.0)).unwrap(),
+            UniformDensity::new((0.0, 1.0)).unwrap(),
+            UniformDensity::new((-10.0, 10.0)).unwrap(),
+            UniformDensity::new((-10.0, 10.0)).unwrap(),
+        ]);
 
-    // #[test]
-    // fn test_ech_model() {
-    //     let prior = UnivariateND::new([
-    //         Uniform1D::new((-1.0, 1.0)).unwrap(),
-    //         Uniform1D::new((-1.0, 1.0)).unwrap(),
-    //         Uniform1D::new((-1.0, 1.0)).unwrap(),
-    //         Uniform1D::new((0.05, 0.1)).unwrap(),
-    //         Uniform1D::new((0.1, 1.0)).unwrap(),
-    //         Uniform1D::new((0.1, 0.5)).unwrap(),
-    //         Uniform1D::new((0.0, 1.0)).unwrap(),
-    //         Constant1D::new(1125.0),
-    //         Uniform1D::new((5.0, 100.0)).unwrap(),
-    //         Uniform1D::new((0.0, 1.0)).unwrap(),
-    //         Uniform1D::new((-10.0, 10.0)).unwrap(),
-    //         Uniform1D::new((-10.0, 10.0)).unwrap(),
-    //     ]);
+        let range = (&prior).get_range();
+        let model = ECHModel::new(prior);
 
-    //     let model = ECHModel::new(prior);
+        let sc = ScObsSeries::<f64>::from_iterator((0..8).map(|i| {
+            ScObs::new(
+                224640.0 + i as f64 * 3600.0 * 2.0,
+                ScObsConf::Position([1.0, 0.0, 0.0]),
+            )
+        }));
 
-    //     let sc = ScObsSeries::<f64, ObserVec<f64, 3>>::from_iterator((0..8).map(|i| {
-    //         ScObs::new(
-    //             224640.0 + i as f64 * 3600.0 * 2.0,
-    //             ScObsConf::Distance(1.0),
-    //             None,
-    //         )
-    //     }));
+        let mut ensbl = OcnusEnsbl::new(1, range);
+        let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
 
-    //     let mut ensbl = OcnusEnsbl {
-    //         params_array: Matrix::<f64, Const<12>, Dyn, VecStorage<f64, Const<12>, Dyn>>::zeros(1),
-    //         fm_states: vec![(); 1],
-    //         cs_states: vec![XCState::default(); 1],
-    //         weights: vec![1.0; 1],
-    //     };
+        // UT
 
-    //     let mut output = DMatrix::<ObserVec<f64, 3>>::zeros(sc.len(), 1);
+        ensbl.ptpdf.particles_mut().set_column(
+            0,
+            &SVector::<f64, 12>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
+                0.0_f64.to_radians(),
+                0.1,
+                1.0,
+                0.25,
+                0.0,
+                600.0,
+                20.0,
+                0.0,
+                1.0 / 0.25,
+                1.0 / 0.25,
+            ]),
+        );
 
-    //     // UT
+        model
+            .initialize_states_ensbl(&mut ensbl)
+            .expect("initialization failed");
 
-    //     ensbl.params_array.set_column(
-    //         0,
-    //         &SVector::<f64, 12>::from([
-    //             5.0_f64.to_radians(),
-    //             -3.0_f64.to_radians(),
-    //             0.0_f64.to_radians(),
-    //             0.1,
-    //             1.0,
-    //             0.25,
-    //             0.0,
-    //             600.0,
-    //             20.0,
-    //             0.0,
-    //             1.0 / 0.25,
-    //             1.0 / 0.25,
-    //         ]),
-    //     );
+        model
+            .simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &ECHModel::<f64, MultivariateDensity<f64, Const<12>>>::observe_mag,
+                &mut output.as_view_mut(),
+                None::<&mut NullNoise<f64>>,
+            )
+            .expect("simulation failed");
 
-    //     model
-    //         .initialize_states_ensbl(&sc, &mut ensbl)
-    //         .expect("initialization failed");
+        assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
 
-    //     model
-    //         .simulate_ensbl(
-    //             &sc,
-    //             &mut ensbl,
-    //             &mut output.as_view_mut(),
-    //             None::<&mut NullNoise<f64>>,
-    //         )
-    //         .expect("simulation failed");
+        // LFF
 
-    //     assert!((output[(0, 0)][1] - 17.744316275).abs() < 1e-6);
-    //     assert!((output[(2, 0)][1] - 19.713773158).abs() < 1e-6);
-    //     assert!((output[(4, 0)][2] + 2.3477388063).abs() < 1e-6);
-    //     assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
+        ensbl.ptpdf.particles_mut().set_column(
+            0,
+            &SVector::<f64, 12>::from([
+                5.0_f64.to_radians(),
+                -3.0_f64.to_radians(),
+                0.0_f64.to_radians(),
+                0.1,
+                1.0,
+                0.25,
+                0.0,
+                600.0,
+                20.0,
+                1.0,
+                1.0 / 0.25,
+                1.0 / 0.25,
+            ]),
+        );
 
-    //     // LFF
+        model
+            .initialize_states_ensbl(&mut ensbl)
+            .expect("initialization failed");
 
-    //     ensbl.params_array.set_column(
-    //         0,
-    //         &SVector::<f64, 12>::from([
-    //             5.0_f64.to_radians(),
-    //             -3.0_f64.to_radians(),
-    //             0.0_f64.to_radians(),
-    //             0.1,
-    //             1.0,
-    //             0.25,
-    //             0.0,
-    //             600.0,
-    //             20.0,
-    //             1.0,
-    //             1.0 / 0.25,
-    //             1.0 / 0.25,
-    //         ]),
-    //     );
+        model
+            .simulate_ensbl(
+                &sc,
+                &mut ensbl,
+                &ECHModel::<f64, MultivariateDensity<f64, Const<12>>>::observe_mag,
+                &mut output.as_view_mut(),
+                None::<&mut NullNoise<f64>>,
+            )
+            .expect("simulation failed");
 
-    //     model
-    //         .initialize_states_ensbl(&sc, &mut ensbl)
-    //         .expect("initialization failed");
-
-    //     model
-    //         .simulate_ensbl(
-    //             &sc,
-    //             &mut ensbl,
-    //             &mut output.as_view_mut(),
-    //             None::<&mut NullNoise<f64>>,
-    //         )
-    //         .expect("simulation failed");
-
-    //     assert!((output[(0, 0)][1] - 19.562870351).abs() < 1e-6);
-    //     assert!((output[(2, 0)][1] - 20.085491851).abs() < 1e-6);
-    //     assert!((output[(4, 0)][2] + 1.7143621590).abs() < 1e-6);
-    //     assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
-    // }
+        assert!((output[(0, 0)][1] - 19.562870351).abs() < 1e-6);
+        assert!((output[(2, 0)][1] - 20.085491851).abs() < 1e-6);
+        assert!((output[(4, 0)][2] + 1.7143621590).abs() < 1e-6);
+        assert!((ensbl.cs_states[0].z - 0.025129674).abs() < 1e-6);
+    }
 }

@@ -341,12 +341,12 @@ where
         params: &VectorView<T, D, RStride, CStride>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
-        obs_func: OF,
+        obs_func: &OF,
         obs_array: &mut DMatrixViewMut<OT>,
     ) -> Result<(), OcnusModelError<T>>
     where
         OT: OcnusObser,
-        OF: Fn(&ScObs<T>, &VectorView<T, D, RStride, CStride>, &FMST, &CSST) -> OT,
+        OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>,
         RStride: Dim,
         CStride: Dim,
     {
@@ -371,7 +371,12 @@ where
             } else {
                 self.forward(time_step, params, fm_state, cs_state)?;
 
-                obs_row[(0, 0)] = obs_func(scobs, params, fm_state, cs_state);
+                obs_row[(0, 0)] = obs_func(
+                    scobs,
+                    &OVector::<T, D>::from_iterator(params.iter().cloned()),
+                    fm_state,
+                    cs_state,
+                )?;
             }
 
             Ok::<(), OcnusModelError<T>>(())
@@ -386,7 +391,7 @@ where
         &self,
         series: &ScObsSeries<T>,
         ensbl: &mut OcnusEnsbl<T, D, FMST, CSST>,
-        obs_func: OF,
+        obs_func: &OF,
         obs_array: &mut DMatrixViewMut<OT>,
         opt_noise: Option<&mut NM>,
     ) -> Result<(), OcnusModelError<T>>

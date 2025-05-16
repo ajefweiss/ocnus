@@ -3,7 +3,7 @@ use crate::obser::{OcnusNoise, OcnusObser};
 use covmatrix::CovMatrix;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use nalgebra::{Const, DVector, OVector, RealField, SVector};
+use nalgebra::{Const, DVector, DVectorView, OVector, RealField, SVector};
 use num_traits::Zero;
 use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
@@ -473,6 +473,55 @@ where
             }
         }
     }
+}
+
+/// Mean square error (MSE) for the [`ObserVec`] type.
+pub fn observec_mse<T, const N: usize>(
+    obser: &DVectorView<ObserVec<T, N>>,
+    other: &DVectorView<ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    obser
+        .into_iter()
+        .zip(other)
+        .map(|(out_vec, ref_vec)| out_vec.mean_square_error(ref_vec))
+        .sum::<T>()
+        / T::from_usize(other.len()).unwrap()
+}
+
+/// Mean square error (MSE) percentage for the [`ObserVec`] type.
+pub fn observec_msep<T, const N: usize>(
+    obser: &DVectorView<ObserVec<T, N>>,
+    other: &DVectorView<ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_mse(obser, other) / observec_mse(&DVector::zeros(other.len()).as_view(), other)
+}
+
+/// Root mean square error (RMSE) for the [`ObserVec`] type.
+pub fn observec_rmse<T, const N: usize>(
+    obser: &DVectorView<ObserVec<T, N>>,
+    other: &DVectorView<ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_mse(obser, other).sqrt()
+}
+
+/// Root mean square error (RMSE) percentage for the [`ObserVec`] type.
+pub fn observec_rmsep<T, const N: usize>(
+    obser: &DVectorView<ObserVec<T, N>>,
+    other: &DVectorView<ObserVec<T, N>>,
+) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_rmse(obser, other).sqrt()
 }
 
 #[cfg(test)]

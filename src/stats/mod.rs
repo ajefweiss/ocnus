@@ -1,4 +1,4 @@
-//! # The statistics sub-module for the **ocnus** framework.
+//! # Statistics sub-module for the **ocnus** framework.
 //!
 //! This module introduces the [`Density`] trait, which is the trait that is shared by all joint or univariate probability density functions.
 //! The three main implemented probability density functions are:
