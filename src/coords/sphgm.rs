@@ -1,4 +1,4 @@
-use crate::coords::OcnusCoords;
+use crate::coords::{OcnusCoords, param_value};
 use nalgebra::{ArrayStorage, Const, Dim, OVector, RealField, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
@@ -108,10 +108,10 @@ where
         RStride: Dim,
         CStride: Dim,
     {
-        let x0 = Self::param_value("center_x0", params).unwrap();
-        let y0 = Self::param_value("center_y0", params).unwrap();
-        let z0 = Self::param_value("center_z0", params).unwrap();
-        let radius = Self::param_value("radius_0", params).unwrap();
+        let x0 = param_value("center_x0", &Self::PARAMS, params).unwrap();
+        let y0 = param_value("center_y0", &Self::PARAMS, params).unwrap();
+        let z0 = param_value("center_z0", &Self::PARAMS, params).unwrap();
+        let radius = param_value("radius_0", &Self::PARAMS, params).unwrap();
 
         assert!(radius > T::zero(), "sphere radius must be positive");
 

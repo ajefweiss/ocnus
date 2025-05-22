@@ -1,118 +1,23 @@
-//! Particle filtering methods.
-
-mod abc;
-mod sir;
-
 use crate::{
     base::{OcnusEnsbl, OcnusModel, OcnusModelError, ScObs, ScObsSeries},
-    obser::{NullNoise, OcnusObser},
-    stats::{Density, DensityRange, MultivariateDensity, UnivariateDensity},
+    methods::filters::{ParticleFilter, ParticleFilterError},
+    obser::{NullNoise, OcnusNoise, OcnusObser},
+    stats::{Density, DensityRange, ParticleDensity, UnivariateDensity},
 };
-use derive_builder::Builder;
 use itertools::Itertools;
 use log::{debug, info};
 use nalgebra::{
     DMatrix, DVectorView, DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn,
-    OMatrix, OVector, RealField, Scalar, U1, allocator::Allocator,
+    OVector, RealField, Scalar, U1, allocator::Allocator,
 };
 use num_traits::{AsPrimitive, Zero};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::{
-    io::Write,
     iter::Sum,
     ops::{AddAssign, Mul, Sub},
     time::Instant,
 };
-use thiserror::Error;
-
-/// Errors associated with particle filters methods.
-#[allow(missing_docs)]
-#[derive(Debug, Error)]
-pub enum ParticleFilterError<T> {
-    #[error("model error")]
-    Model(#[from] OcnusModelError<T>),
-    #[error("nothing was done")]
-    Nothing,
-    #[error("simulations exceeded time limit {elapsed:.1} / {limit:.1} sec")]
-    TimeLimitExceeded { elapsed: f64, limit: f64 },
-}
-
-/// A particle filter data structure.
-#[derive(Builder, Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(bound(serialize = "
-    T: Serialize, 
-    OVector<T, D>: Serialize, 
-    OVector<DensityRange<T>, D>: Serialize, 
-    OMatrix<T, D, D>: Serialize, 
-    OMatrix<T, D, Dyn>: Serialize,
-    FMST: Serialize,
-    CSST: Serialize,
-    OT: Serialize"))]
-#[serde(bound(deserialize = "
-    T: Deserialize<'de>, 
-    OVector<T, D>: Deserialize<'de>, 
-    OVector<DensityRange<T>, D>: Deserialize<'de>, 
-    OMatrix<T, D, D>: Deserialize<'de> , 
-    OMatrix<T, D, Dyn>: Deserialize<'de>,
-    FMST: Deserialize<'de>,
-    CSST: Deserialize<'de>,
-    OT: Deserialize<'de>"))]
-pub struct ParticleFilter<T, D, FMST, CSST, OT>
-where
-    T: Copy + RealField,
-    D: DimName + DimMin<D>,
-    FMST: Clone,
-    CSST: Clone,
-    OT: OcnusObser + Scalar,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
-{
-    /// The model ensemble.
-    #[builder(default = None)]
-    pub ensbl: Option<OcnusEnsbl<T, D, FMST, CSST>>,
-
-    /// The model ensemble output array.
-    #[builder(default = None)]
-    pub ensbl_output: Option<DMatrix<OT>>,
-
-    /// The model ensemble output errors.
-    #[builder(default = None)]
-    pub ensbl_errors: Option<Vec<T>>,
-
-    /// Multiplier for the transition kernel (covariance matrix), a higher value leads to a better
-    /// exploration of the parameter  space but slower convergence. The "optimal" value is 2.0
-    /// (see Filippi et al. 2013).
-    #[builder(default = T::from_usize(2).unwrap())]
-    pub expl_factor: T,
-
-    /// Iteration counter,
-    #[builder(default = 0, setter(skip))]
-    pub iter: usize,
-
-    /// Random seed (initial & running).
-    #[builder(default = 42)]
-    pub rseed: u64,
-
-    /// Maximum simulation time limit (in seconds).
-    #[builder(default = 5.0)]
-    pub sim_time_limit: f64,
-
-    /// Total simulation runs counter,
-    #[builder(default = 0, setter(skip))]
-    pub truns: usize,
-}
 
 impl<T, D, FMST, CSST, OT> ParticleFilter<T, D, FMST, CSST, OT>
 where
@@ -146,23 +51,25 @@ where
     <DefaultAllocator as Allocator<D>>::Buffer<DensityRange<T>>: Sync,
     usize: AsPrimitive<T>,
 {
-    /// Initialize the ensemble data using a error metric function `EF` and a threshold value.
-    pub fn pf_initialize_ensbl<M, EF, OF>(
+    /// A single iteration of an approximate Bayesian Computation particle filter algorithm.
+    pub fn pf_abc_iter<M, NM, EF, OF>(
         &mut self,
-        model: &M,
+        models: (&M, &mut NM),
         series: &ScObsSeries<T>,
         ensemble_sizes: (usize, usize),
         obs_func: &OF,
         err_func: (&EF, T),
-    ) -> Result<(), ParticleFilterError<T>>
+    ) -> Result<(T, T), ParticleFilterError<T>>
     where
         M: OcnusModel<T, D, FMST, CSST>,
-        EF: Fn(&DVectorView<OT>) -> T + Send + Sync,
+        NM: OcnusNoise<T, OT> + Sync,
+        EF: Fn(&DVectorView<OT>) -> T + Sync,
         OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
         <DefaultAllocator as Allocator<D>>::Buffer<UnivariateDensity<T>>: Sync,
     {
         let start = Instant::now();
 
+        let (model, noise) = models;
         let (ensemble_size, sim_ensemble_size) = ensemble_sizes;
 
         let mut counter = 0;
@@ -181,11 +88,14 @@ where
         let mut temp_ensbl = OcnusEnsbl::new(sim_ensemble_size, model.model_prior().get_range());
         let mut temp_output = DMatrix::<OT>::zeros(series.len(), sim_ensemble_size);
 
+        // Copy the density and increase the size of the multivariate normal density estimate.
+        let mut density_old = target_ensbl.ptpdf.clone() * self.expl_factor;
+
         while counter != target_ensbl.len() {
-            model.initialize_ensbl::<100, MultivariateDensity<T, D>>(
+            model.initialize_ensbl::<100, ParticleDensity<T, D>>(
                 &mut temp_ensbl,
-                None,
-                self.rseed + 17 * iteration as u64,
+                Some(&density_old),
+                1 + self.rseed + 23 * iteration as u64,
             )?;
 
             model.simulate_ensbl(
@@ -193,7 +103,7 @@ where
                 &mut temp_ensbl,
                 obs_func,
                 &mut temp_output.as_view_mut(),
-                None::<&mut NullNoise<T>>,
+                Some(noise),
             )?;
 
             let mut flags = vec![true; sim_ensemble_size];
@@ -249,7 +159,7 @@ where
 
             if start.elapsed().as_millis() as f64 / 1e3 > self.sim_time_limit {
                 info!(
-                    "pf_initialize aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
+                    "pf_abc_iter aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
                     (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
                     start.elapsed().as_millis() as f64 / 1e3,
                     counter,
@@ -279,13 +189,37 @@ where
             let eps_2 = filter_values_sorted[(ensemble_size as f64 * 0.50) as usize];
             let eps_3 = filter_values_sorted[(ensemble_size as f64 * 0.68) as usize];
 
+            // Reset the multivariate normal density estimate of the old density.
+            density_old *= T::one() / self.expl_factor;
+
+            target_ensbl
+                .ptpdf
+                .from_transition(&density_old, Some(&model.model_prior()));
+
+            // Compute the effective sample size.
+            let ess = T::one()
+                / target_ensbl
+                    .ptpdf
+                    .weights()
+                    .iter()
+                    .map(|value| value.powi(2))
+                    .sum::<T>();
+
+            let kld = target_ensbl
+                .ptpdf
+                .kullback_leibler_divergence(&density_old)
+                .expect("failed to compute the kl div");
+
             info!(
-                "pf_initialize_data\n\tKL delta: n/a | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
+                "pf_abc_iter\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
+                kld,
                 eps_1,
                 eps_2,
                 eps_3,
                 T::from_f64((iteration * sim_ensemble_size * series.len()) as f64 / 1e6).unwrap(),
                 T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+                ess,
+                ensemble_size,
             );
 
             self.rseed += 1;
@@ -304,10 +238,13 @@ where
             self.ensbl_output = Some(target_output);
             self.ensbl_errors = Some(target_filter_values);
 
-            Ok(())
+            self.iter += 1;
+            self.truns += iteration * sim_ensemble_size;
+
+            Ok((ess, kld))
         } else {
             info!(
-                "pf_initialize_data\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
+                "pf_abc_iter\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
                 0.0,
                 T::from_f64((iteration * sim_ensemble_size * series.len()) as f64 / 1e6).unwrap(),
                 T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
@@ -318,19 +255,7 @@ where
             self.ensbl = Some(target_ensbl);
             self.ensbl_output = Some(target_output);
 
-            Ok(())
+            Err(ParticleFilterError::Nothing)
         }
-    }
-
-    /// Serialize result to a JSON file.
-    pub fn save(&self, path: String) -> std::io::Result<()>
-    where
-        Self: Serialize,
-    {
-        let mut file = std::fs::File::create(path)?;
-
-        file.write_all(serde_json5::to_string(&self).unwrap().as_bytes())?;
-
-        Ok(())
     }
 }

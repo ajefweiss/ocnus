@@ -1,4 +1,4 @@
-use crate::coords::{OcnusCoords, quaternion_rot};
+use crate::coords::{OcnusCoords, param_value, quaternion_rot};
 use nalgebra::{
     ArrayStorage, Const, Dim, OVector, RealField, UnitQuaternion, Vector3, VectorView, VectorView3,
 };
@@ -61,7 +61,7 @@ where
     {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
-        let delta = Self::param_value("delta", params).unwrap();
+        let delta = param_value("delta", &Self::PARAMS, params).unwrap();
 
         let quaternion = cs_state.q;
 
@@ -125,7 +125,7 @@ where
     {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
-        let delta = Self::param_value("delta", params).unwrap();
+        let delta = param_value("delta", &Self::PARAMS, params).unwrap();
 
         let mu = ics[0];
         let nu = ics[1];
@@ -163,12 +163,12 @@ where
         CStride: Dim,
     {
         // Extract parameters using their identifiers.
-        let distance_0 =
-            Self::param_value("distance_0", params).unwrap() * T::from_usize(695510).unwrap();
-        let diameter_1au = Self::param_value("diameter_1au", params).unwrap();
-        let longitude = Self::param_value("longitude", params).unwrap();
-        let latitude = Self::param_value("latitude", params).unwrap();
-        let inclination = Self::param_value("inclination", params).unwrap();
+        let distance_0 = param_value("distance_0", &Self::PARAMS, params).unwrap()
+            * T::from_usize(695510).unwrap();
+        let diameter_1au = param_value("diameter_1au", &Self::PARAMS, params).unwrap();
+        let longitude = param_value("longitude", &Self::PARAMS, params).unwrap();
+        let latitude = param_value("latitude", &Self::PARAMS, params).unwrap();
+        let inclination = param_value("inclination", &Self::PARAMS, params).unwrap();
 
         let rt = distance_0 / T::from_f64(1.496e8).unwrap();
 
@@ -193,7 +193,7 @@ where
     {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
-        let delta = Self::param_value("delta", params).unwrap();
+        let delta = param_value("delta", &Self::PARAMS, params).unwrap();
 
         let quaternion = cs_state.q;
 
@@ -232,7 +232,7 @@ where
         let minor_radius = cs_state.minor_radius;
         let quaternion = cs_state.q;
 
-        let delta = Self::param_value("delta", params).unwrap();
+        let delta = param_value("delta", &Self::PARAMS, params).unwrap();
 
         let ecs_norot = quaternion.conjugate().transform_vector(&ecs.clone_owned());
 

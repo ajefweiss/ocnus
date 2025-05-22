@@ -285,10 +285,10 @@ where
     /// Resample the model parameters, and re-initialize the coOFordinate system and forward model states for an ensemble.
     fn resample_ensbl(
         &self,
-        size: usize,
+        ensbl: &mut OcnusEnsbl<T, D, FMST, CSST>,
         ptpdf: &ParticleDensity<T, D>,
         rseed: u64,
-    ) -> Result<OcnusEnsbl<T, D, FMST, CSST>, OcnusModelError<T>>
+    ) -> Result<(), OcnusModelError<T>>
     where
         T: for<'x> Mul<&'x T, Output = T>
             + for<'x> Sub<&'x T, Output = T>
@@ -297,8 +297,6 @@ where
         for<'x> &'x T: Mul<&'x T, Output = T>,
     {
         let start = Instant::now();
-
-        let mut ensbl = OcnusEnsbl::new(size, ptpdf.get_range());
 
         ensbl
             .ptpdf
@@ -326,11 +324,11 @@ where
 
         debug!(
             "fevm_resample: {:2.2}M evaluations in {:.2} sec",
-            size as f64 / 1e6,
+            ensbl.len() as f64 / 1e6,
             start.elapsed().as_millis() as f64 / 1e3
         );
 
-        Ok(ensbl)
+        Ok(())
     }
 
     /// Perform a forward simulation and generate synthetic observables `OT` for the
@@ -396,7 +394,7 @@ where
         opt_noise: Option<&mut NM>,
     ) -> Result<(), OcnusModelError<T>>
     where
-        OT: AddAssign + Scalar + OcnusObser,
+        OT: AddAssign + OcnusObser + Scalar,
         OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
         NM: OcnusNoise<T, OT> + Sync,
     {

@@ -2,8 +2,7 @@ use crate::stats::{Density, DensityRange};
 use derive_more::{Deref, DerefMut, IntoIterator};
 use log::error;
 use nalgebra::{
-    DefaultAllocator, Dim, DimName, OVector, RealField, Scalar, U1, VectorView,
-    allocator::Allocator,
+    DefaultAllocator, Dim, DimName, OVector, RealField, U1, VectorView, allocator::Allocator,
 };
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal, Uniform, uniform::SampleUniform};
@@ -32,13 +31,13 @@ pub struct MultivariateDensity<T, D>(
     #[into_iterator(owned, ref, ref_mut)] OVector<UnivariateDensity<T>, D>,
 )
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
     D: DimName,
     DefaultAllocator: Allocator<D>;
 
 impl<T, D> MultivariateDensity<T, D>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
     D: DimName,
     DefaultAllocator: Allocator<D>,
 {
@@ -47,15 +46,15 @@ where
     where
         I: IntoIterator<Item = &'a UnivariateDensity<T>>,
     {
-        Self(OVector::<UnivariateDensity<T>, D>::from_iterator(
-            uvpdfs.into_iter().cloned(),
-        ))
+        let vector = OVector::<UnivariateDensity<T>, D>::from_iterator(uvpdfs.into_iter().cloned());
+
+        Self(vector)
     }
 }
 
 impl<T, D> Density<T, D> for &MultivariateDensity<T, D>
 where
-    T: Copy + RealField + SampleUniform + Scalar,
+    T: Copy + RealField + SampleUniform + RealField,
     D: DimName,
     DefaultAllocator: Allocator<D>,
     StandardNormal: Distribution<T>,
@@ -116,7 +115,7 @@ where
 #[serde(tag = "type", content = "content")]
 pub enum UnivariateDensity<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
 {
     Constant(ConstantDensity<T>),
     Cosine(CosineDensity<T>),
@@ -127,7 +126,7 @@ where
 
 impl<T> Density<T, U1> for &UnivariateDensity<T>
 where
-    T: Copy + RealField + SampleUniform + Scalar,
+    T: Copy + RealField + SampleUniform + RealField,
     StandardNormal: Distribution<T>,
 {
     fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<OVector<T, U1>> {
@@ -175,14 +174,14 @@ where
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConstantDensity<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
 {
     range: OVector<DensityRange<T>, U1>,
 }
 
 impl<T> ConstantDensity<T>
 where
-    T: Copy + PartialOrd + Scalar,
+    T: Copy + PartialOrd + RealField,
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
@@ -195,7 +194,7 @@ where
 
 impl<T> Density<T, U1> for &ConstantDensity<T>
 where
-    T: Copy + RealField + Scalar,
+    T: Copy + RealField + RealField,
 {
     fn draw_sample<const A: usize>(&self, _rng: &mut impl Rng) -> Option<OVector<T, U1>> {
         Some(OVector::from([self.range[0].min()]))
@@ -226,14 +225,14 @@ where
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CosineDensity<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
 {
     range: OVector<DensityRange<T>, U1>,
 }
 
 impl<T> CosineDensity<T>
 where
-    T: Copy + RealField + Scalar,
+    T: Copy + RealField + RealField,
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
@@ -292,7 +291,7 @@ where
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NormalDensity<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
 {
     mean: T,
     range: OVector<DensityRange<T>, U1>,
@@ -301,7 +300,7 @@ where
 
 impl<T> NormalDensity<T>
 where
-    T: Copy + PartialOrd + Scalar,
+    T: Copy + PartialOrd + RealField,
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
@@ -379,7 +378,7 @@ where
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ReciprocalDensity<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
 {
     range: OVector<DensityRange<T>, U1>,
 }
@@ -445,7 +444,7 @@ where
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct UniformDensity<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField,
 {
     range: OVector<DensityRange<T>, U1>,
 }

@@ -11,7 +11,7 @@ where
         Some(ord) => match ord {
             Ordering::Equal => T::from_usize(matches!(k, 0) as usize).unwrap(),
             _ => {
-                let sum = (1..11).try_fold(
+                let sum = (1..13).try_fold(
                     (x / (T::one() * T::from_usize(2).unwrap())).powi(k as i32),
                     |acc, idx| {
                         let next = T::from_i32(i32::pow(-1, idx as u32)).unwrap()
@@ -50,13 +50,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::ulps_eq;
 
     #[test]
     fn test_bessel() {
-        assert!((bessel_jn(0.0f32, 0) - 1.0).abs() < 1e-6);
-        assert!((bessel_jn(0.0f32, 1)).abs() < 1e-6);
-        assert!((bessel_jn(2.404826f32, 0)).abs() < 1e-6);
-        assert!((bessel_jn(5.520071f32, 0)).abs() < 1e-6);
-        assert!((bessel_jn(3.831705f32, 1)).abs() < 1e-6);
+        assert!(ulps_eq!(bessel_jn(0.0f32, 0), 1.0));
+        assert!(ulps_eq!(bessel_jn(0.0f32, 1), 0.0));
+        assert!(ulps_eq!(bessel_jn(2.4048254f32, 0), 0.0));
+        assert!(ulps_eq!(
+            bessel_jn(5.520075f32, 0),
+            0.0,
+            max_ulps = 6,
+            epsilon = 8.0 * f32::EPSILON
+        ));
+        assert!(ulps_eq!(bessel_jn(3.8317059f32, 1), 0.0));
     }
 }

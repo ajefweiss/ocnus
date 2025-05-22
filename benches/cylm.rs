@@ -3,7 +3,7 @@ use nalgebra::{Const, DMatrix};
 use ocnus::{
     base::{OcnusEnsbl, OcnusModel, ScObs, ScObsConf, ScObsSeries},
     models::CCLFFModel,
-    obser::{NullNoise, ObserVec},
+    obser::{MeasureInSituMagneticFields, NullNoise, ObserVec},
     stats::{ConstantDensity, Density, MultivariateDensity, UniformDensity},
 };
 use std::{hint::black_box, time::Duration};
@@ -31,10 +31,10 @@ fn benchmark_lff_f32(c: &mut Criterion) {
         ObserVec::from([-3.13531505, -13.98423491, -6.64658269]),
         ObserVec::from([-5.34451816, -14.85328723, -1.73480069]),
         ObserVec::from([-3.38360946, -15.34720671, -1.71139834]),
-        ObserVec::from([-4.00239361, -14.94369, 1.2604304]),
+        ObserVec::from([-4.00239361, -14.94369000, 1.26043040]),
         ObserVec::from([-4.21540068, -13.93568105, 4.73878965]),
-        ObserVec::from([-2.7273795, -14.29364075, 4.8267508]),
-        ObserVec::from([-5.41469694, -13.9772912, 4.14112123]),
+        ObserVec::from([-2.72737950, -14.29364075, 4.82675080]),
+        ObserVec::from([-5.41469694, -13.97729120, 4.14112123]),
         ObserVec::from([-4.28371012, -13.89409455, 5.13879915]),
         ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
     ];
@@ -85,7 +85,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 .simulate_ensbl(
                     &sc,
                     &mut data,
-                    &CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag,
+                    &CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag3,
                     &mut output.as_view_mut(),
                     None::<&mut NullNoise<f32>>,
                 )

@@ -1,7 +1,7 @@
 use crate::stats::{DensityRange, ParticleDensity};
 use nalgebra::{
     DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn, OMatrix, OVector,
-    RealField, Scalar, U1, allocator::Allocator,
+    RealField, U1, allocator::Allocator,
 };
 use num_traits::AsPrimitive;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
@@ -76,11 +76,6 @@ where
         + Allocator<D, Dyn>,
     StandardNormal: Distribution<T>,
 {
-    /// Return a reference to the underlying [`ParticleDensity`].
-    pub fn as_density(&self) -> &ParticleDensity<T, D> {
-        &self.ptpdf
-    }
-
     /// Return a mutable reference to the underlying [`ParticleDensity`].
     pub fn as_density_mut(&mut self) -> &mut ParticleDensity<T, D> {
         &mut self.ptpdf
@@ -102,7 +97,6 @@ where
         T: Copy
             + for<'x> Mul<&'x T, Output = T>
             + RealField
-            + Scalar
             + for<'x> Sub<&'x T, Output = T>
             + Sum
             + for<'x> Sum<&'x T>,

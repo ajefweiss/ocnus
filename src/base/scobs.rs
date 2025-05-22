@@ -1,7 +1,7 @@
 use derive_more::IntoIterator;
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{RealField, Vector3};
+use nalgebra::{DVector, RealField, Scalar, Vector3};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{Ordering, max},
@@ -144,20 +144,21 @@ where
     /// Sorts a set of ordered data according to the order of observations.
     ///
     /// Note that this function clones the underlying observables (potentially slow).
-    pub fn sort_data_by_timestamp<OT>(&self, data: &[&[OT]]) -> Vec<OT>
+    pub fn sort_data_by_timestamp<OT>(&self, data: &[&[OT]]) -> DVector<OT>
     where
-        OT: Clone,
+        OT: Clone + Scalar,
     {
         let mut counters = vec![0; self.count_series()];
         let mut vector = Vec::with_capacity(self.len());
 
         for idx in &self.sorti {
-            vector.push(data[*idx][counters[*idx]].clone());
+            let d = data[*idx][counters[*idx]].clone();
+            vector.push(d);
 
             counters[*idx] += 1;
         }
 
-        vector
+        DVector::from_iterator(vector.len(), vector.iter().cloned())
     }
 
     /// The reciprocal of [`ScObsSeries::sort_by_timestamp`].
@@ -184,6 +185,20 @@ where
                 }
             })
             .collect()
+    }
+}
+
+impl<T> Add<ScObs<T>> for ScObsSeries<T> {
+    type Output = Self;
+
+    fn add(self, rhs: ScObs<T>) -> Self::Output {
+        let mut scobs = self.scobs;
+        let mut sorti = self.sorti;
+
+        scobs.push(rhs);
+        sorti.push(*sorti.last().unwrap_or(&0));
+
+        Self { scobs, sorti }
     }
 }
 
@@ -215,6 +230,13 @@ impl<T> Add for ScObsSeries<T> {
         );
 
         Self { scobs, sorti }
+    }
+}
+
+impl<T> AddAssign<ScObs<T>> for ScObsSeries<T> {
+    fn add_assign(&mut self, rhs: ScObs<T>) {
+        self.scobs.push(rhs);
+        self.sorti.push(*self.sorti.last().unwrap_or(&0));
     }
 }
 

@@ -358,7 +358,7 @@ where
 
 impl<T, D> AddAssign<&OVector<T, D>> for MultivariateNormalDensity<T, D>
 where
-    T: Copy + RealField + Scalar,
+    T: Copy + RealField,
     D: DimName,
     DefaultAllocator: Allocator<D> + Allocator<U1, D> + Allocator<D, D>,
 {
@@ -528,6 +528,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!((mvpdf_1.kullback_leibler_divergence(&mvpdf_2).unwrap() - 0.20391017).abs() < 1e-6);
+        assert!(ulps_eq!(
+            mvpdf_1.kullback_leibler_divergence(&mvpdf_2).unwrap(),
+            0.20391017
+        ));
     }
 }

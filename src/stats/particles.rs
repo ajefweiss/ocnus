@@ -2,7 +2,7 @@ use crate::stats::{Density, DensityRange, MultivariateNormalDensity};
 use covmatrix::CovMatrix;
 use nalgebra::{
     DefaultAllocator, Dim, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn, OMatrix, OVector,
-    RealField, Scalar, U1, VectorView, allocator::Allocator,
+    RealField, U1, VectorView, allocator::Allocator,
 };
 use num_traits::AsPrimitive;
 use rand::Rng;
@@ -10,7 +10,7 @@ use rand_distr::{Distribution, StandardNormal, Uniform, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
 use std::{
     iter::Sum,
-    ops::{Mul, Sub},
+    ops::{Mul, MulAssign, Sub},
 };
 
 /// A probability density function defined by an ensemble of particles.
@@ -29,7 +29,7 @@ use std::{
     OMatrix<T, D, Dyn>: Deserialize<'de>"))]
 pub struct ParticleDensity<T, D>
 where
-    T: Copy + RealField + Scalar,
+    T: Copy + RealField,
     D: DimName + DimMin<D>,
     DimMinimum<D, D>: DimSub<U1>,
     DefaultAllocator: Allocator<D>
@@ -62,7 +62,7 @@ where
 
 impl<T, D> ParticleDensity<T, D>
 where
-    T: Copy + RealField + SampleUniform + Scalar,
+    T: Copy + RealField + SampleUniform,
     D: DimName + DimMin<D>,
     DimMinimum<D, D>: DimSub<U1>,
     DefaultAllocator: Allocator<D>
@@ -140,13 +140,9 @@ where
         })
     }
 
-    /// Create a [`ParticleDensity`] from an ensemble of particles assuming a transition
+    /// Update `self` assuming a transition
     /// from another [`ParticleDensity`] with optional prior.
-    pub fn from_vectors_with_transition<F>(
-        vectors: OMatrix<T, D, Dyn>,
-        other: &Self,
-        opt_prior: Option<&F>,
-    ) -> Option<Self>
+    pub fn from_transition<F>(&mut self, other: &Self, opt_prior: Option<&F>)
     where
         T: for<'x> Mul<&'x T, Output = T>
             + SampleUniform
@@ -162,8 +158,8 @@ where
         let covmat_inv = other.mvpdf.pseudo_inverse();
 
         let mut weights = OVector::<T, Dyn>::from_iterator(
-            vectors.ncols(),
-            vectors.column_iter().map(|params_new| {
+            self.particles.ncols(),
+            self.particles.column_iter().map(|params_new| {
                 let value = other
                     .particles
                     .column_iter()
@@ -189,12 +185,31 @@ where
             .iter_mut()
             .for_each(|weight| *weight /= weights_total);
 
-        Self::from_vectors(vectors, other.get_range(), Some(weights))
+        let mvpdf = MultivariateNormalDensity::from_vectors::<_, _>(
+            &self.particles.as_view(),
+            self.range.clone(),
+            Some(weights.as_slice()),
+        )
+        .unwrap();
+
+        self.mvpdf = mvpdf;
+        self.weights = weights;
+
+        if self.kde.is_some() {
+            self.set_kde_covmatrix();
+        }
     }
 
     /// Returns true if the density contains no particles.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+    /// Estimate the Kullback-Leibler divergence between two [`ParticleDensity`] using the multivariate normal estimates.
+    pub fn kullback_leibler_divergence(&self, other: &ParticleDensity<T, D>) -> Option<T>
+    where
+        T: Sum + for<'x> Sum<&'x T>,
+    {
+        self.mvpdf.kullback_leibler_divergence(&other.mvpdf)
     }
 
     /// Returns the number of particles, also referred to as its 'length'.
@@ -254,11 +269,16 @@ where
     pub fn weights(&self) -> &OVector<T, Dyn> {
         &self.weights
     }
+
+    /// Returns a mutable reference to the particle weights.
+    pub fn weights_mut(&mut self) -> &mut OVector<T, Dyn> {
+        &mut self.weights
+    }
 }
 
 impl<T, D> Density<T, D> for &ParticleDensity<T, D>
 where
-    T: Copy + RealField + SampleUniform + Scalar + Sum,
+    T: Copy + RealField + SampleUniform + Sum,
     D: DimName + DimMin<D>,
     DimMinimum<D, D>: DimSub<U1>,
     DefaultAllocator: Allocator<D>
@@ -335,6 +355,58 @@ where
                     .exp()
             })
             .sum::<T>()
+    }
+}
+
+impl<T, D> Mul<T> for ParticleDensity<T, D>
+where
+    T: Copy + RealField + SampleUniform,
+    D: DimName + DimMin<D>,
+    DimMinimum<D, D>: DimSub<U1>,
+    DefaultAllocator: Allocator<D>
+        + Allocator<U1, D>
+        + Allocator<D, D>
+        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
+        + Allocator<DimMinimum<D, D>, D>
+        + Allocator<D, DimMinimum<D, D>>
+        + Allocator<DimMinimum<D, D>>
+        + Allocator<DimMinimum<D, D>>
+        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
+        + Allocator<D, Dyn>,
+    StandardNormal: Distribution<T>,
+{
+    type Output = ParticleDensity<T, D>;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Self {
+            kde: self.kde,
+            mvpdf: self.mvpdf * rhs,
+            particles: self.particles,
+            range: self.range,
+            weights: self.weights,
+        }
+    }
+}
+
+impl<T, D> MulAssign<T> for ParticleDensity<T, D>
+where
+    T: Copy + RealField + SampleUniform,
+    D: DimName + DimMin<D>,
+    DimMinimum<D, D>: DimSub<U1>,
+    DefaultAllocator: Allocator<D>
+        + Allocator<U1, D>
+        + Allocator<D, D>
+        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
+        + Allocator<DimMinimum<D, D>, D>
+        + Allocator<D, DimMinimum<D, D>>
+        + Allocator<DimMinimum<D, D>>
+        + Allocator<DimMinimum<D, D>>
+        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
+        + Allocator<D, Dyn>,
+    StandardNormal: Distribution<T>,
+{
+    fn mul_assign(&mut self, rhs: T) {
+        self.mvpdf *= rhs;
     }
 }
 

@@ -9,7 +9,7 @@ use std::{marker::PhantomData, ops::AddAssign};
 /// A trait that is shared by all observation noise models.
 pub trait OcnusNoise<T, O>
 where
-    O: AddAssign + OcnusObser + Scalar,
+    O: AddAssign + OcnusObser,
 {
     /// Generate a random noise time-series.
     fn generate_noise(&self, series: &ScObsSeries<T>, rng: &mut impl Rng) -> DVector<O>;

@@ -28,8 +28,8 @@ pub use ttgm::{TTGeometry, TTState};
 pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
 use nalgebra::{
-    DefaultAllocator, Dim, DimName, OVector, RealField, SVector, Scalar, ToTypenum, U3, Unit,
-    UnitQuaternion, Vector3, VectorView, VectorView3, allocator::Allocator,
+    DefaultAllocator, Dim, DimName, OVector, RealField, SVector, Unit, UnitQuaternion, Vector3,
+    VectorView, VectorView3, allocator::Allocator,
 };
 
 /// A trait that is shared by all coordinate systems describing a model geometry.
@@ -152,28 +152,6 @@ where
         RStride: Dim,
         CStride: Dim;
 
-    /// Retrieve a model parameter index by name.
-    fn param_index(name: &str) -> Option<usize>
-    where
-        DefaultAllocator: Allocator<D>,
-    {
-        Self::PARAMS.iter().position(|param| *param == name)
-    }
-
-    /// Retrieve a model parameter value by name.
-    fn param_value<RStride, CStride>(
-        name: &str,
-        params: &VectorView<T, D, RStride, CStride>,
-    ) -> Option<T>
-    where
-        T: Clone,
-        RStride: Dim,
-        CStride: Dim,
-        DefaultAllocator: Allocator<D>,
-    {
-        Self::param_index(name).map(|index| params[index])
-    }
-
     /// Transform external coordinates `ecs` into the internal coordinates `ics`.
     fn transform_ics_to_ecs<RStride, CStride>(
         ics: &VectorView3<T>,
@@ -195,17 +173,17 @@ where
         CStride: Dim;
 
     /// Test the implemented trait functions.
-    // #[cfg(test)]
+    #[cfg(test)]
     fn test_implementation<RStride, CStride>(
         ics: &VectorView3<T>,
         params: &VectorView<T, D, RStride, CStride>,
         delta_h: T,
     ) where
-        D: ToTypenum,
+        D: nalgebra::ToTypenum,
         RStride: Dim,
         CStride: Dim,
         CSST: Default,
-        DefaultAllocator: Allocator<U3>,
+        DefaultAllocator: Allocator<nalgebra::U3>,
     {
         let mut cs_state = CSST::default();
 
@@ -293,14 +271,39 @@ where
         )
         .unwrap();
 
-        assert!((detg_basis / detg_analy - T::one()).abs() < T::from_f64(1e-6).unwrap());
+        assert!(approx::ulps_eq!(detg_basis, detg_analy));
     }
+}
+
+/// Retrieve a model parameter index by name.
+pub fn param_index<D>(name: &str, names: &OVector<&'static str, D>) -> Option<usize>
+where
+    D: Dim,
+    DefaultAllocator: Allocator<D>,
+{
+    names.iter().position(|param| *param == name)
+}
+
+/// Retrieve a model parameter value by name.
+pub fn param_value<T, D, RStride, CStride>(
+    name: &str,
+    names: &OVector<&'static str, D>,
+    params: &VectorView<T, D, RStride, CStride>,
+) -> Option<T>
+where
+    T: Copy,
+    D: Dim,
+    RStride: Dim,
+    CStride: Dim,
+    DefaultAllocator: Allocator<D>,
+{
+    param_index(name, names).map(|index| params[index])
 }
 
 /// Generate unit quaternion from three successive rotations around the z, y and x-axis.
 pub fn quaternion_rot<T>(z_angle: T, y_angle: T, x_angle: T) -> UnitQuaternion<T>
 where
-    T: Copy + Scalar + RealField,
+    T: Copy + RealField,
 {
     let uz = Vector3::<T>::z_axis();
     let uy = Vector3::<T>::y_axis();

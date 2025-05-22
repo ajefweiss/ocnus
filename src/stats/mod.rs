@@ -2,9 +2,11 @@
 //!
 //! This module introduces the [`Density`] trait, which is the trait that is shared by all joint or univariate probability density functions.
 //! The three main implemented probability density functions are:
-//! - [`MultivariateDensity`]: A joint probability density function defined by a set of univariate proability density functions.
-//! - [`MultivariateNormalDensity`]: A joint probability density function defined by a [`CovMatrix`](`covmatrix::CovMatrix`).
-//! - [`ParticleDensity`]: A joint probability density function defined by an ensemble of particles.
+//! - [`MultivariateDensity`] A joint probability density function defined by a set of univariate proability density functions.
+//! - [`MultivariateNormalDensity`] A joint probability density function defined by a [`CovMatrix`](`covmatrix::CovMatrix`).
+//! - [`ParticleDensity`] A joint probability density function defined by an ensemble of particles.
+//!
+//! All univariate density functions are summarized within the [`UnivariateDensity`] ADT, and these types should not be used by their own.
 
 mod normal;
 mod particles;
@@ -27,9 +29,9 @@ where
     D: DimName,
     DefaultAllocator: Allocator<D>,
 {
-    /// Draw a random sample vector from the underlying density.
+    /// Draw a random sample (vector) from the underlying density.
     ///
-    /// This function returns None if the number of sampling attempts reaches `A`.
+    /// This function is limited to `A` sampling attempts, and returns None if the sampling process fails.
     fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<OVector<T, D>>;
 
     /// Returns the constant values for each dimension,
