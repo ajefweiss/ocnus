@@ -43,7 +43,7 @@ where
 /// A full WSA-HUX state data structure.
 /// The const generic `R` is the maximum radius in solar radii.
 #[allow(missing_docs)]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct WSAState<T, const R: usize>
 where
     T: Clone + Scalar,

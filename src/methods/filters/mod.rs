@@ -118,7 +118,8 @@ where
     where
         M: OcnusModel<T, D, FMST, CSST>,
         EF: Fn(&DVectorView<OT>) -> T + Send + Sync,
-        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
+        OF: Fn(&M, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>
+            + Sync,
     {
         let start = Instant::now();
 

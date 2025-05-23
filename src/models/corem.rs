@@ -91,6 +91,7 @@ macro_rules! impl_core_forward_model {
             Self: Send + Sync,
         {
             fn observe_mag3(
+                &self,
                 scobs: &ScObs<T>,
                 params: &SVector<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                 fm_state: &COREState<T>,

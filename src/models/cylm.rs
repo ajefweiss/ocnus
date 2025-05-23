@@ -250,6 +250,7 @@ macro_rules! impl_cylm {
             Self: Send + Sync,
         {
             fn observe_mag3(
+                &self,
                 scobs: &ScObs<T>,
                 params: &SVector<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                 _fm_state: &(),

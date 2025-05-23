@@ -3,33 +3,36 @@ mod types;
 pub use types::*;
 
 use crate::{
-    ModelError, OcnusError, OcnusModel,
-    coords::{CoordsError, OcnusCoords, USPHGeometry},
-    models::concat_arrays,
-    obser::{ObserVec, ScObs, ScObsConf, ScObsSeries},
+    base::{OcnusModel, OcnusModelError, ScObs, ScObsConf},
+    coords::{OcnusCoords, SPHUGeometry, param_value},
+    models::concat_strs,
+    obser::{MeasureInSituPlasmaBulkVelocity, ObserVec},
+    stats::{Density, DensityRange},
 };
-use nalgebra::{Const, Dim, RealField, SVectorView, U1, Vector3, VectorView, VectorView3};
+use nalgebra::{Const, Dim, RealField, SVector, U1, Vector3, VectorView, VectorView3};
 use num_traits::AsPrimitive;
-use ocnus_stats::Density;
-use rand_distr::{Distribution, StandardNormal};
+use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::Deserialize;
 use std::{fs, io, path::Path};
 
 /// Standard WSA model
-pub fn wsa_map<T, const P: usize, M>((efs, dist): (T, T), params: &SVectorView<T, P>) -> T
+pub fn wsa_map<T, const D: usize>(
+    (efs, dist): (T, T),
+    names: &SVector<&'static str, D>,
+    params: &SVector<T, D>,
+) -> T
 where
     T: Copy + RealField,
-    M: OcnusCoords<T, P, ()>,
 {
     // Extract parameters using their identifiers.
-    let a1 = M::param_value("a1", params).unwrap();
-    let a2 = M::param_value("a2", params).unwrap();
-    let a3 = M::param_value("a3", params).unwrap();
-    let a4 = M::param_value("a4", params).unwrap();
-    let a5 = M::param_value("a5", params).unwrap();
-    let a6 = M::param_value("a6", params).unwrap();
-    let a7 = M::param_value("a7", params).unwrap();
-    let a8 = M::param_value("a8", params).unwrap();
+    let a1 = param_value("a1", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a2 = param_value("a2", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a3 = param_value("a3", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a4 = param_value("a4", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a5 = param_value("a5", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a6 = param_value("a6", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a7 = param_value("a7", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a8 = param_value("a8", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
 
     a1 + a2 / (T::one() + efs).powf(a3)
         * (a4 - a5 * (-(T::from_f64(180.0).unwrap() * dist / T::pi() / a6).powf(a7)).exp()).powf(a8)
@@ -39,15 +42,13 @@ macro_rules! impl_wsa_model {
     ($model: ident,  $coords: ident, $params: expr, $fn_map: tt, $docs: literal) => {
         #[doc=$docs]
         #[derive(Debug)]
-        pub struct $model<T, const R: usize, D>(D, pub WSAInputData<T>, pub (T, T, T))
+        pub struct $model<T, const R: usize, P>(P, pub WSAInputData<T>, (T, T, T))
         where
-            T: Copy + RealField,
-            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>;
+            T: Copy + RealField;
 
-        impl<T, const R: usize, D> $model<T, R, D>
+        impl<T, const R: usize, P> $model<T, R, P>
         where
             T: Copy + RealField,
-            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
         {
             #[doc = "Limits the latitude to the given value."]
             pub fn limit_latitude(&mut self, max_lat: T) {
@@ -67,261 +68,67 @@ macro_rules! impl_wsa_model {
             }
 
             #[doc = concat!("Create a new [`", stringify!($model), "`].")]
-            pub fn new(pdf: D, data: WSAInputData<T>, radial_resolution: T) -> Self {
-                let lon_res = data.lon_1d[1] - data.lon_1d[0];
-                let lat_res = data.lat_1d[1] - data.lat_1d[0];
+            pub fn new(pdf: P, input: WSAInputData<T>, radial_resolution: T) -> Self {
+                let lon_res = input.lon_1d[1] - input.lon_1d[0];
+                let lat_res = input.lat_1d[1] - input.lat_1d[0];
 
-                Self(pdf, data, (radial_resolution, lon_res, lat_res))
+                Self(pdf, input, (radial_resolution, lon_res, lat_res))
             }
 
             #[doc = concat!("Create a new [`", stringify!($model), "`] from a JSON5 file.")]
-            pub fn from_file<P>(pdf: D, path: P, radial_resolution: T) -> io::Result<Self>
+            pub fn from_file<L>(pdf: P, path: L, radial_resolution: T) -> io::Result<Self>
             where
                 T: Copy + RealField + for<'x> Deserialize<'x>,
-                P: AsRef<Path>,
+                L: AsRef<Path>,
             {
-                let data = serde_json5::from_str::<WSAInputData<T>>(&fs::read_to_string(path)?)
+                let input = serde_json5::from_str::<WSAInputData<T>>(&fs::read_to_string(path)?)
                     .expect("deserialization failed");
 
-                let lon_res = data.lon_1d[1] - data.lon_1d[0];
-                let lat_res = data.lat_1d[1] - data.lat_1d[0];
+                let lon_res = input.lon_1d[1] - input.lon_1d[0];
+                let lat_res = input.lat_1d[1] - input.lat_1d[0];
 
-                Ok(Self(pdf, data, (radial_resolution, lon_res, lat_res)))
+                Ok(Self(pdf, input, (radial_resolution, lon_res, lat_res)))
             }
         }
 
-        // Re-implement the OcnusCoords trait because we have no inheritance.
-        // Here we make use of the fact that the parameters for the coordinates are at the front
-        // and we pass on smaller fixed views of each parameter vector.
-        impl<T, const R: usize, D>
-            OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, ()> for $model<T, R, D>
-        where
-            T: Copy + RealField,
-            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-            Self: Send + Sync,
-        {
-            const PARAMS: [&'static str; { $coords::<f64>::PARAMS.len() + $params.len() }] =
-                concat_arrays!($coords::<f64>::PARAMS, $params);
-
-            fn contravariant_basis<CStride: Dim>(
-                ics: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &(),
-            ) -> Result<[Vector3<T>; 3], CoordsError> {
-                $coords::contravariant_basis(
-                    ics,
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-
-            fn detg<CStride: Dim>(
-                ics: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &(),
-            ) -> Result<T, CoordsError> {
-                $coords::detg(
-                    ics,
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-
-            fn initialize_cs<CStride: Dim>(
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &mut (),
-            ) -> Result<(), CoordsError> {
-                $coords::initialize_cs(
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-
-            fn transform_ics_to_ecs<CStride: Dim>(
-                ics: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &(),
-            ) -> Result<Vector3<T>, CoordsError> {
-                $coords::transform_ics_to_ecs(
-                    ics,
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-
-            fn transform_ecs_to_ics<CStride: Dim>(
-                ecs: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    CStride,
-                >,
-                cs_state: &(),
-            ) -> Result<Vector3<T>, CoordsError> {
-                $coords::transform_ecs_to_ics(
-                    ecs,
-                    &params.fixed_rows::<{ $coords::<f64>::PARAMS.len() }>(0),
-                    cs_state,
-                )
-            }
-        }
-
-        impl<T, const R: usize, D>
-            OcnusModel<
+        impl<'a, T, const R: usize, P>
+            MeasureInSituPlasmaBulkVelocity<
                 T,
-                ObserVec<T, 1>,
-                { $coords::<f64>::PARAMS.len() + $params.len() },
+                { $coords::<f64>::PARAMS_COUNT + $params.len() },
                 WSAState<T, R>,
                 (),
-            > for $model<T, R, D>
+            > for $model<T, R, P>
         where
             T: AsPrimitive<usize> + Copy + RealField,
-            D: Sync,
-            StandardNormal: Distribution<T>,
-            for<'x> &'x D: Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }>,
-            Self: OcnusCoords<T, { $coords::<f64>::PARAMS.len() + $params.len() }, ()>,
+            Self: Send + Sync,
         {
-            const RCS: usize = 128;
-
-            fn forward(
+            fn observe_pbv(
                 &self,
-                time_step: T,
-                _params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                >,
-                fm_state: &mut WSAState<T, R>,
-                _cs_state: &mut (),
-            ) -> Result<(), ModelError<T>> {
-                fm_state.angle += time_step * T::two_pi() / T::from_f64(27.2753 * 86400.0).unwrap();
-
-                Ok(())
-            }
-
-            fn initialize_states(
-                &self,
-                _series: &ScObsSeries<T, ObserVec<T, 1>>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                >,
-                fm_state: &mut WSAState<T, R>,
-                cs_state: &mut (),
-            ) -> Result<(), OcnusError<T>> {
-                // Extract parameters using their identifiers.
-                let dr = self.2.0;
-                let dphi = self.2.1;
-
-                Self::initialize_cs(params, cs_state)?;
-
-                fm_state.initialize(dr, &self.1);
-
-                // WSA implementation.
-                fm_state
-                    .wsahux
-                    .iter_mut()
-                    .zip(self.1.lat_indices.iter())
-                    .for_each(|(slice, lat_index)| {
-                        let efs_slc = self.1.efs.column(*lat_index);
-                        let dmap_slc = self.1.dmap.column(*lat_index);
-                        slice
-                            .0
-                            .row_mut(0)
-                            .iter_mut()
-                            .zip(efs_slc.iter())
-                            .zip(dmap_slc)
-                            .for_each(|((value, efs), dmap)| {
-                                *value = $fn_map::<
-                                    T,
-                                    { $coords::<f64>::PARAMS.len() + $params.len() },
-                                    Self,
-                                >((*efs, *dmap), params);
-                            });
-
-                        // NaN interpolation, we use a for loop as it is guaranteed
-                        // that NaN values are solitary.
-                        for i in 0..slice.ncols() {
-                            if !slice[(0, i)].is_finite() {
-                                if i == 0 {
-                                    slice[(0, i)] = (slice[(0, slice.ncols() - 1)] + slice[(0, 1)])
-                                        / T::from_usize(2).unwrap();
-                                } else if i == slice.ncols() - 1 {
-                                    slice[(0, i)] = (slice[(0, slice.ncols() - 2)] + slice[(0, 0)])
-                                        / T::from_usize(2).unwrap();
-                                } else {
-                                    slice[(0, i)] = (slice[(0, i + 1)] + slice[(0, i - 1)])
-                                        / T::from_usize(2).unwrap();
-                                }
-                            }
-                        }
-
-                        // Apply the 1d heliospheric upwind model to the inviscid burgers equation.
-                        for r_i in 0..(slice.nrows() - 1) {
-                            for phi_i in 0..(slice.ncols()) {
-                                // Force periodicity
-                                if phi_i == slice.ncols() - 1 {
-                                    slice[(r_i + 1, phi_i)] = slice[(r_i + 1, 0)]
-                                } else {
-                                    let f1 = (slice[(r_i, phi_i + 1)] - slice[(r_i, phi_i)])
-                                        / slice[(r_i, phi_i)];
-
-                                    let f2 = T::two_pi() / T::from_f64(25.38 * 86400.0).unwrap()
-                                        * dr
-                                        * T::from_f64(695700.0).unwrap()
-                                        / dphi;
-
-                                    slice[(r_i + 1, phi_i)] = slice[(r_i, phi_i)] + f1 * f2
-                                }
-                            }
-                        }
-                    });
-
-                Ok(())
-            }
-
-            fn observe(
-                &self,
-                scobs: &ScObs<T, ObserVec<T, 1>>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                >,
+                scobs: &ScObs<T>,
+                params: &SVector<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }>,
                 fm_state: &WSAState<T, R>,
                 cs_state: &(),
-            ) -> Result<ObserVec<T, 1>, OcnusError<T>> {
+            ) -> Result<ObserVec<T, 1>, OcnusModelError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
-                    ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state)?;
+                let q = match Self::transform_ecs_to_ics(
+                    &sc_pos.as_view(),
+                    &params.generic_view(
+                        (0, 0),
+                        (
+                            Const::<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                            Const::<1>,
+                        ),
+                    ),
+                    cs_state,
+                ) {
+                    Some(value) => value,
+                    None => {
+                        return Err(OcnusModelError::CoordinateTransform(sc_pos.into_owned()));
+                    }
+                };
 
                 let r_index: usize =
                     ((q[0] * T::from_usize(R).unwrap() - T::from_f64(2.5).unwrap()) / self.2.0)
@@ -378,25 +185,234 @@ macro_rules! impl_wsa_model {
                     fm_state.wsahux[lat_index].0[(r_index, lon_index)]
                 ]))
             }
+        }
 
-            fn observe_ics_plus_basis(
-                &self,
-                scobs: &ScObs<T, ObserVec<T, 1>>,
+        // Re-implement the OcnusCoords trait because we have no inheritance.
+        // Here we make use of the fact that the parameters for the coordinates are at the front
+        // and we pass on smaller fixed views of each parameter vector.
+        impl<'a, T, const R: usize, P>
+            OcnusCoords<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }, ()> for $model<T, R, P>
+        where
+            T: Copy + RealField,
+            Self: Send + Sync,
+        {
+            const PARAMS: SVector<&'static str, { $coords::<f64>::PARAMS_COUNT + $params.len() }> =
+                SVector::from_array_storage(concat_strs!($coords::<f64>::PARAMS, $params));
+
+            fn contravariant_basis<RStride: Dim, CStride: Dim>(
+                ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
-                    U1,
-                    Const<{ $coords::<f64>::PARAMS.len() + $params.len() }>,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
                 >,
+                cs_state: &(),
+            ) -> Option<[Vector3<T>; 3]> {
+                $coords::contravariant_basis(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn detg<RStride: Dim, CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &(),
+            ) -> Option<T> {
+                $coords::detg(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn initialize_cs<RStride: Dim, CStride: Dim>(
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &mut (),
+            ) {
+                $coords::initialize_cs(
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &(),
+            ) -> Option<Vector3<T>> {
+                $coords::transform_ics_to_ecs(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
+                ecs: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &(),
+            ) -> Option<Vector3<T>> {
+                $coords::transform_ecs_to_ics(
+                    ecs,
+                    &params.fixed_rows::<{ $coords::<f64>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+        }
+
+        impl<T, const R: usize, P>
+            OcnusModel<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }, WSAState<T, R>, ()>
+            for $model<T, R, P>
+        where
+            T: AsPrimitive<usize> + Copy + Default + RealField + SampleUniform,
+            for<'x> &'x P: Density<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+            StandardNormal: Distribution<T>,
+            usize: AsPrimitive<T>,
+            Self: OcnusCoords<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }, ()>,
+        {
+            const RCS: usize = 128;
+
+            fn forward(
+                &self,
+                time_step: T,
+                _params: &VectorView<
+                    T,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                    U1,
+                    Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>,
+                >,
+                fm_state: &mut WSAState<T, R>,
+                _cs_state: &mut (),
+            ) -> Result<(), OcnusModelError<T>> {
+                fm_state.angle += time_step * T::two_pi() / T::from_f64(27.2753 * 86400.0).unwrap();
+
+                Ok(())
+            }
+
+            fn get_range(
+                &self,
+            ) -> SVector<DensityRange<T>, { $coords::<f64>::PARAMS_COUNT + $params.len() }> {
+                (&self.0).get_range()
+            }
+
+            fn initialize_states(
+                &self,
+                params: &VectorView<T, Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>>,
+                fm_state: &mut WSAState<T, R>,
+                cs_state: &mut (),
+            ) -> Result<(), OcnusModelError<T>> {
+                Self::initialize_cs(params, cs_state);
+
+                fm_state.initialize(self.2.0, &self.1);
+
+                let dr = self.2.0;
+                let dphi = self.2.1;
+
+                // WSA implementation.
+                fm_state
+                    .wsahux
+                    .iter_mut()
+                    .zip(self.1.lat_indices.iter())
+                    .for_each(|(slice, lat_index)| {
+                        let efs_slc = self.1.efs.column(*lat_index);
+                        let dmap_slc = self.1.dmap.column(*lat_index);
+
+                        slice
+                            .0
+                            .row_mut(0)
+                            .iter_mut()
+                            .zip(efs_slc.iter())
+                            .zip(dmap_slc)
+                            .for_each(|((value, efs), dmap)| {
+                                *value = $fn_map::<
+                                    T,
+                                    { $coords::<f64>::PARAMS_COUNT + $params.len() },
+                                >(
+                                    (*efs, *dmap), &Self::PARAMS, &params.clone_owned()
+                                );
+                            });
+
+                        // NaN interpolation, we use a for loop as it is guaranteed
+                        // that NaN values are solitary.
+                        for i in 0..slice.ncols() {
+                            if !slice[(0, i)].is_finite() {
+                                if i == 0 {
+                                    slice[(0, i)] = (slice[(0, slice.ncols() - 1)] + slice[(0, 1)])
+                                        / T::from_usize(2).unwrap();
+                                } else if i == slice.ncols() - 1 {
+                                    slice[(0, i)] = (slice[(0, slice.ncols() - 2)] + slice[(0, 0)])
+                                        / T::from_usize(2).unwrap();
+                                } else {
+                                    slice[(0, i)] = (slice[(0, i + 1)] + slice[(0, i - 1)])
+                                        / T::from_usize(2).unwrap();
+                                }
+                            }
+                        }
+
+                        // Apply the 1d heliospheric upwind model to the inviscid burgers equation.
+                        for r_i in 0..(slice.nrows() - 1) {
+                            for phi_i in 0..(slice.ncols()) {
+                                // Force periodicity
+                                if phi_i == slice.ncols() - 1 {
+                                    slice[(r_i + 1, phi_i)] = slice[(r_i + 1, 0)]
+                                } else {
+                                    let f1 = (slice[(r_i, phi_i + 1)] - slice[(r_i, phi_i)])
+                                        / slice[(r_i, phi_i)];
+
+                                    let f2 = T::two_pi() / T::from_f64(25.38 * 86400.0).unwrap()
+                                        * dr
+                                        * T::from_f64(695700.0).unwrap()
+                                        / dphi;
+
+                                    slice[(r_i + 1, phi_i)] = slice[(r_i, phi_i)] + f1 * f2
+                                }
+                            }
+                        }
+                    });
+
+                Ok(())
+            }
+
+            fn observe_ics_basis(
+                &self,
+                scobs: &ScObs<T>,
+                params: &VectorView<T, Const<{ $coords::<f64>::PARAMS_COUNT + $params.len() }>>,
                 _fm_state: &WSAState<T, R>,
                 cs_state: &(),
-            ) -> Result<ObserVec<T, 12>, OcnusError<T>> {
+            ) -> Result<ObserVec<T, 12>, OcnusModelError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
-                    ScObsConf::Distance(x) => [*x, T::zero(), T::zero()],
                     ScObsConf::Position(r) => *r,
                 });
 
-                let q = Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state)?;
+                let q = match Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state) {
+                    Some(value) => value,
+                    None => {
+                        return Err(OcnusModelError::CoordinateTransform(sc_pos.into_owned()));
+                    }
+                };
 
                 let (mu, nu, s) = (q[0], q[1], q[2]);
 
@@ -404,28 +420,28 @@ macro_rules! impl_wsa_model {
                     &Vector3::from([mu, nu, s]).as_view(),
                     params,
                     cs_state,
-                )?;
+                )
+                .expect("failed to construct contravariant basis");
 
                 Ok(ObserVec::<T, 12>::from([
                     mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
                 ]))
             }
 
-            fn param_step_sizes(&self) -> [T; { $coords::<f64>::PARAMS.len() + $params.len() }] {
-                (&self.0)
-                    .get_valid_range()
-                    .iter()
-                    .map(|(min, max)| {
-                        (*max - *min) * T::from_usize(128).unwrap() * T::from_f64(5e-7).unwrap()
-                    })
-                    .collect::<Vec<T>>()
-                    .try_into()
-                    .unwrap()
+            fn param_step_sizes(
+                &self,
+            ) -> SVector<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }> {
+                SVector::<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }>::from_iterator(
+                    (&self.0).get_range().iter().map(|range| {
+                        (range.max() - range.min())
+                            * T::from_usize(128).unwrap()
+                            * T::from_f64(5e-7).unwrap()
+                    }),
+                )
             }
-
             fn model_prior(
                 &self,
-            ) -> impl Density<T, { $coords::<f64>::PARAMS.len() + $params.len() }> {
+            ) -> impl Density<T, { $coords::<f64>::PARAMS_COUNT + $params.len() }> {
                 &self.0
             }
         }
@@ -434,7 +450,7 @@ macro_rules! impl_wsa_model {
 
 impl_wsa_model!(
     WSAHUXModel,
-    USPHGeometry,
+    SPHUGeometry,
     ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"],
     wsa_map,
     "Standard WSA solar wind model."
@@ -443,57 +459,60 @@ impl_wsa_model!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OcnusEnsbl, obser::NullNoise};
+    use crate::{
+        base::OcnusEnsbl,
+        base::ScObsSeries,
+        obser::NullNoise,
+        stats::{ConstantDensity, MultivariateDensity},
+    };
     use nalgebra::DMatrix;
-    use ocnus_stats::{Constant1D, UnivariateND};
 
     #[test]
     fn test_wsahux() {
-        let sc: ScObsSeries<f32, ObserVec<f32, 1>> =
-            ScObsSeries::<f32, ObserVec<f32, 1>>::from_iterator((0..100).map(|i| {
-                ScObs::new(
-                    (14400 * i) as f32,
-                    ScObsConf::Position([1.0, 0.0, 0.0]),
-                    None,
-                )
-            }));
+        let sc: ScObsSeries<f64> = ScObsSeries::<f64>::from_iterator(
+            (0..100).map(|i| ScObs::new((14400 * i) as f64, ScObsConf::Position([1.0, 0.0, 0.0]))),
+        );
 
-        let prior = UnivariateND::new([
-            Constant1D::new(285.0),     // a1 = 285 # speeed
-            Constant1D::new(625.0),     // a2 = 625 # speed
-            Constant1D::new(2.0 / 9.0), // a3 = 2/9 # expansion factor coefficient
-            Constant1D::new(1.0),       // a4 = 1 # exp offset
-            Constant1D::new(0.8),       // a5 = 0.8 # exp factor
-            Constant1D::new(2.0),       // a6 = 2 # distance fraction (DO NOT CHANGE)
-            Constant1D::new(2.0),       // a7 = 2 # distance factor coefficient
-            Constant1D::new(3.0),       // a8 = 3 # coefficient everything
+        let prior = MultivariateDensity::<_, 8>::new(&[
+            ConstantDensity::new(285.0),     // a1 = 285 # speeed
+            ConstantDensity::new(625.0),     // a2 = 625 # speed
+            ConstantDensity::new(2.0 / 9.0), // a3 = 2/9 # expansion factor coefficient
+            ConstantDensity::new(1.0),       // a4 = 1 # exp offset
+            ConstantDensity::new(0.8),       // a5 = 0.8 # exp factor
+            ConstantDensity::new(2.0),       // a6 = 2 # distance fraction (DO NOT CHANGE)
+            ConstantDensity::new(2.0),       // a7 = 2 # distance factor coefficient
+            ConstantDensity::new(3.0),       // a8 = 3 # coefficient everything
         ]);
 
         let path = Path::new("examples")
-            .join("data")
+            .join("input")
             .join("wsapy_NSO-GONG_CR2047_0_NSteps90.json");
 
-        let mut model = WSAHUXModel::<f32, 215, _>::from_file(prior, path, 2.0).unwrap();
+        let range = (&prior).get_range();
+        let mut model = WSAHUXModel::<f64, 215, _>::from_file(prior, path, 2.0).unwrap();
 
         model.limit_latitude(1.0);
 
-        let mut ensbl = OcnusEnsbl::new(1);
+        let mut ensbl = OcnusEnsbl::new(1, range);
         let mut output = DMatrix::<ObserVec<_, 1>>::zeros(sc.len(), 1);
 
         model
-            .initialize_ensbl(&sc, &mut ensbl, None::<&UnivariateND<f32, 8>>, 41)
+            .initialize_ensbl::<100, _>(&mut ensbl, None::<&MultivariateDensity<f64, 8>>, 41)
             .unwrap();
 
         model
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
+                &WSAHUXModel::<f64, 215, MultivariateDensity<f64, 8>>::observe_pbv,
                 &mut output.as_view_mut(),
-                None::<&mut NullNoise<f32>>,
+                None::<&mut NullNoise<f64>>,
             )
             .unwrap();
 
-        let speed = Vec::<f32>::from_iter(output.column(0).iter().map(|value| value[0]));
+        let speed = Vec::<f64>::from_iter(output.column(0).iter().map(|value| value[0]));
+
+        dbg!(&ensbl.fm_states[0].wsahux);
 
         assert!((speed[0] - 298.2084).abs() < 1e-6);
         assert!((speed[25] - 440.25708).abs() < 1e-6);

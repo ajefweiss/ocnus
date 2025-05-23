@@ -45,6 +45,7 @@ where
         M: OcnusModel<T, D, FMST, CSST>,
         LF: Fn(&DVectorView<ObserVec<T, N>>) -> T + Sync,
         OF: Fn(
+                &M,
                 &ScObs<T>,
                 &SVector<T, D>,
                 &FMST,

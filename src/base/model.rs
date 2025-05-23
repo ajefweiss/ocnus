@@ -307,7 +307,7 @@ where
     }
 
     /// Perform a forward simulation and generate synthetic observables `OT` for the
-    ///  given spacecraft observers using a generating function `OF`.
+    /// given spacecraft observers using a generating function `OF`.
     fn simulate<OT, OF>(
         &self,
         series: &ScObsSeries<T>,
@@ -319,7 +319,7 @@ where
     ) -> Result<(), OcnusModelError<T>>
     where
         OT: OcnusObser,
-        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>,
+        OF: Fn(&Self, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>,
     {
         let mut timer = T::zero();
 
@@ -343,6 +343,7 @@ where
                 self.forward(time_step, params, fm_state, cs_state)?;
 
                 obs_row[(0, 0)] = obs_func(
+                    self,
                     scobs,
                     &SVector::<T, D>::from_iterator(params.iter().cloned()),
                     fm_state,
@@ -368,7 +369,8 @@ where
     ) -> Result<(), OcnusModelError<T>>
     where
         OT: AddAssign + OcnusObser + Scalar,
-        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
+        OF: Fn(&Self, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>
+            + Sync,
         NM: OcnusNoise<T, OT> + Sync,
     {
         let start = Instant::now();
@@ -405,6 +407,7 @@ where
                                 self.forward(time_step, params, fm_state, cs_state)?;
 
                                 obs[(0, 0)] = obs_func(
+                                    self,
                                     scobs,
                                     &SVector::<T, D>::from_iterator(params.iter().cloned()),
                                     fm_state,

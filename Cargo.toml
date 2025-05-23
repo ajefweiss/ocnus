@@ -54,6 +54,6 @@ harness = false
 #name = "corem"
 #harness = false
 
-#[[bench]]
-#name = "wsahux"
-#harness = false
+[[bench]]
+name = "wsahux"
+harness = false

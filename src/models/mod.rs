@@ -2,11 +2,11 @@
 
 mod corem;
 mod cylm;
-// mod wsahux;
+mod wsahux;
 
 pub use corem::*;
 pub use cylm::*;
-// pub use wsahux::*;
+pub use wsahux::*;
 
 /// Concatenates the &str array `b` with an [`OVector<&str>`] `a` and returns an [`ArrayStorage`].
 macro_rules! concat_strs {

@@ -42,7 +42,13 @@ where
         + Sum
         + for<'x> Sum<&'x T>,
     for<'x> &'x T: Mul<&'x T, Output = T>,
-    OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<ObserVec<T, N>, OcnusModelError<T>>
+    OF: Fn(
+            &M,
+            &ScObs<T>,
+            &SVector<T, D>,
+            &FMST,
+            &CSST,
+        ) -> Result<ObserVec<T, N>, OcnusModelError<T>>
         + Sync,
     CF: Fn(T, T) -> T + Sync,
     FMST: Clone + Default + Send,
