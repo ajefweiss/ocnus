@@ -2,14 +2,11 @@ use crate::{
     base::{OcnusEnsbl, OcnusModel, OcnusModelError, ScObs, ScObsSeries},
     methods::filters::{ParticleFilter, ParticleFilterError},
     obser::{NullNoise, OcnusNoise, OcnusObser},
-    stats::{Density, DensityRange, ParticleDensity, UnivariateDensity},
+    stats::{Density, ParticleDensity},
 };
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{
-    DMatrix, DVectorView, DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn,
-    OVector, RealField, Scalar, U1, allocator::Allocator,
-};
+use nalgebra::{DMatrix, DVectorView, Dyn, RealField, SVector, Scalar, U1};
 use num_traits::{AsPrimitive, Zero};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
@@ -19,7 +16,7 @@ use std::{
     time::Instant,
 };
 
-impl<T, D, FMST, CSST, OT> ParticleFilter<T, D, FMST, CSST, OT>
+impl<T, const D: usize, FMST, CSST, OT> ParticleFilter<T, D, FMST, CSST, OT>
 where
     T: Copy
         + for<'x> Mul<&'x T, Output = T>
@@ -29,26 +26,10 @@ where
         + Sum
         + for<'x> Sum<&'x T>,
     for<'x> &'x T: Mul<&'x T, Output = T>,
-    D: DimName + DimMin<D>,
     FMST: Clone + Default + Send,
     CSST: Clone + Default + Send,
     OT: AddAssign + OcnusObser + Scalar + Zero,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
     StandardNormal: Distribution<T>,
-    <DefaultAllocator as Allocator<D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D, Dyn>>::Buffer<T>: Send + Sync,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D>>::Buffer<DensityRange<T>>: Sync,
     usize: AsPrimitive<T>,
 {
     /// A single iteration of an approximate Bayesian Computation particle filter algorithm.
@@ -64,8 +45,7 @@ where
         M: OcnusModel<T, D, FMST, CSST>,
         NM: OcnusNoise<T, OT> + Sync,
         EF: Fn(&DVectorView<OT>) -> T + Sync,
-        OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
-        <DefaultAllocator as Allocator<D>>::Buffer<UnivariateDensity<T>>: Sync,
+        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
     {
         let start = Instant::now();
 

@@ -4,33 +4,43 @@ use crate::{
     math::bessel_jn,
     models::concat_strs,
     obser::{MeasureInSituMagneticFields, ObserVec},
-    stats::Density,
+    stats::{Density, DensityRange},
 };
-use nalgebra::{
-    Const, DefaultAllocator, Dim, DimName, OVector, RealField, SVector, Vector3, VectorView,
-    VectorView3, allocator::Allocator,
-};
+use nalgebra::{Const, Dim, RealField, SVector, U1, Vector3, VectorView, VectorView3};
 use num_traits::AsPrimitive;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use std::{cmp::Ordering, iter::Sum, marker::PhantomData};
 
 /// Linear force-free magnetic field Chi (nu) and Xi (s) functions.
-pub fn cc_lff_chi_xi<T, D>(
+pub fn cc_lff_chi_xi<T, const D: usize>(
     q: Vector3<T>,
-    names: &OVector<&'static str, D>,
-    params: &OVector<T, D>,
+    names: &SVector<&'static str, D>,
+    params: &SVector<T, D>,
 ) -> Result<(T, T), OcnusModelError<T>>
 where
     T: Copy + RealField,
-    D: DimName,
-    SVector<T, 3>: Sum,
-    DefaultAllocator: Allocator<D>,
 {
     // Extract parameters using their identifiers.
-    let b = param_value("b_scale", names, &params.as_view()).unwrap();
-    let y_offset = param_value("y", names, &params.as_view()).unwrap();
-    let alpha_signed = param_value("alpha", names, &params.as_view()).unwrap();
-    let radius = param_value("radius", names, &params.as_view()).unwrap();
+    let b = param_value(
+        "b_scale",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let y_offset =
+        param_value("y", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let alpha_signed = param_value(
+        "alpha",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let radius = param_value(
+        "radius",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
 
     let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
@@ -70,22 +80,35 @@ where
 }
 
 /// Uniform twist magnetic field observable.
-pub fn cc_ut_chi_xi<T, D>(
+pub fn cc_ut_chi_xi<T, const D: usize>(
     q: Vector3<T>,
-    names: &OVector<&'static str, D>,
-    params: &OVector<T, D>,
+    names: &SVector<&'static str, D>,
+    params: &SVector<T, D>,
 ) -> Result<(T, T), OcnusModelError<T>>
 where
     T: Copy + RealField,
-    D: DimName,
-    SVector<T, 3>: Sum,
-    DefaultAllocator: Allocator<D>,
 {
     // Extract parameters using their identifiers.
-    let b = param_value("b_scale", names, &params.as_view()).unwrap();
-    let y_offset = param_value("y", names, &params.as_view()).unwrap();
-    let tau = param_value("tau", names, &params.as_view()).unwrap();
-    let radius = param_value("radius", names, &params.as_view()).unwrap();
+    let b = param_value(
+        "b_scale",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let y_offset =
+        param_value("y", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let tau = param_value(
+        "tau",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let radius = param_value(
+        "radius",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
 
     let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
@@ -110,24 +133,47 @@ where
 }
 
 /// Magnetic field configuration as is used in Nieves-Chinchilla et al. (2018).
-pub fn ec_hybrid_obs<T, D>(
+pub fn ec_hybrid_obs<T, const D: usize>(
     q: Vector3<T>,
-    names: &OVector<&'static str, D>,
-    params: &OVector<T, D>,
+    names: &SVector<&'static str, D>,
+    params: &SVector<T, D>,
 ) -> Result<(T, T), OcnusModelError<T>>
 where
     T: Copy + RealField,
-    D: DimName,
-    SVector<T, 3>: Sum,
-    DefaultAllocator: Allocator<D>,
 {
     // Extract parameters using their identifiers.
-    let y_offset = param_value("y", names, &params.as_view()).unwrap();
-    let radius = param_value("radius", names, &params.as_view()).unwrap();
-    let b = param_value("b_scale", names, &params.as_view()).unwrap();
-    let lambda = param_value("lambda", names, &params.as_view()).unwrap();
-    let alpha_signed = param_value("alpha", names, &params.as_view()).unwrap();
-    let tau = param_value("tau", names, &params.as_view()).unwrap();
+    let y_offset =
+        param_value("y", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let radius = param_value(
+        "radius",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let b = param_value(
+        "b_scale",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let lambda = param_value(
+        "lambda",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let alpha_signed = param_value(
+        "alpha",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
+    let tau = param_value(
+        "tau",
+        names,
+        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
+    )
+    .unwrap();
 
     let (alpha, sign) = match alpha_signed
         .partial_cmp(&T::zero())
@@ -195,7 +241,7 @@ macro_rules! impl_cylm {
         impl<T, P>
             MeasureInSituMagneticFields<
                 T,
-                { $coords::<f32>::PARAMS_LEN + $params.len() },
+                { $coords::<f32>::PARAMS_COUNT + $params.len() },
                 (),
                 XCState<T>,
             > for $model<T, P>
@@ -205,7 +251,7 @@ macro_rules! impl_cylm {
         {
             fn observe_mag3(
                 scobs: &ScObs<T>,
-                params: &OVector<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>>,
+                params: &SVector<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                 _fm_state: &(),
                 cs_state: &XCState<T>,
             ) -> Result<ObserVec<T, 3>, OcnusModelError<T>> {
@@ -218,7 +264,7 @@ macro_rules! impl_cylm {
                     &params.generic_view(
                         (0, 0),
                         (
-                            Const::<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                            Const::<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                             Const::<1>,
                         ),
                     ),
@@ -233,7 +279,7 @@ macro_rules! impl_cylm {
                 let params_view = &params.generic_view(
                     (0, 0),
                     (
-                        Const::<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                        Const::<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                         Const::<1>,
                     ),
                 );
@@ -258,13 +304,13 @@ macro_rules! impl_cylm {
                             Ok(ObserVec::<T, 3>::from(b_s))
                         }
                         _ => {
-                            let (chi_xi, xi_lff) = $fn_mag(q, &Self::PARAMS, params)?;
+                            let (chi, xi) = $fn_mag(q, &Self::PARAMS, params)?;
 
-                            let chi_xi_det = chi_xi
+                            let chi_xi_det = chi
                                 / Self::detg(&q.as_view(), params_view, cs_state)
                                     .expect("failed to construct contravariant basis");
 
-                            let xi_lff_det = xi_lff
+                            let xi_lff_det = xi
                                 / Self::detg(&q.as_view(), params_view, cs_state)
                                     .expect("failed to construct contravariant basis");
 
@@ -293,148 +339,117 @@ macro_rules! impl_cylm {
         // Re-implement the OcnusCoords trait because we have no inheritance.
         // Here we make use of the fact that the parameters for the coordinates are at the front
         // and we pass on smaller fixed views of each parameter vector.
-        impl<T, P> OcnusCoords<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>, XCState<T>>
+        impl<T, P> OcnusCoords<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }, XCState<T>>
             for $model<T, P>
         where
             T: Copy + RealField,
             Self: Send + Sync,
         {
-            const PARAMS: OVector<
-                &'static str,
-                Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
-            > = OVector::from_array_storage(concat_strs!($coords::<f32>::PARAMS, $params));
+            const PARAMS: SVector<&'static str, { $coords::<f32>::PARAMS_COUNT + $params.len() }> =
+                SVector::from_array_storage(concat_strs!($coords::<f32>::PARAMS, $params));
 
-            fn contravariant_basis<RStride, CStride>(
+            fn contravariant_basis<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                     RStride,
                     CStride,
                 >,
                 cs_state: &XCState<T>,
-            ) -> Option<[Vector3<T>; 3]>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<[Vector3<T>; 3]> {
                 $coords::contravariant_basis(
                     ics,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_LEN }>(0),
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
                     cs_state,
                 )
             }
 
-            fn detg<RStride, CStride>(
+            fn detg<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                     RStride,
                     CStride,
                 >,
                 cs_state: &XCState<T>,
-            ) -> Option<T>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<T> {
                 $coords::detg(
                     ics,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_LEN }>(0),
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
                     cs_state,
                 )
             }
 
-            fn initialize_cs<RStride, CStride>(
+            fn initialize_cs<RStride: Dim, CStride: Dim>(
                 params: &VectorView<
                     T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                     RStride,
                     CStride,
                 >,
                 cs_state: &mut XCState<T>,
-            ) where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) {
                 $coords::initialize_cs(
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_LEN }>(0),
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
                     cs_state,
                 )
             }
 
-            fn transform_ics_to_ecs<RStride, CStride>(
+            fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                     RStride,
                     CStride,
                 >,
                 cs_state: &XCState<T>,
-            ) -> Option<Vector3<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<Vector3<T>> {
                 $coords::transform_ics_to_ecs(
                     ics,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_LEN }>(0),
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
                     cs_state,
                 )
             }
 
-            fn transform_ecs_to_ics<RStride, CStride>(
+            fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
                 ecs: &VectorView3<T>,
                 params: &VectorView<
                     T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
                     RStride,
                     CStride,
                 >,
                 cs_state: &XCState<T>,
-            ) -> Option<Vector3<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<Vector3<T>> {
                 $coords::transform_ecs_to_ics(
                     ecs,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_LEN }>(0),
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
                     cs_state,
                 )
             }
         }
 
-        impl<T, P>
-            OcnusModel<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>, (), XCState<T>>
+        impl<T, P> OcnusModel<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }, (), XCState<T>>
             for $model<T, P>
         where
             T: Copy + Default + RealField + SampleUniform,
-            for<'x> &'x P: Density<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>>,
+            for<'x> &'x P: Density<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>,
             StandardNormal: Distribution<T>,
             usize: AsPrimitive<T>,
-            Self: OcnusCoords<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>, XCState<T>>,
+            Self: OcnusCoords<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }, XCState<T>>,
         {
             const RCS: usize = 128;
 
-            fn forward<RStride, CStride>(
+            fn forward(
                 &self,
                 time_step: T,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
+                params: &VectorView<T, Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>>,
                 _fm_state: &mut (),
                 cs_state: &mut XCState<T>,
-            ) -> Result<(), OcnusModelError<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Result<(), OcnusModelError<T>> {
                 // Extract parameters using their identifiers.
                 let vel = param_value("velocity", &Self::PARAMS, params).unwrap()
                     / T::from_f32(1.496e8).unwrap();
@@ -444,42 +459,30 @@ macro_rules! impl_cylm {
                 Ok(())
             }
 
-            fn initialize_states<RStride, CStride>(
+            fn get_range(
                 &self,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
+            ) -> SVector<DensityRange<T>, { $coords::<f32>::PARAMS_COUNT + $params.len() }> {
+                (&self.0).get_range()
+            }
+
+            fn initialize_states(
+                &self,
+                params: &VectorView<T, Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>>,
                 _fm_state: &mut (),
                 cs_state: &mut XCState<T>,
-            ) -> Result<(), OcnusModelError<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Result<(), OcnusModelError<T>> {
                 Self::initialize_cs(params, cs_state);
 
                 Ok(())
             }
 
-            fn observe_ics_basis<RStride, CStride>(
+            fn observe_ics_basis(
                 &self,
                 scobs: &ScObs<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
+                params: &VectorView<T, Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>>,
                 _fm_state: &(),
                 cs_state: &XCState<T>,
-            ) -> Result<ObserVec<T, 12>, OcnusModelError<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Result<ObserVec<T, 12>, OcnusModelError<T>> {
                 let sc_pos = Vector3::from(match scobs.configuration() {
                     ScObsConf::Position(r) => *r,
                 });
@@ -507,8 +510,8 @@ macro_rules! impl_cylm {
 
             fn param_step_sizes(
                 &self,
-            ) -> OVector<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>> {
-                OVector::<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>>::from_iterator(
+            ) -> SVector<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }> {
+                SVector::<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>::from_iterator(
                     (&self.0).get_range().iter().map(|range| {
                         (range.max() - range.min())
                             * T::from_usize(128).unwrap()
@@ -519,7 +522,7 @@ macro_rules! impl_cylm {
 
             fn model_prior(
                 &self,
-            ) -> impl Density<T, Const<{ $coords::<f32>::PARAMS_LEN + $params.len() }>> {
+            ) -> impl Density<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }> {
                 &self.0
             }
         }
@@ -565,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_cclff_model() {
-        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+        let prior = MultivariateDensity::<_, 8>::new(&[
             UniformDensity::new((-1.0, 1.0)).unwrap(),
             UniformDensity::new((0.5, 1.0)).unwrap(),
             UniformDensity::new((0.05, 0.1)).unwrap(),
@@ -611,7 +614,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                &CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag3,
+                &CCLFFModel::<f32, MultivariateDensity<f32, 8>>::observe_mag3,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f32>>,
             )
@@ -644,7 +647,7 @@ mod tests {
 
     #[test]
     fn test_cclff_model_twist() {
-        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+        let prior = MultivariateDensity::<_, 8>::new(&[
             UniformDensity::new((-1.0, 1.0)).unwrap(),
             UniformDensity::new((0.5, 1.0)).unwrap(),
             UniformDensity::new((0.05, 0.1)).unwrap(),
@@ -687,7 +690,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                &CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag3,
+                &CCLFFModel::<f32, MultivariateDensity<f32, 8>>::observe_mag3,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f32>>,
             )
@@ -712,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_ccut_model() {
-        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+        let prior = MultivariateDensity::<_, 8>::new(&[
             UniformDensity::new((-1.0, 1.0)).unwrap(),
             UniformDensity::new((0.5, 1.0)).unwrap(),
             UniformDensity::new((0.05, 0.1)).unwrap(),
@@ -758,7 +761,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                &CCUTModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag3,
+                &CCUTModel::<f32, MultivariateDensity<f32, 8>>::observe_mag3,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f32>>,
             )
@@ -792,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_ccut_model_twist() {
-        let prior = MultivariateDensity::<_, Const<8>>::new(&[
+        let prior = MultivariateDensity::<_, 8>::new(&[
             UniformDensity::new((-1.0, 1.0)).unwrap(),
             UniformDensity::new((0.5, 1.0)).unwrap(),
             UniformDensity::new((0.05, 0.1)).unwrap(),
@@ -835,7 +838,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                &CCUTModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag3,
+                &CCUTModel::<f32, MultivariateDensity<f32, 8>>::observe_mag3,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f32>>,
             )
@@ -864,7 +867,7 @@ mod tests {
 
     #[test]
     fn test_ech_model() {
-        let prior = MultivariateDensity::<_, Const<12>>::new(&[
+        let prior = MultivariateDensity::<_, 12>::new(&[
             UniformDensity::new((-1.0, 1.0)).unwrap(),
             UniformDensity::new((-1.0, 1.0)).unwrap(),
             UniformDensity::new((-1.0, 1.0)).unwrap(),
@@ -920,7 +923,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                &ECHModel::<f32, MultivariateDensity<f32, Const<12>>>::observe_mag3,
+                &ECHModel::<f32, MultivariateDensity<f32, 12>>::observe_mag3,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f32>>,
             )
@@ -980,7 +983,7 @@ mod tests {
             .simulate_ensbl(
                 &sc,
                 &mut ensbl,
-                &ECHModel::<f32, MultivariateDensity<f32, Const<12>>>::observe_mag3,
+                &ECHModel::<f32, MultivariateDensity<f32, 12>>::observe_mag3,
                 &mut output.as_view_mut(),
                 None::<&mut NullNoise<f32>>,
             )

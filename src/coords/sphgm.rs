@@ -1,5 +1,5 @@
 use crate::coords::{OcnusCoords, param_value};
-use nalgebra::{ArrayStorage, Const, Dim, OVector, RealField, Vector3, VectorView, VectorView3};
+use nalgebra::{ArrayStorage, Dim, RealField, SVector, U0, U4, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
 
@@ -44,23 +44,19 @@ where
     }
 }
 
-impl<T> OcnusCoords<T, Const<4>, SPHState<T>> for SPHGeometry<T>
+impl<T> OcnusCoords<T, 4, SPHState<T>> for SPHGeometry<T>
 where
     T: Copy + RealField,
 {
-    const PARAMS: OVector<&'static str, Const<4>> = OVector::from_array_storage(ArrayStorage(
+    const PARAMS: SVector<&'static str, 4> = SVector::from_array_storage(ArrayStorage(
         [["center_x0", "center_y0", "center_z0", "radius_0"]; 1],
     ));
 
-    fn contravariant_basis<RStride, CStride>(
+    fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<4>, RStride, CStride>,
+        _params: &VectorView<T, U4, RStride, CStride>,
         cs_state: &SPHState<T>,
-    ) -> Option<[Vector3<T>; 3]>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<[Vector3<T>; 3]> {
         let radius = cs_state.radius;
 
         let r = ics[0];
@@ -84,15 +80,11 @@ where
     }
 
     /// Compute the determinant of the metric tensor.
-    fn detg<RStride, CStride>(
+    fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<4>, RStride, CStride>,
+        _params: &VectorView<T, U4, RStride, CStride>,
         cs_state: &SPHState<T>,
-    ) -> Option<T>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<T> {
         let radius = cs_state.radius;
 
         let r = ics[0];
@@ -101,13 +93,10 @@ where
         Some(r.powi(2) * radius.powi(3) * theta.sin())
     }
 
-    fn initialize_cs<RStride, CStride>(
-        params: &VectorView<T, Const<4>, RStride, CStride>,
+    fn initialize_cs<RStride: Dim, CStride: Dim>(
+        params: &VectorView<T, U4, RStride, CStride>,
         cs_state: &mut SPHState<T>,
-    ) where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) {
         let x0 = param_value("center_x0", &Self::PARAMS, params).unwrap();
         let y0 = param_value("center_y0", &Self::PARAMS, params).unwrap();
         let z0 = param_value("center_z0", &Self::PARAMS, params).unwrap();
@@ -119,15 +108,11 @@ where
         cs_state.radius = radius;
     }
 
-    fn transform_ics_to_ecs<RStride, CStride>(
+    fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<4>, RStride, CStride>,
+        _params: &VectorView<T, U4, RStride, CStride>,
         cs_state: &SPHState<T>,
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<Vector3<T>> {
         let center = cs_state.center;
         let radius = cs_state.radius;
 
@@ -144,15 +129,11 @@ where
         )
     }
 
-    fn transform_ecs_to_ics<RStride, CStride>(
+    fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
-        _params: &VectorView<T, Const<4>, RStride, CStride>,
+        _params: &VectorView<T, U4, RStride, CStride>,
         cs_state: &SPHState<T>,
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<Vector3<T>> {
         let center = cs_state.center;
         let radius = cs_state.radius;
 
@@ -167,22 +148,17 @@ where
     }
 }
 
-impl<T> OcnusCoords<T, Const<0>, ()> for SPHUGeometry<T>
+impl<T> OcnusCoords<T, 0, ()> for SPHUGeometry<T>
 where
     T: Copy + RealField,
 {
-    const PARAMS: OVector<&'static str, Const<0>> =
-        OVector::from_array_storage(ArrayStorage([[]; 1]));
+    const PARAMS: SVector<&'static str, 0> = SVector::from_array_storage(ArrayStorage([[]; 1]));
 
-    fn contravariant_basis<RStride, CStride>(
+    fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<0>, RStride, CStride>,
+        _params: &VectorView<T, U0, RStride, CStride>,
         _cs_state: &(),
-    ) -> Option<[Vector3<T>; 3]>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<[Vector3<T>; 3]> {
         let r = ics[0];
         let phi = ics[1];
         let theta = ics[2];
@@ -203,39 +179,28 @@ where
     }
 
     /// Compute the determinant of the metric tensor.
-    fn detg<RStride, CStride>(
+    fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<0>, RStride, CStride>,
+        _params: &VectorView<T, U0, RStride, CStride>,
         _cs_state: &(),
-    ) -> Option<T>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<T> {
         let r = ics[0];
         let theta = ics[2];
 
         Some(r.powi(2) * theta.sin())
     }
 
-    fn initialize_cs<RStride, CStride>(
-        _params: &VectorView<T, Const<0>, RStride, CStride>,
+    fn initialize_cs<RStride: Dim, CStride: Dim>(
+        _params: &VectorView<T, U0, RStride, CStride>,
         _cs_state: &mut (),
-    ) where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) {
     }
 
-    fn transform_ics_to_ecs<RStride, CStride>(
+    fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        _params: &VectorView<T, Const<0>, RStride, CStride>,
+        _params: &VectorView<T, U0, RStride, CStride>,
         _cs_state: &(),
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<Vector3<T>> {
         let r = ics[0];
         let phi = ics[1];
         let theta = ics[2];
@@ -247,15 +212,11 @@ where
         ))
     }
 
-    fn transform_ecs_to_ics<RStride, CStride>(
+    fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
-        _params: &VectorView<T, Const<0>, RStride, CStride>,
+        _params: &VectorView<T, U0, RStride, CStride>,
         _cs_state: &(),
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<Vector3<T>> {
         let v = ecs;
         let vn = v.norm();
 

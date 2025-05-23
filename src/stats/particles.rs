@@ -1,8 +1,7 @@
 use crate::stats::{Density, DensityRange, MultivariateNormalDensity};
 use covmatrix::CovMatrix;
 use nalgebra::{
-    DefaultAllocator, Dim, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn, OMatrix, OVector,
-    RealField, U1, VectorView, allocator::Allocator,
+    Const, DVector, Dyn, Matrix, MatrixView, RealField, SVector, SVectorView, U1, VecStorage,
 };
 use num_traits::AsPrimitive;
 use rand::Rng;
@@ -15,72 +14,37 @@ use std::{
 
 /// A probability density function defined by an ensemble of particles.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound(serialize = "
-    T: Serialize, 
-    OVector<T, D>: Serialize, 
-    OVector<DensityRange<T>, D>: Serialize, 
-    OMatrix<T, D, D>: Serialize, 
-    OMatrix<T, D, Dyn>: Serialize"))]
-#[serde(bound(deserialize = "
-    T: Deserialize<'de>, 
-    OVector<T, D>: Deserialize<'de>, 
-    OVector<DensityRange<T>, D>: Deserialize<'de>, 
-    OMatrix<T, D, D>: Deserialize<'de> , 
-    OMatrix<T, D, Dyn>: Deserialize<'de>"))]
-pub struct ParticleDensity<T, D>
+#[serde(bound(serialize = "T: Serialize"))]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+pub struct ParticleDensity<T, const D: usize>
 where
     T: Copy + RealField,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
 {
     /// The covariance matrix that is used for kernel density estimation.
-    kde: Option<CovMatrix<T, D>>,
+    kde: Option<CovMatrix<T, Const<D>>>,
 
     /// An [`MultivariateNormalDensity`] estimate of the underlying density.
     mvpdf: MultivariateNormalDensity<T, D>,
 
     /// The particle ensemble that approximates the underlying density.
-    particles: OMatrix<T, D, Dyn>,
+    particles: Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>>,
 
     /// Valid parameter range.
-    range: OVector<DensityRange<T>, D>,
+    range: SVector<DensityRange<T>, D>,
 
     /// Particle ensemble weights
-    weights: OVector<T, Dyn>,
+    weights: DVector<T>,
 }
 
-impl<T, D> ParticleDensity<T, D>
+impl<T, const D: usize> ParticleDensity<T, D>
 where
-    T: Copy + RealField + SampleUniform,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
+    T: Copy + RealField,
 {
     /// Estimates the exact density  at a specific position `x`.
-    pub fn density(&self, x: &VectorView<T, D>) -> T
+    pub fn density(&self, x: &SVectorView<T, D>) -> T
     where
         T: SampleUniform + Sum,
+        StandardNormal: Distribution<T>,
     {
         let density_rel = self.relative_density(x);
 
@@ -102,9 +66,9 @@ where
 
     /// Create a [`ParticleDensity`] from an ensemble of particles.
     pub fn from_vectors(
-        vectors: OMatrix<T, D, Dyn>,
-        range: OVector<DensityRange<T>, D>,
-        opt_weights: Option<OVector<T, Dyn>>,
+        vectors: &MatrixView<T, Const<D>, Dyn>,
+        range: SVector<DensityRange<T>, D>,
+        opt_weights: Option<DVector<T>>,
     ) -> Option<Self>
     where
         T: for<'x> Mul<&'x T, Output = T>
@@ -112,52 +76,51 @@ where
             + Sum
             + for<'x> Sum<&'x T>,
         for<'x> &'x T: Mul<&'x T, Output = T>,
+        StandardNormal: Distribution<T>,
         usize: AsPrimitive<T>,
     {
         let mvpdf = match &opt_weights {
-            Some(weights) => MultivariateNormalDensity::from_vectors::<_, _>(
+            Some(weights) => MultivariateNormalDensity::from_vectors::<U1, Const<D>>(
                 &vectors.as_view(),
-                range.clone(),
+                range,
                 Some(weights.as_slice()),
             ),
-            None => {
-                MultivariateNormalDensity::from_vectors(&vectors.as_view(), range.clone(), None)
-            }
+            None => MultivariateNormalDensity::from_vectors::<U1, Const<D>>(
+                &vectors.as_view(),
+                range,
+                None,
+            ),
         }?;
-
-        let size = vectors.ncols();
 
         Some(Self {
             kde: None,
             mvpdf,
-            particles: vectors,
+            particles: vectors.clone_owned(),
             range,
             weights: if let Some(weights) = opt_weights {
                 weights.clone()
             } else {
-                OVector::from_element_generic(Dyn(size), U1, T::one() / size.as_())
+                DVector::from_element(vectors.ncols(), T::one() / vectors.ncols().as_())
             },
         })
     }
 
     /// Update `self` assuming a transition
     /// from another [`ParticleDensity`] with optional prior.
-    pub fn from_transition<F>(&mut self, other: &Self, opt_prior: Option<&F>)
+    pub fn from_transition<P>(&mut self, other: &Self, opt_prior: Option<&P>)
     where
         T: for<'x> Mul<&'x T, Output = T>
             + SampleUniform
             + for<'x> Sub<&'x T, Output = T>
             + Sum
             + for<'x> Sum<&'x T>,
+        P: Density<T, D>,
         for<'x> &'x T: Mul<&'x T, Output = T>,
         usize: AsPrimitive<T>,
-        F: Density<T, D>,
-        <nalgebra::DefaultAllocator as nalgebra::allocator::Allocator<D, nalgebra::Dyn>>::Buffer<T>:
-            std::marker::Sync,
     {
         let covmat_inv = other.mvpdf.pseudo_inverse();
 
-        let mut weights = OVector::<T, Dyn>::from_iterator(
+        let mut weights = DVector::<T>::from_iterator(
             self.particles.ncols(),
             self.particles.column_iter().map(|params_new| {
                 let value = other
@@ -186,8 +149,8 @@ where
             .for_each(|weight| *weight /= weights_total);
 
         let mvpdf = MultivariateNormalDensity::from_vectors::<_, _>(
-            &self.particles.as_view(),
-            self.range.clone(),
+            &self.particles.as_view::<_, _, U1, Dyn>(),
+            self.range,
             Some(weights.as_slice()),
         )
         .unwrap();
@@ -218,17 +181,20 @@ where
     }
 
     /// Returns a reference to the particles matrix.
-    pub fn particles(&self) -> &OMatrix<T, D, Dyn> {
+    pub fn particles(&self) -> &Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
         &self.particles
     }
 
     /// Returns a reference to the particles matrix.
-    pub fn particles_mut(&mut self) -> &mut OMatrix<T, D, Dyn> {
+    pub fn particles_mut(&mut self) -> &mut Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
         &mut self.particles
     }
 
     /// Resample from existing particles.
-    pub fn resample(&self, rng: &mut impl Rng) -> OVector<T, D> {
+    pub fn resample(&self, rng: &mut impl Rng) -> SVector<T, D>
+    where
+        T: SampleUniform,
+    {
         let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
         let offset = {
@@ -266,33 +232,24 @@ where
     }
 
     /// Returns a reference to the particle weights.
-    pub fn weights(&self) -> &OVector<T, Dyn> {
+    pub fn weights(&self) -> &DVector<T> {
         &self.weights
     }
 
     /// Returns a mutable reference to the particle weights.
-    pub fn weights_mut(&mut self) -> &mut OVector<T, Dyn> {
+    pub fn weights_mut(&mut self) -> &mut DVector<T> {
         &mut self.weights
     }
 }
 
-impl<T, D> Density<T, D> for &ParticleDensity<T, D>
+impl<T, const D: usize> Density<T, D> for &ParticleDensity<T, D>
 where
     T: Copy + RealField + SampleUniform + Sum,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<OVector<T, D>> {
+    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, D>>
+    where
+        StandardNormal: Distribution<T>,
+    {
         let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
         let offset = {
@@ -321,22 +278,18 @@ where
             self.particles.column(pdx)
         };
 
-        self.mvpdf.draw_sample_with_offset::<A, _, _>(&offset, rng)
+        self.mvpdf.draw_sample_with_offset::<A>(&offset, rng)
     }
 
-    fn get_constants(&self) -> OVector<T, D> {
+    fn get_constants(&self) -> SVector<T, D> {
         (&self.mvpdf).get_constants()
     }
 
-    fn get_range(&self) -> OVector<DensityRange<T>, D> {
-        self.range.clone()
+    fn get_range(&self) -> SVector<DensityRange<T>, D> {
+        self.range
     }
 
-    fn relative_density<RStride, CStride>(&self, x: &VectorView<T, D, RStride, CStride>) -> T
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    fn relative_density(&self, x: &SVectorView<T, D>) -> T {
         if !self.validate_sample(&x.as_view()) {
             return (-T::one()).sqrt();
         }
@@ -350,7 +303,7 @@ where
                         .kde
                         .as_ref()
                         .expect("kde covmatrix is not set")
-                        .mahalanobis_distance(&(x - col).as_view())
+                        .mahalanobis_distance::<U1, Dyn>(&(x - col).as_view())
                         / T::from_usize(2).unwrap())
                     .exp()
             })
@@ -358,22 +311,9 @@ where
     }
 }
 
-impl<T, D> Mul<T> for ParticleDensity<T, D>
+impl<T, const D: usize> Mul<T> for ParticleDensity<T, D>
 where
-    T: Copy + RealField + SampleUniform,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
+    T: Copy + RealField,
 {
     type Output = ParticleDensity<T, D>;
 
@@ -388,22 +328,9 @@ where
     }
 }
 
-impl<T, D> MulAssign<T> for ParticleDensity<T, D>
+impl<T, const D: usize> MulAssign<T> for ParticleDensity<T, D>
 where
-    T: Copy + RealField + SampleUniform,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
+    T: Copy + RealField,
 {
     fn mul_assign(&mut self, rhs: T) {
         self.mvpdf *= rhs;
@@ -436,14 +363,14 @@ mod tests {
 
         let mvpdf_0 = MultivariateNormalDensity::from_vectors::<Dyn, U2>(
             &array_0.as_view(),
-            OVector::from([DensityRange((-0.75, 0.75)); 2]),
+            SVector::from([DensityRange((-0.75, 0.75)); 2]),
             None,
         )
         .unwrap();
 
         let mut ptpdf_0 = ParticleDensity::from_vectors(
-            array_0,
-            OVector::from([DensityRange((-0.75, 0.75)); 2]),
+            &array_0.as_view(),
+            SVector::from([DensityRange((-0.75, 0.75)); 2]),
             None,
         )
         .unwrap();
@@ -476,8 +403,8 @@ mod tests {
         );
 
         let mut ptpdf = ParticleDensity::from_vectors(
-            array,
-            OVector::from([DensityRange((-0.75, 0.75)); 3]),
+            &array.as_view(),
+            SVector::from([DensityRange((-0.75, 0.75)); 3]),
             None,
         )
         .unwrap();

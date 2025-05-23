@@ -1,8 +1,5 @@
 use crate::stats::{DensityRange, ParticleDensity};
-use nalgebra::{
-    DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn, OMatrix, OVector,
-    RealField, U1, allocator::Allocator,
-};
+use nalgebra::{Const, Dyn, OMatrix, RealField, SVector};
 use num_traits::AsPrimitive;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
@@ -16,38 +13,13 @@ use std::{
 ///
 /// This is just a fancy [`ParticleDensity`].
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound(serialize = "
-    T: Serialize, 
-    OVector<T, D>: Serialize, 
-    OVector<DensityRange<T>, D>: Serialize, 
-    OMatrix<T, D, D>: Serialize, 
-    OMatrix<T, D, Dyn>: Serialize,
-    FMST: Serialize,
-    CSST: Serialize"))]
-#[serde(bound(deserialize = "
-    T: Deserialize<'de>, 
-    OVector<T, D>: Deserialize<'de>, 
-    OVector<DensityRange<T>, D>: Deserialize<'de>, 
-    OMatrix<T, D, D>: Deserialize<'de> , 
-    OMatrix<T, D, Dyn>: Deserialize<'de>,
-    FMST: Deserialize<'de>,
-    CSST: Deserialize<'de>"))]
-pub struct OcnusEnsbl<T, D, FMST, CSST>
+#[serde(bound(serialize = "T: Serialize, FMST: Serialize, CSST: Serialize"))]
+#[serde(bound(
+    deserialize = "T: Deserialize<'de>, FMST: Deserialize<'de>, CSST: Deserialize<'de>"
+))]
+pub struct OcnusEnsbl<T, const D: usize, FMST, CSST>
 where
     T: Copy + RealField,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
 {
     /// Ensemble model parameter view.
     pub ptpdf: ParticleDensity<T, D>,
@@ -59,22 +31,9 @@ where
     pub cs_states: Vec<CSST>,
 }
 
-impl<T, D, FMST, CSST> OcnusEnsbl<T, D, FMST, CSST>
+impl<T, const D: usize, FMST, CSST> OcnusEnsbl<T, D, FMST, CSST>
 where
     T: Copy + RealField + SampleUniform,
-    D: DimName + DimMin<D>,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
 {
     /// Return a mutable reference to the underlying [`ParticleDensity`].
     pub fn as_density_mut(&mut self) -> &mut ParticleDensity<T, D> {
@@ -92,7 +51,7 @@ where
     }
 
     /// Create a new [`OcnusEnsbl`] filled with zeros.
-    pub fn new(size: usize, range: OVector<DensityRange<T>, D>) -> Self
+    pub fn new(size: usize, range: SVector<DensityRange<T>, D>) -> Self
     where
         T: Copy
             + for<'x> Mul<&'x T, Output = T>
@@ -103,11 +62,16 @@ where
         for<'x> &'x T: Mul<&'x T, Output = T>,
         FMST: Clone + Default,
         CSST: Clone + Default,
+        StandardNormal: Distribution<T>,
         usize: AsPrimitive<T>,
     {
         Self {
-            ptpdf: ParticleDensity::from_vectors(OMatrix::<T, D, Dyn>::zeros(size), range, None)
-                .unwrap(),
+            ptpdf: ParticleDensity::from_vectors(
+                &OMatrix::<T, Const<D>, Dyn>::zeros(size).as_view(),
+                range,
+                None,
+            )
+            .unwrap(),
             fm_states: vec![FMST::default(); size],
             cs_states: vec![CSST::default(); size],
         }

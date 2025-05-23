@@ -1,7 +1,6 @@
 use crate::coords::{OcnusCoords, param_value, quaternion_rot};
 use nalgebra::{
-    ArrayStorage, Const, DefaultAllocator, Dim, DimName, OVector, RealField, UnitQuaternion,
-    Vector3, VectorView, VectorView3, allocator::Allocator,
+    ArrayStorage, Const, Dim, RealField, SVector, UnitQuaternion, Vector3, VectorView, VectorView3,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
@@ -24,18 +23,14 @@ where
 
 /// The circular-cylindric contravariant basis vectors.
 #[allow(clippy::extra_unused_type_parameters)]
-pub fn cc_basis<T, D, RStride, CStride>(
+pub fn cc_basis<T, const D: usize, RStride: Dim, CStride: Dim>(
     (r, nu, _z): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let y_offset = param_value("y", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
@@ -53,18 +48,14 @@ where
 
 /// The elliptic-cylindric contravariant basis vectors.
 #[allow(clippy::extra_unused_type_parameters)]
-pub fn ec_basis<T, D, RStride, CStride>(
+pub fn ec_basis<T, const D: usize, RStride: Dim, CStride: Dim>(
     (mu, nu, _s): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
@@ -99,18 +90,14 @@ where
 
 /// The circular-cylindric metric determinant.
 #[allow(clippy::extra_unused_type_parameters)]
-pub fn cc_detg<T, D, RStride, CStride>(
+pub fn cc_detg<T, const D: usize, RStride: Dim, CStride: Dim>(
     (r, _nu, _z): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> T
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let y_offset = param_value("y", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
@@ -122,18 +109,14 @@ where
 
 /// The elliptic-cylindric metric determinant
 #[allow(clippy::extra_unused_type_parameters)]
-pub fn ec_detg<T, D, RStride, CStride>(
+pub fn ec_detg<T, const D: usize, RStride: Dim, CStride: Dim>(
     (mu, _nu, _s): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> T
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
@@ -145,18 +128,14 @@ where
 }
 
 /// The circular-cylindric coordinate transformation (ecs -> ics).
-pub fn cc_ecs_to_ics<T, D, RStride, CStride>(
+pub fn cc_ecs_to_ics<T, const D: usize, RStride: Dim, CStride: Dim>(
     (x, y, z): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let radius = param_value("radius", names, params).unwrap();
     let y_offset = param_value("y", names, params).unwrap();
@@ -185,18 +164,14 @@ where
 }
 
 /// The elliptic-cylindric coordinate transformation (ecs -> ics).
-pub fn ec_ecs_to_ics<T, D, RStride, CStride>(
+pub fn ec_ecs_to_ics<T, const D: usize, RStride: Dim, CStride: Dim>(
     (x, y, z): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
@@ -229,18 +204,14 @@ where
 }
 
 /// The circular-cylindric coordinate transformation (ics -> ecs).
-pub fn cc_ics_to_ecs<T, D, RStride, CStride>(
+pub fn cc_ics_to_ecs<T, const D: usize, RStride: Dim, CStride: Dim>(
     (r, nu, y): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let radius = param_value("radius", names, params).unwrap();
     let y_offset = param_value("y", names, params).unwrap();
@@ -256,18 +227,14 @@ where
 }
 
 /// The elliptic-cylindric coordinate transformation (ics -> ecs).
-pub fn ec_ics_to_ecs<T, D, RStride, CStride>(
+pub fn ec_ics_to_ecs<T, const D: usize, RStride: Dim, CStride: Dim>(
     (mu, nu, s): (T, T, T),
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
-    RStride: Dim,
-    CStride: Dim,
 {
     let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
@@ -305,25 +272,21 @@ macro_rules! impl_xcgm_geom {
             }
         }
 
-        impl<T> OcnusCoords<T, Const<{ $params.len() }>, XCState<T>> for $model<T>
+        impl<T> OcnusCoords<T, { $params.len() }, XCState<T>> for $model<T>
         where
             T: Copy + RealField,
         {
-            const PARAMS: OVector<&'static str, Const<{ $params.len() }>> =
-                OVector::from_array_storage(ArrayStorage([$params; 1]));
+            const PARAMS: SVector<&'static str, { $params.len() }> =
+                SVector::from_array_storage(ArrayStorage([$params; 1]));
 
-            fn contravariant_basis<RStride, CStride>(
+            fn contravariant_basis<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
                 cs_state: &XCState<T>,
-            ) -> Option<[Vector3<T>; 3]>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<[Vector3<T>; 3]> {
                 let quaternion = cs_state.q;
 
-                let [dmu, dnu, ds] = $fn_basis::<T, Const<{ $params.len() }>, RStride, CStride>(
+                let [dmu, dnu, ds] = $fn_basis::<T, { $params.len() }, RStride, CStride>(
                     (ics[0], ics[1], ics[2]),
                     &Self::PARAMS,
                     params,
@@ -338,16 +301,12 @@ macro_rules! impl_xcgm_geom {
             }
 
             /// Compute the determinant of the metric tensor.
-            fn detg<RStride, CStride>(
+            fn detg<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
                 cs_state: &XCState<T>,
-            ) -> Option<T>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
-                Some($fn_detg::<T, Const<{ $params.len() }>, RStride, CStride>(
+            ) -> Option<T> {
+                Some($fn_detg::<T, { $params.len() }, RStride, CStride>(
                     (ics[0], ics[1], ics[2]),
                     &Self::PARAMS,
                     params,
@@ -355,13 +314,10 @@ macro_rules! impl_xcgm_geom {
                 ))
             }
 
-            fn initialize_cs<RStride, CStride>(
+            fn initialize_cs<RStride: Dim, CStride: Dim>(
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
                 cs_state: &mut XCState<T>,
-            ) where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) {
                 let phi = param_value("phi", &Self::PARAMS, params).unwrap();
                 let theta = param_value("theta", &Self::PARAMS, params).unwrap();
                 let psi = param_value("psi", &Self::PARAMS, params).unwrap_or(T::zero());
@@ -379,18 +335,14 @@ macro_rules! impl_xcgm_geom {
                 cs_state.q = quaternion_rot(phi, psi, theta);
             }
 
-            fn transform_ics_to_ecs<RStride, CStride>(
+            fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
                 cs_state: &XCState<T>,
-            ) -> Option<Vector3<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<Vector3<T>> {
                 let quaternion = cs_state.q;
 
-                let ecs_norot = $fn_ecs::<T, Const<{ $params.len() }>, RStride, CStride>(
+                let ecs_norot = $fn_ecs::<T, { $params.len() }, RStride, CStride>(
                     (ics[0], ics[1], ics[2]),
                     &Self::PARAMS,
                     params,
@@ -403,22 +355,18 @@ macro_rules! impl_xcgm_geom {
                 )
             }
 
-            fn transform_ecs_to_ics<RStride, CStride>(
+            fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
                 ecs: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
                 cs_state: &XCState<T>,
-            ) -> Option<Vector3<T>>
-            where
-                RStride: Dim,
-                CStride: Dim,
-            {
+            ) -> Option<Vector3<T>> {
                 let quaternion = cs_state.q;
 
                 let ecs_norot = quaternion
                     .conjugate()
                     .transform_vector(&(ecs - Vector3::new(cs_state.x, T::zero(), cs_state.z)));
 
-                Some($fn_ics::<T, Const<{ $params.len() }>, RStride, CStride>(
+                Some($fn_ics::<T, { $params.len() }, RStride, CStride>(
                     (ecs_norot[0], ecs_norot[1], ecs_norot[2]),
                     &Self::PARAMS,
                     params,

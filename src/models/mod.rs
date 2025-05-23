@@ -1,10 +1,10 @@
 //! Implemented models and forward model state types.
 
-// mod corem;
+mod corem;
 mod cylm;
 // mod wsahux;
 
-// pub use corem::*;
+pub use corem::*;
 pub use cylm::*;
 // pub use wsahux::*;
 

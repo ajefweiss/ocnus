@@ -6,15 +6,12 @@ mod sir;
 use crate::{
     base::{OcnusEnsbl, OcnusModel, OcnusModelError, ScObs, ScObsSeries},
     obser::{NullNoise, OcnusObser},
-    stats::{Density, DensityRange, MultivariateDensity, UnivariateDensity},
+    stats::{Density, MultivariateDensity},
 };
 use derive_builder::Builder;
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{
-    DMatrix, DVectorView, DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn,
-    OMatrix, OVector, RealField, Scalar, U1, allocator::Allocator,
-};
+use nalgebra::{DMatrix, DVectorView, Dyn, RealField, SVector, Scalar, U1};
 use num_traits::{AsPrimitive, Zero};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
@@ -43,41 +40,20 @@ pub enum ParticleFilterError<T> {
 #[derive(Builder, Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(bound(serialize = "
     T: Serialize, 
-    OVector<T, D>: Serialize, 
-    OVector<DensityRange<T>, D>: Serialize, 
-    OMatrix<T, D, D>: Serialize, 
-    OMatrix<T, D, Dyn>: Serialize,
     FMST: Serialize,
     CSST: Serialize,
     OT: Serialize"))]
 #[serde(bound(deserialize = "
     T: Deserialize<'de>, 
-    OVector<T, D>: Deserialize<'de>, 
-    OVector<DensityRange<T>, D>: Deserialize<'de>, 
-    OMatrix<T, D, D>: Deserialize<'de> , 
-    OMatrix<T, D, Dyn>: Deserialize<'de>,
     FMST: Deserialize<'de>,
     CSST: Deserialize<'de>,
     OT: Deserialize<'de>"))]
-pub struct ParticleFilter<T, D, FMST, CSST, OT>
+pub struct ParticleFilter<T, const D: usize, FMST, CSST, OT>
 where
     T: Copy + RealField,
-    D: DimName + DimMin<D>,
     FMST: Clone,
     CSST: Clone,
     OT: OcnusObser + Scalar,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
 {
     /// The model ensemble.
     #[builder(default = None)]
@@ -114,7 +90,7 @@ where
     pub truns: usize,
 }
 
-impl<T, D, FMST, CSST, OT> ParticleFilter<T, D, FMST, CSST, OT>
+impl<T, const D: usize, FMST, CSST, OT> ParticleFilter<T, D, FMST, CSST, OT>
 where
     T: Copy
         + for<'x> Mul<&'x T, Output = T>
@@ -124,26 +100,10 @@ where
         + Sum
         + for<'x> Sum<&'x T>,
     for<'x> &'x T: Mul<&'x T, Output = T>,
-    D: DimName + DimMin<D>,
     FMST: Clone + Default + Send,
     CSST: Clone + Default + Send,
     OT: AddAssign + OcnusObser + Scalar + Zero,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
     StandardNormal: Distribution<T>,
-    <DefaultAllocator as Allocator<D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D, Dyn>>::Buffer<T>: Send + Sync,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D>>::Buffer<DensityRange<T>>: Sync,
     usize: AsPrimitive<T>,
 {
     /// Initialize the ensemble data using a error metric function `EF` and a threshold value.
@@ -158,8 +118,7 @@ where
     where
         M: OcnusModel<T, D, FMST, CSST>,
         EF: Fn(&DVectorView<OT>) -> T + Send + Sync,
-        OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
-        <DefaultAllocator as Allocator<D>>::Buffer<UnivariateDensity<T>>: Sync,
+        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
     {
         let start = Instant::now();
 

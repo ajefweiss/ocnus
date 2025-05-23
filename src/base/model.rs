@@ -6,10 +6,7 @@ use crate::{
 };
 use itertools::zip_eq;
 use log::debug;
-use nalgebra::{
-    DMatrixViewMut, DefaultAllocator, Dim, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn,
-    OVector, RealField, Scalar, U1, Vector3, VectorView, VectorViewMut, allocator::Allocator,
-};
+use nalgebra::{DMatrixViewMut, RealField, SVector, SVectorView, SVectorViewMut, Scalar, Vector3};
 use num_traits::AsPrimitive;
 use rand::{Rng, SeedableRng};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
@@ -45,29 +42,11 @@ pub enum OcnusModelError<T> {
 }
 
 /// A trait that is shared by all models within the **ocnus** framework.
-pub trait OcnusModel<T, D, FMST, CSST>: OcnusCoords<T, D, CSST>
+pub trait OcnusModel<T, const D: usize, FMST, CSST>: OcnusCoords<T, D, CSST>
 where
     T: Copy + RealField + SampleUniform,
-    D: DimName + DimMin<D>,
     FMST: Clone + Default + Send,
     CSST: Clone + Default + Send,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
-    StandardNormal: Distribution<T>,
-    <DefaultAllocator as Allocator<D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D, Dyn>>::Buffer<T>: Send + Sync,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D>>::Buffer<DensityRange<T>>: Sync,
-    usize: AsPrimitive<T>,
 {
     /// The base rayon chunk size that is used for any parallel iterators.
     ///
@@ -75,21 +54,21 @@ where
     const RCS: usize;
 
     /// Evolve a model state forward in time.
-    fn forward<RStride, CStride>(
+    fn forward(
         &self,
         time_step: T,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &SVectorView<T, D>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
-    ) -> Result<(), OcnusModelError<T>>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Result<(), OcnusModelError<T>>;
+
+    /// Returns the valid parameter range.
+    fn get_range(&self) -> SVector<DensityRange<T>, D>;
 
     /// Initialize the model parameters, the coordinate system and forward model states.
-    fn initialize<const A: usize, P, RStride, CStride>(
+    fn initialize<const A: usize, P>(
         &self,
-        params: &mut VectorViewMut<T, D, RStride, CStride>,
+        params: &mut SVectorViewMut<T, D>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
         opt_pdf: Option<&P>,
@@ -97,10 +76,10 @@ where
     ) -> Result<(), OcnusModelError<T>>
     where
         for<'x> &'x P: Density<T, D>,
-        RStride: Dim,
-        CStride: Dim,
+        StandardNormal: Distribution<T>,
+        usize: AsPrimitive<T>,
     {
-        self.initialize_params::<A, RStride, CStride>(params, opt_pdf, rng)?;
+        self.initialize_params::<A>(params, opt_pdf, rng)?;
         self.initialize_states(&params.as_view(), fm_state, cs_state)?;
 
         Ok(())
@@ -117,6 +96,8 @@ where
     where
         P: Sync,
         for<'x> &'x P: Density<T, D>,
+        StandardNormal: Distribution<T>,
+        usize: AsPrimitive<T>,
     {
         let start = Instant::now();
 
@@ -134,9 +115,7 @@ where
                 chunks
                     .iter_mut()
                     .try_for_each(|((params, fm_state), cs_state)| {
-                        self.initialize::<A, P, _, _>(
-                            params, fm_state, cs_state, opt_pdf, &mut rng,
-                        )?;
+                        self.initialize::<A, P>(params, fm_state, cs_state, opt_pdf, &mut rng)?;
 
                         Ok::<(), OcnusModelError<T>>(())
                     })?;
@@ -154,15 +133,15 @@ where
     }
 
     /// Initialize the model parameters
-    fn initialize_params<const A: usize, RStride, CStride>(
+    fn initialize_params<const A: usize>(
         &self,
-        params: &mut VectorViewMut<T, D, RStride, CStride>,
+        params: &mut SVectorViewMut<T, D>,
         opt_pdf: Option<impl Density<T, D>>,
         rng: &mut impl Rng,
     ) -> Result<(), OcnusModelError<T>>
     where
-        RStride: Dim,
-        CStride: Dim,
+        StandardNormal: Distribution<T>,
+        usize: AsPrimitive<T>,
     {
         let opt_col = match opt_pdf.as_ref() {
             Some(pdf) => pdf.draw_sample::<A>(rng),
@@ -188,6 +167,8 @@ where
     where
         P: Sync,
         for<'x> &'x P: Density<T, D>,
+        StandardNormal: Distribution<T>,
+        usize: AsPrimitive<T>,
     {
         let start = Instant::now();
 
@@ -201,7 +182,7 @@ where
                 let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 17) as u64);
 
                 chunks.iter_mut().try_for_each(|params| {
-                    self.initialize_params::<A, _, _>(params, opt_pdf, &mut rng)?;
+                    self.initialize_params::<A>(params, opt_pdf, &mut rng)?;
 
                     Ok::<(), OcnusModelError<T>>(())
                 })?;
@@ -219,15 +200,12 @@ where
     }
 
     /// Initialize the coordinate system and forward model states.
-    fn initialize_states<RStride, CStride>(
+    fn initialize_states(
         &self,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &SVectorView<T, D>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
-    ) -> Result<(), OcnusModelError<T>>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Result<(), OcnusModelError<T>>;
 
     /// Initialize the the coordinate system and forward model states for an ensemble.
     fn initialize_states_ensbl(
@@ -268,19 +246,16 @@ where
     fn model_prior(&self) -> impl Density<T, D>;
 
     /// Return internal coordinates and the basis vectors at the location of the observation.
-    fn observe_ics_basis<RStride, CStride>(
+    fn observe_ics_basis(
         &self,
         scobs: &ScObs<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &SVectorView<T, D>,
         fm_state: &FMST,
         cs_state: &CSST,
-    ) -> Result<ObserVec<T, 12>, OcnusModelError<T>>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Result<ObserVec<T, 12>, OcnusModelError<T>>;
 
     /// Step sizes for finite differences.
-    fn param_step_sizes(&self) -> OVector<T, D>;
+    fn param_step_sizes(&self) -> SVector<T, D>;
 
     /// Resample the model parameters, and re-initialize the coOFordinate system and forward model states for an ensemble.
     fn resample_ensbl(
@@ -333,10 +308,10 @@ where
 
     /// Perform a forward simulation and generate synthetic observables `OT` for the
     ///  given spacecraft observers using a generating function `OF`.
-    fn simulate<OT, OF, RStride, CStride>(
+    fn simulate<OT, OF>(
         &self,
         series: &ScObsSeries<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &SVectorView<T, D>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
         obs_func: &OF,
@@ -344,9 +319,7 @@ where
     ) -> Result<(), OcnusModelError<T>>
     where
         OT: OcnusObser,
-        OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>,
-        RStride: Dim,
-        CStride: Dim,
+        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>,
     {
         let mut timer = T::zero();
 
@@ -371,7 +344,7 @@ where
 
                 obs_row[(0, 0)] = obs_func(
                     scobs,
-                    &OVector::<T, D>::from_iterator(params.iter().cloned()),
+                    &SVector::<T, D>::from_iterator(params.iter().cloned()),
                     fm_state,
                     cs_state,
                 )?;
@@ -395,7 +368,7 @@ where
     ) -> Result<(), OcnusModelError<T>>
     where
         OT: AddAssign + OcnusObser + Scalar,
-        OF: Fn(&ScObs<T>, &OVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
+        OF: Fn(&ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>> + Sync,
         NM: OcnusNoise<T, OT> + Sync,
     {
         let start = Instant::now();
@@ -433,7 +406,7 @@ where
 
                                 obs[(0, 0)] = obs_func(
                                     scobs,
-                                    &OVector::<T, D>::from_iterator(params.iter().cloned()),
+                                    &SVector::<T, D>::from_iterator(params.iter().cloned()),
                                     fm_state,
                                     cs_state,
                                 )?;
@@ -478,18 +451,14 @@ where
 
     /// Perform a forward simulation and return the internal coordinates and basis vectors for
     /// the given spacecraft observers.
-    fn simulate_ics_basis<RStride, CStride>(
+    fn simulate_ics_basis(
         &self,
         series: &ScObsSeries<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &SVectorView<T, D>,
         fm_state: &mut FMST,
         cs_state: &mut CSST,
         out_array: &mut DMatrixViewMut<ObserVec<T, 12>>,
-    ) -> Result<(), OcnusModelError<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Result<(), OcnusModelError<T>> {
         let mut timer = T::zero();
 
         if (series.len() != out_array.nrows()) || (out_array.ncols() != 1) {

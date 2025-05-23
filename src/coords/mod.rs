@@ -28,74 +28,59 @@ pub use ttgm::{TTGeometry, TTState};
 pub use xcgm::{CCGeometry, ECGeometry, XCState};
 
 use nalgebra::{
-    DefaultAllocator, Dim, DimName, OVector, RealField, SVector, Unit, UnitQuaternion, Vector3,
-    VectorView, VectorView3, allocator::Allocator,
+    Const, Dim, RealField, SVector, SVectorView, Unit, UnitQuaternion, Vector3, VectorView,
+    VectorView3,
 };
 
 /// A trait that is shared by all coordinate systems describing a model geometry.
 ///
 /// Each coordinate system is associated with a single coordinate system state type `CSST`.
-pub trait OcnusCoords<T, D, CSST>
+pub trait OcnusCoords<T, const D: usize, CSST>
 where
     T: Copy + RealField,
-    D: DimName,
     Self: Send + Sync,
-    DefaultAllocator: Allocator<D>,
 {
     /// Coordinate system parameter names.
-    const PARAMS: OVector<&'static str, D>;
+    const PARAMS: SVector<&'static str, D>;
 
     /// Coordinate system parameter name count.
-    const PARAMS_LEN: usize = D::USIZE;
+    const PARAMS_COUNT: usize = D;
 
     /// Computes the local contravariant basis vectors.
-    fn contravariant_basis<RStride, CStride>(
+    fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<[Vector3<T>; 3]>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Option<[Vector3<T>; 3]>;
 
     /// Computes the local contravariant basis vectors and returns the normalized vectors.
-    fn contravariant_basis_normalized<RStride, CStride>(
+    fn contravariant_basis_normalized<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<[Vector3<T>; 3]>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<[Vector3<T>; 3]> {
         let [dmu, dnu, ds] = Self::contravariant_basis(ics, params, cs_state)?;
 
         Some([dmu / dmu.norm(), dnu / dnu.norm(), ds / ds.norm()])
     }
 
     /// Computes the local covariant basis vectors.
-    fn covariant_basis<RStride, CStride>(
+    fn covariant_basis(
         _ics: &VectorView3<T>,
-        _params: &VectorView<T, D, RStride, CStride>,
+        _params: &SVectorView<T, D>,
         _state: &CSST,
-    ) -> Option<[Vector3<T>; 3]>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<[Vector3<T>; 3]> {
         unimplemented!("computation of the covariant basis vectors is currently not implemented")
     }
 
     /// Create a vector from contravariant components.
-    fn contravariant_vector<RStride, CStride>(
+    fn contravariant_vector<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
     ) -> Option<Vector3<T>>
     where
-        RStride: Dim,
-        CStride: Dim,
         SVector<T, 3>: Sum,
     {
         let basis = Self::contravariant_basis(ics, params, cs_state)?;
@@ -110,15 +95,13 @@ where
     }
 
     /// Create a vector from contravariant components, using the normalized basis vectors.
-    fn contravariant_vector_normalized<RStride, CStride>(
+    fn contravariant_vector_normalized<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
     ) -> Option<Vector3<T>>
     where
-        RStride: Dim,
-        CStride: Dim,
         SVector<T, 3>: Sum,
     {
         let basis = Self::contravariant_basis_normalized(ics, params, cs_state)?;
@@ -133,57 +116,42 @@ where
     }
 
     /// Compute the determinant of the metric tensor.
-    fn detg<RStride, CStride>(
+    fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<T>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Option<T>;
 
     /// Initialize the coordinate system state.
     ///
     /// This function may panic for invalid parameter inputs.
-    fn initialize_cs<RStride, CStride>(
-        params: &VectorView<T, D, RStride, CStride>,
+    fn initialize_cs<RStride: Dim, CStride: Dim>(
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &mut CSST,
-    ) where
-        RStride: Dim,
-        CStride: Dim;
+    );
 
     /// Transform external coordinates `ecs` into the internal coordinates `ics`.
-    fn transform_ics_to_ecs<RStride, CStride>(
+    fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Option<Vector3<T>>;
 
     /// Transform internal coordinates `ics` into cartesian coordinates `ecs`.
-    fn transform_ecs_to_ics<RStride, CStride>(
+    fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         cs_state: &CSST,
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim;
+    ) -> Option<Vector3<T>>;
 
     /// Test the implemented trait functions.
     #[cfg(test)]
-    fn test_implementation<RStride, CStride>(
+    fn test_implementation<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, D, RStride, CStride>,
+        params: &VectorView<T, Const<D>, RStride, CStride>,
         delta_h: T,
     ) where
-        D: nalgebra::ToTypenum,
-        RStride: Dim,
-        CStride: Dim,
         CSST: Default,
-        DefaultAllocator: Allocator<nalgebra::U3>,
     {
         let mut cs_state = CSST::default();
 
@@ -276,26 +244,18 @@ where
 }
 
 /// Retrieve a model parameter index by name.
-pub fn param_index<D>(name: &str, names: &OVector<&'static str, D>) -> Option<usize>
-where
-    D: Dim,
-    DefaultAllocator: Allocator<D>,
-{
+pub fn param_index<const D: usize>(name: &str, names: &SVector<&'static str, D>) -> Option<usize> {
     names.iter().position(|param| *param == name)
 }
 
 /// Retrieve a model parameter value by name.
-pub fn param_value<T, D, RStride, CStride>(
+pub fn param_value<T, const D: usize, RStride: Dim, CStride: Dim>(
     name: &str,
-    names: &OVector<&'static str, D>,
-    params: &VectorView<T, D, RStride, CStride>,
+    names: &SVector<&'static str, D>,
+    params: &VectorView<T, Const<D>, RStride, CStride>,
 ) -> Option<T>
 where
     T: Copy,
-    D: Dim,
-    RStride: Dim,
-    CStride: Dim,
-    DefaultAllocator: Allocator<D>,
 {
     param_index(name, names).map(|index| params[index])
 }

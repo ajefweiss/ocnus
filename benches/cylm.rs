@@ -1,5 +1,5 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use nalgebra::{Const, DMatrix};
+use nalgebra::DMatrix;
 use ocnus::{
     base::{OcnusEnsbl, OcnusModel, ScObs, ScObsConf, ScObsSeries},
     models::CCLFFModel,
@@ -11,7 +11,7 @@ use std::{hint::black_box, time::Duration};
 const ENSEMBLE_SIZE: usize = 2_usize.pow(16);
 
 fn benchmark_lff_f32(c: &mut Criterion) {
-    let prior = MultivariateDensity::<_, Const<8>>::new(&[
+    let prior = MultivariateDensity::<_, 8>::new(&[
         UniformDensity::new((-1.0, 1.0)).unwrap(),
         UniformDensity::new((0.5, 1.0)).unwrap(),
         UniformDensity::new((0.05, 0.1)).unwrap(),
@@ -62,7 +62,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     group.bench_function("cylm_lff_initialize", |b| {
         b.iter(|| {
             model
-                .initialize_ensbl::<100, MultivariateDensity<f32, Const<8>>>(
+                .initialize_ensbl::<100, MultivariateDensity<f32, 8>>(
                     black_box(&mut data),
                     black_box(None),
                     42,
@@ -75,7 +75,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     group.bench_function("cylm_lff_simulate", |b| {
         b.iter(|| {
             model
-                .initialize_ensbl::<100, MultivariateDensity<f32, Const<8>>>(
+                .initialize_ensbl::<100, MultivariateDensity<f32, 8>>(
                     black_box(&mut data),
                     black_box(None),
                     42,
@@ -85,7 +85,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 .simulate_ensbl(
                     &sc,
                     &mut data,
-                    &CCLFFModel::<f32, MultivariateDensity<f32, Const<8>>>::observe_mag3,
+                    &CCLFFModel::<f32, MultivariateDensity<f32, 8>>::observe_mag3,
                     &mut output.as_view_mut(),
                     None::<&mut NullNoise<f32>>,
                 )

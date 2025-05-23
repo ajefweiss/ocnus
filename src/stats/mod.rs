@@ -16,45 +16,37 @@ pub use normal::*;
 pub use particles::*;
 pub use simple::*;
 
-use nalgebra::{
-    DefaultAllocator, Dim, DimName, OVector, RealField, VectorView, allocator::Allocator,
-};
+use nalgebra::{RealField, SVector, SVectorView};
 use rand::Rng;
+use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 
 /// A trait that is shared by all probability density functions.
-pub trait Density<T, D>
+pub trait Density<T, const D: usize>
 where
     T: Copy + RealField,
-    D: DimName,
-    DefaultAllocator: Allocator<D>,
 {
     /// Draw a random sample (vector) from the underlying density.
     ///
     /// This function is limited to `A` sampling attempts, and returns None if the sampling process fails.
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<OVector<T, D>>;
+    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, D>>
+    where
+        StandardNormal: Distribution<T>;
 
     /// Returns the constant values for each dimension,
     /// returns NaN for each dimensions that is not fixed.
-    fn get_constants(&self) -> OVector<T, D>;
+    fn get_constants(&self) -> SVector<T, D>;
 
     /// Returns the minimum and maximum valid values for each dimension.
-    fn get_range(&self) -> OVector<DensityRange<T>, D>;
+    fn get_range(&self) -> SVector<DensityRange<T>, D>;
 
     /// Calculates or estimates a relative density value at a specific position `x`.
     ///
     /// If the position `x` is outside the valid range, this function returns NaN.
-    fn relative_density<RStride, CStride>(&self, x: &VectorView<T, D, RStride, CStride>) -> T
-    where
-        RStride: Dim,
-        CStride: Dim;
+    fn relative_density(&self, x: &SVectorView<T, D>) -> T;
 
     /// Validate a random sample vector by checking the sample w.r.t. to the valid range.
-    fn validate_sample<RStride, CStride>(&self, sample: &VectorView<T, D, RStride, CStride>) -> bool
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    fn validate_sample(&self, sample: &SVectorView<T, D>) -> bool {
         sample
             .iter()
             .zip(self.get_range().iter())
@@ -69,15 +61,8 @@ where
     }
 
     /// Same as [`validate_sample`](`crate::stats::Density::validate_sample`), except that a boolean array is returned where each violating dimension is flagged.
-    fn validate_sample_flags<RStride, CStride>(
-        &self,
-        sample: &VectorView<T, D, RStride, CStride>,
-    ) -> OVector<bool, D>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
-        OVector::from_iterator(
+    fn validate_sample_flags(&self, sample: &SVectorView<T, D>) -> SVector<bool, D> {
+        SVector::from_iterator(
             sample
                 .iter()
                 .zip(self.get_range().iter())

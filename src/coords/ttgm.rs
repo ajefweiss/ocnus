@@ -1,6 +1,6 @@
 use crate::coords::{OcnusCoords, param_value, quaternion_rot};
 use nalgebra::{
-    ArrayStorage, Const, Dim, OVector, RealField, UnitQuaternion, Vector3, VectorView, VectorView3,
+    ArrayStorage, Dim, RealField, SVector, U6, UnitQuaternion, Vector3, VectorView, VectorView3,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
@@ -35,11 +35,11 @@ where
     }
 }
 
-impl<T> OcnusCoords<T, Const<6>, TTState<T>> for TTGeometry<T>
+impl<T> OcnusCoords<T, 6, TTState<T>> for TTGeometry<T>
 where
     T: Copy + RealField,
 {
-    const PARAMS: OVector<&'static str, Const<6>> = OVector::from_array_storage(ArrayStorage(
+    const PARAMS: SVector<&'static str, 6> = SVector::from_array_storage(ArrayStorage(
         [[
             "longitude",
             "latitude",
@@ -50,15 +50,11 @@ where
         ]; 1],
     ));
 
-    fn contravariant_basis<RStride, CStride>(
+    fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<6>, RStride, CStride>,
+        params: &VectorView<T, U6, RStride, CStride>,
         cs_state: &TTState<T>,
-    ) -> Option<[Vector3<T>; 3]>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<[Vector3<T>; 3]> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
         let delta = param_value("delta", &Self::PARAMS, params).unwrap();
@@ -114,15 +110,11 @@ where
     }
 
     /// Compute the determinant of the metric tensor.
-    fn detg<RStride, CStride>(
+    fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<6>, RStride, CStride>,
+        params: &VectorView<T, U6, RStride, CStride>,
         cs_state: &TTState<T>,
-    ) -> Option<T>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<T> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
         let delta = param_value("delta", &Self::PARAMS, params).unwrap();
@@ -155,13 +147,10 @@ where
         )
     }
 
-    fn initialize_cs<RStride, CStride>(
-        params: &VectorView<T, Const<6>, RStride, CStride>,
+    fn initialize_cs<RStride: Dim, CStride: Dim>(
+        params: &VectorView<T, U6, RStride, CStride>,
         cs_state: &mut TTState<T>,
-    ) where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) {
         // Extract parameters using their identifiers.
         let distance_0 = param_value("distance_0", &Self::PARAMS, params).unwrap()
             * T::from_usize(695510).unwrap();
@@ -182,15 +171,11 @@ where
         cs_state.q = quaternion_rot(longitude, latitude, inclination);
     }
 
-    fn transform_ics_to_ecs<RStride, CStride>(
+    fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<6>, RStride, CStride>,
+        params: &VectorView<T, U6, RStride, CStride>,
         cs_state: &TTState<T>,
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<Vector3<T>> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
         let delta = param_value("delta", &Self::PARAMS, params).unwrap();
@@ -219,15 +204,11 @@ where
         )))
     }
 
-    fn transform_ecs_to_ics<RStride, CStride>(
+    fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
-        params: &VectorView<T, Const<6>, RStride, CStride>,
+        params: &VectorView<T, U6, RStride, CStride>,
         cs_state: &TTState<T>,
-    ) -> Option<Vector3<T>>
-    where
-        RStride: Dim,
-        CStride: Dim,
-    {
+    ) -> Option<Vector3<T>> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
         let quaternion = cs_state.q;

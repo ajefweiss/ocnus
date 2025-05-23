@@ -2,14 +2,11 @@ use crate::{
     base::{OcnusEnsbl, OcnusModel, OcnusModelError, ScObs, ScObsSeries},
     methods::filters::{ParticleFilter, ParticleFilterError},
     obser::{NullNoise, ObserVec},
-    stats::{Density, DensityRange, ParticleDensity, UnivariateDensity},
+    stats::{Density, ParticleDensity},
 };
 use itertools::Itertools;
 use log::{debug, info};
-use nalgebra::{
-    DMatrix, DVectorView, DefaultAllocator, DimDiff, DimMin, DimMinimum, DimName, DimSub, Dyn,
-    OVector, RealField, U1, allocator::Allocator,
-};
+use nalgebra::{DMatrix, DVectorView, Dyn, RealField, SVector, U1};
 use num_traits::AsPrimitive;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
@@ -20,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-impl<T, D, FMST, CSST, const N: usize> ParticleFilter<T, D, FMST, CSST, ObserVec<T, N>>
+impl<T, const D: usize, FMST, CSST, const N: usize> ParticleFilter<T, D, FMST, CSST, ObserVec<T, N>>
 where
     T: Copy
         + for<'x> Mul<&'x T, Output = T>
@@ -30,25 +27,9 @@ where
         + Sum
         + for<'x> Sum<&'x T>,
     for<'x> &'x T: Mul<&'x T, Output = T>,
-    D: DimName + DimMin<D>,
     FMST: Clone + Default + Send,
     CSST: Clone + Default + Send,
-    DimMinimum<D, D>: DimSub<U1>,
-    DefaultAllocator: Allocator<D>
-        + Allocator<U1, D>
-        + Allocator<D, D>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<DimMinimum<D, D>, D>
-        + Allocator<D, DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimMinimum<D, D>>
-        + Allocator<DimDiff<DimMinimum<D, D>, U1>>
-        + Allocator<D, Dyn>,
     StandardNormal: Distribution<T>,
-    <DefaultAllocator as Allocator<D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D, Dyn>>::Buffer<T>: Send + Sync,
-    <DefaultAllocator as Allocator<D, D>>::Buffer<T>: Sync,
-    <DefaultAllocator as Allocator<D>>::Buffer<DensityRange<T>>: Sync,
     usize: AsPrimitive<T>,
 {
     /// A single iteration of an sequential importance resampling particle filter algorithm.
@@ -65,12 +46,11 @@ where
         LF: Fn(&DVectorView<ObserVec<T, N>>) -> T + Sync,
         OF: Fn(
                 &ScObs<T>,
-                &OVector<T, D>,
+                &SVector<T, D>,
                 &FMST,
                 &CSST,
             ) -> Result<ObserVec<T, N>, OcnusModelError<T>>
             + Sync,
-        <DefaultAllocator as Allocator<D>>::Buffer<UnivariateDensity<T>>: Sync,
     {
         let start = Instant::now();
 

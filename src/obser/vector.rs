@@ -3,7 +3,7 @@ use crate::obser::{OcnusNoise, OcnusObser};
 use covmatrix::CovMatrix;
 use derive_more::{Deref, From, Index, IndexMut, IntoIterator};
 use itertools::zip_eq;
-use nalgebra::{Const, DVector, DVectorView, OVector, RealField, SVector};
+use nalgebra::{Const, DVector, DVectorView, Dyn, OVector, RealField, SVector};
 use num_traits::{AsPrimitive, Zero};
 use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
@@ -479,7 +479,7 @@ where
 pub fn multivariate_likelihood<T, const N: usize>(
     x: &DVectorView<ObserVec<T, N>>,
     mu: &DVectorView<ObserVec<T, N>>,
-    covm: CovMatrix<T, Const<N>>,
+    covm: CovMatrix<T, Dyn>,
 ) -> T
 where
     T: Copy + RealField,
@@ -488,19 +488,8 @@ where
     let mut value = T::zero();
 
     for i in 0..N {
-        let mut x_slice = OVector::<T, Const<N>>::from_iterator(x.iter().map(|x_obs| x_obs[i]));
-        let mut mu_slice = OVector::<T, Const<N>>::from_iterator(mu.iter().map(|mu_obs| mu_obs[i]));
-
-        // Correct matching NaN's
-        x_slice
-            .iter_mut()
-            .zip(mu_slice.iter_mut())
-            .for_each(|(xv, muv)| {
-                if !xv.is_finite() && !muv.is_finite() {
-                    *xv = T::zero();
-                    *muv = T::zero();
-                }
-            });
+        let x_slice = OVector::<T, Const<N>>::from_iterator(x.iter().map(|x_obs| x_obs[i]));
+        let mu_slice = OVector::<T, Const<N>>::from_iterator(mu.iter().map(|mu_obs| mu_obs[i]));
 
         value += covm.multivariate_likelihood(&x_slice.as_view(), &mu_slice.as_view())
     }
