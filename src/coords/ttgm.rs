@@ -1,4 +1,4 @@
-use crate::coords::{OcnusCoords, param_value, quaternion_rot};
+use crate::coords::{Coordinates, param_value, quaternion_rot};
 use nalgebra::{
     ArrayStorage, Dim, RealField, SVector, U6, UnitQuaternion, Vector3, VectorView, VectorView3,
 };
@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<T> OcnusCoords<T, 6, TTState<T>> for TTGeometry<T>
+impl<T> Coordinates<T, 6> for TTGeometry<T>
 where
     T: Copy + RealField,
 {
@@ -50,10 +50,12 @@ where
         ]; 1],
     ));
 
+    type CSST = TTState<T>;
+
     fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, U6, RStride, CStride>,
-        cs_state: &TTState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<[Vector3<T>; 3]> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
@@ -113,7 +115,7 @@ where
     fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, U6, RStride, CStride>,
-        cs_state: &TTState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<T> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
@@ -149,7 +151,7 @@ where
 
     fn initialize_cs<RStride: Dim, CStride: Dim>(
         params: &VectorView<T, U6, RStride, CStride>,
-        cs_state: &mut TTState<T>,
+        cs_state: &mut Self::CSST,
     ) {
         // Extract parameters using their identifiers.
         let distance_0 = param_value("distance_0", &Self::PARAMS, params).unwrap()
@@ -174,7 +176,7 @@ where
     fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, U6, RStride, CStride>,
-        cs_state: &TTState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
@@ -207,7 +209,7 @@ where
     fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
         params: &VectorView<T, U6, RStride, CStride>,
-        cs_state: &TTState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>> {
         let major_radius = cs_state.major_radius;
         let minor_radius = cs_state.minor_radius;
@@ -246,7 +248,7 @@ where
             -(axis_delta[0].powi(2) + axis_delta[1].powi(2)).sqrt()
         };
 
-        // Compute internal coordinates (mu, nu).
+        // Compute internal coords (mu, nu).
         let r = (dl.powi(2) + z.powi(2)).sqrt();
         let omega = z.atan2(dl);
         let mut nu = omega / T::two_pi();

@@ -1,4 +1,4 @@
-use crate::coords::{OcnusCoords, param_value, quaternion_rot};
+use crate::coords::{Coordinates, param_value, quaternion_rot};
 use nalgebra::{
     ArrayStorage, Const, Dim, RealField, SVector, UnitQuaternion, Vector3, VectorView, VectorView3,
 };
@@ -32,15 +32,12 @@ pub fn cc_basis<T, const D: usize, RStride: Dim, CStride: Dim>(
 where
     T: Copy + RealField,
 {
-    let y_offset = param_value("y", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
 
     let omega = T::two_pi() * nu;
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
-    let dr = Vector3::from([omega.cos(), T::zero(), omega.sin()]) * radius_linearized;
-    let dnu =
-        Vector3::from([-omega.sin(), T::zero(), omega.cos()]) * T::two_pi() * r * radius_linearized;
+    let dr = Vector3::from([omega.cos(), T::zero(), omega.sin()]) * radius;
+    let dnu = Vector3::from([-omega.sin(), T::zero(), omega.cos()]) * T::two_pi() * r * radius;
     let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
 
     [dr, dnu, dz]
@@ -57,11 +54,8 @@ pub fn ec_basis<T, const D: usize, RStride: Dim, CStride: Dim>(
 where
     T: Copy + RealField,
 {
-    let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
-
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
     let omega = T::two_pi() * nu;
     let com = omega.cos();
@@ -69,12 +63,12 @@ where
 
     let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
-    let nu_nom = T::two_pi() * delta * mu * radius_linearized;
+    let nu_nom = T::two_pi() * delta * mu * radius;
 
     let dmu = Vector3::from([
-        delta * radius_linearized * com / denom,
+        delta * radius * com / denom,
         T::zero(),
-        delta * radius_linearized * som / denom,
+        delta * radius * som / denom,
     ]);
 
     let dnu = Vector3::from([
@@ -99,12 +93,9 @@ pub fn cc_detg<T, const D: usize, RStride: Dim, CStride: Dim>(
 where
     T: Copy + RealField,
 {
-    let y_offset = param_value("y", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
 
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
-    T::two_pi() * r * radius_linearized.powi(2)
+    T::two_pi() * r * radius.powi(2)
 }
 
 /// The elliptic-cylindric metric determinant
@@ -118,13 +109,10 @@ pub fn ec_detg<T, const D: usize, RStride: Dim, CStride: Dim>(
 where
     T: Copy + RealField,
 {
-    let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
 
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
-    T::two_pi() * mu * delta.powi(2) * radius_linearized.powi(2)
+    T::two_pi() * mu * delta.powi(2) * radius.powi(2)
 }
 
 /// The circular-cylindric coordinate transformation (ecs -> ics).
@@ -138,12 +126,9 @@ where
     T: Copy + RealField,
 {
     let radius = param_value("radius", names, params).unwrap();
-    let y_offset = param_value("y", names, params).unwrap();
 
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
-    // Compute polar coordinates (r, omega).
-    let r = (x.powi(2) + z.powi(2)).sqrt() / radius_linearized;
+    // Compute polar coords (r, omega).
+    let r = (x.powi(2) + z.powi(2)).sqrt() / radius;
 
     let mut nu = if r == T::zero() {
         T::zero()
@@ -173,20 +158,17 @@ pub fn ec_ecs_to_ics<T, const D: usize, RStride: Dim, CStride: Dim>(
 where
     T: Copy + RealField,
 {
-    let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
 
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
-    // Compute internal coordinates (mu, nu).
+    // Compute internal coords (mu, nu).
     let r = (x.powi(2) + z.powi(2)).sqrt();
 
     let (mu, mut nu) = if r == T::zero() {
         (T::zero(), T::zero())
     } else {
         (
-            r * (x.powi(2) + z.powi(2) * delta.powi(2)).sqrt() / r / delta / radius_linearized,
+            r * (x.powi(2) + z.powi(2) * delta.powi(2)).sqrt() / r / delta / radius,
             z.atan2(x) / T::from_usize(2).unwrap() / T::pi(),
         )
     };
@@ -214,14 +196,12 @@ where
     T: Copy + RealField,
 {
     let radius = param_value("radius", names, params).unwrap();
-    let y_offset = param_value("y", names, params).unwrap();
 
     let omega = T::two_pi() * nu;
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
 
-    // Compute cartesian coordinates (x, y, z).
-    let x = omega.cos() * r * radius_linearized;
-    let z = omega.sin() * r * radius_linearized;
+    // Compute cartesian coords (x, y, z).
+    let x = omega.cos() * r * radius;
+    let z = omega.sin() * r * radius;
 
     Vector3::new(x, y, z)
 }
@@ -236,18 +216,14 @@ pub fn ec_ics_to_ecs<T, const D: usize, RStride: Dim, CStride: Dim>(
 where
     T: Copy + RealField,
 {
-    let y_offset = param_value("y", names, params).unwrap();
     let delta = param_value("delta", names, params).unwrap();
     let radius = param_value("radius", names, params).unwrap();
 
-    let radius_linearized = radius * (T::one() - y_offset.powi(2)).sqrt();
-
     let omega = T::two_pi() * nu;
 
-    let df = mu * delta * radius_linearized
-        / (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
+    let df = mu * delta * radius / (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
 
-    // Compute cartesian coordinates (x, y, z).
+    // Compute cartesian coords (x, y, z).
     let x = omega.cos() * df;
     let y = omega.sin() * df;
 
@@ -272,17 +248,19 @@ macro_rules! impl_xcgm_geom {
             }
         }
 
-        impl<T> OcnusCoords<T, { $params.len() }, XCState<T>> for $model<T>
+        impl<T> Coordinates<T, { $params.len() }> for $model<T>
         where
             T: Copy + RealField,
         {
             const PARAMS: SVector<&'static str, { $params.len() }> =
                 SVector::from_array_storage(ArrayStorage([$params; 1]));
 
+            type CSST = XCState<T>;
+
             fn contravariant_basis<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
-                cs_state: &XCState<T>,
+                cs_state: &Self::CSST,
             ) -> Option<[Vector3<T>; 3]> {
                 let quaternion = cs_state.q;
 
@@ -304,7 +282,7 @@ macro_rules! impl_xcgm_geom {
             fn detg<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
-                cs_state: &XCState<T>,
+                cs_state: &Self::CSST,
             ) -> Option<T> {
                 Some($fn_detg::<T, { $params.len() }, RStride, CStride>(
                     (ics[0], ics[1], ics[2]),
@@ -316,7 +294,7 @@ macro_rules! impl_xcgm_geom {
 
             fn initialize_cs<RStride: Dim, CStride: Dim>(
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
-                cs_state: &mut XCState<T>,
+                cs_state: &mut Self::CSST,
             ) {
                 let phi = param_value("phi", &Self::PARAMS, params).unwrap();
                 let theta = param_value("theta", &Self::PARAMS, params).unwrap();
@@ -338,7 +316,7 @@ macro_rules! impl_xcgm_geom {
             fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
                 ics: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
-                cs_state: &XCState<T>,
+                cs_state: &Self::CSST,
             ) -> Option<Vector3<T>> {
                 let quaternion = cs_state.q;
 
@@ -358,7 +336,7 @@ macro_rules! impl_xcgm_geom {
             fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
                 ecs: &VectorView3<T>,
                 params: &VectorView<T, Const<{ $params.len() }>, RStride, CStride>,
-                cs_state: &XCState<T>,
+                cs_state: &Self::CSST,
             ) -> Option<Vector3<T>> {
                 let quaternion = cs_state.q;
 

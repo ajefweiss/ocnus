@@ -3,8 +3,8 @@
 
 pub mod base;
 pub mod coords;
-mod math;
+pub mod math;
 pub mod methods;
 pub mod models;
-pub mod obser;
+pub mod obsty;
 pub mod stats;

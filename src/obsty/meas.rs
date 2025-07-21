@@ -1,63 +1,55 @@
 use crate::{
-    base::{OcnusModel, OcnusModelError, ScObs, ScObsSeries},
+    base::{Model, ModelError, ScConf, ScObs},
+    math::CovMatrix,
     methods::fisher_information_matrix,
-    obser::ObserVec,
+    obsty::ObserVec,
 };
-use covmatrix::CovMatrix;
 use nalgebra::{Const, Dim, Dyn, RealField, SMatrix, SVector, Vector4, VectorView};
 use num_traits::{AsPrimitive, Float};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
-use std::{
-    iter::Sum,
-    ops::{Mul, Sub},
-};
+use std::iter::Sum;
 
 /// A trait that is shared by all models that can measure in situ magnetic fields.
-pub trait MeasureInSituMagneticFields<T, const D: usize, FMST, CSST>
+pub trait MeasInSituMag<T, const D: usize>
 where
-    T: Copy + RealField + Sum,
+    T: Copy + RealField + SampleUniform + Sum,
+    Self: Model<T, D>,
 {
     /// Compute the fisher information matrix (FIM) using magnetic field vector observations.
     fn fisher_mag<RStride: Dim, CStride: Dim>(
         &self,
-        series: &ScObsSeries<T>,
+        scobs: &ScObs<T, ObserVec<T, 3>>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
         covm: &CovMatrix<T, Dyn>,
-    ) -> Result<SMatrix<T, D, D>, OcnusModelError<T>>
+    ) -> Result<SMatrix<T, D, D>, ModelError<T>>
     where
-        Self: OcnusModel<T, D, FMST, CSST> + Sized,
-        T: Float
-            + SampleUniform
-            + for<'x> Mul<&'x T, Output = T>
-            + for<'x> Sub<&'x T, Output = T>
-            + Sum
-            + for<'x> Sum<&'x T>,
-        for<'x> &'x T: Mul<&'x T, Output = T>,
-        FMST: Clone + Default + Send,
-        CSST: Clone + Default + Send,
+        T: Float + Sum,
         StandardNormal: Distribution<T>,
         usize: AsPrimitive<T>,
+        Self: Send + Sync,
+        Self::CSST: Clone + Default + Send,
+        Self::FMST: Clone + Default + Send,
     {
-        fisher_information_matrix(self, series, params, &Self::observe_mag3, covm)
+        fisher_information_matrix(self, scobs, params, &Self::observe_mag3, covm)
     }
 
     /// Returns an in situ magnetic field vector observation.
     fn observe_mag3(
         &self,
-        scobs: &ScObs<T>,
+        scobs: &ScConf<T>,
         params: &SVector<T, D>,
-        fm_state: &FMST,
-        cs_state: &CSST,
-    ) -> Result<ObserVec<T, 3>, OcnusModelError<T>>;
+        fm_state: &Self::FMST,
+        cs_state: &Self::CSST,
+    ) -> Result<ObserVec<T, 3>, ModelError<T>>;
 
     /// Returns an in situ magnetic field vector observation with magnitude.
     fn observe_mag4(
         &self,
-        scobs: &ScObs<T>,
+        scobs: &ScConf<T>,
         params: &SVector<T, D>,
-        fm_state: &FMST,
-        cs_state: &CSST,
-    ) -> Result<ObserVec<T, 4>, OcnusModelError<T>> {
+        fm_state: &Self::FMST,
+        cs_state: &Self::CSST,
+    ) -> Result<ObserVec<T, 4>, ModelError<T>> {
         let measurement = Self::observe_mag3(self, scobs, params, fm_state, cs_state)?;
 
         Ok(ObserVec::<T, 4>::from(Vector4::from([
@@ -69,17 +61,18 @@ where
     }
 }
 
-/// A trait that is shared by all models that can measure in situ plasma bulk velocities.
-pub trait MeasureInSituPlasmaBulkVelocity<T, const D: usize, FMST, CSST>
+/// A trait that is shared by all models that can measure the in situ plasma bulk velocity.
+pub trait MeasInSituPBV<T, const D: usize, FMST, CSST>
 where
     T: Copy + RealField,
+    Self: Model<T, D> + Sized,
 {
     /// Returns the in situ plasma bulk velocity.
     fn observe_pbv(
         &self,
-        scobs: &ScObs<T>,
+        scobs: &ScConf<T>,
         params: &SVector<T, D>,
         fm_state: &FMST,
         cs_state: &CSST,
-    ) -> Result<ObserVec<T, 1>, OcnusModelError<T>>;
+    ) -> Result<ObserVec<T, 1>, ModelError<T>>;
 }

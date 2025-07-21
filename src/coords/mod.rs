@@ -1,21 +1,21 @@
 //! # Curvilinear coordinate systems and model geometries.
 //!
-//! This module introduces the [`OcnusCoords`] trait, which is the trait that is shared by all curvilinear coordinate systems that define a model geometry.
+//! This module introduces the [`Coordinates`] trait, which is the trait that is shared by all curvilinear coordinate systems that define a model geometry.
 //! The trait provides bi-directional coordinate transformation functions, and methods that compute the covariant and contravariant basis vectors.
 //! The basis vectors of the coordinate systems are not necessarily orthonormal. Therefore, one must properly account for using co- and contravariant basis vectors. Simple geometries may nonetheless have orthogonal basis vectors.
 
 //! Currently implemented coordinate systems & model geometries:
-//! - [`CCGeometry`] A circular-cylindrical geometry with internal coordinates (r, ϕ, z) for flux
+//! - [`CCGeometry`] A circular-cylindrical geometry with internal coords (r, ϕ, z) for flux
 //!   rope models.
-//! - [`ECGeometry`] An elliptic-cylindrical geometry with internal coordinates (μ, ν, z) for flux
+//! - [`ECGeometry`] An elliptic-cylindrical geometry with internal coords (μ, ν, z) for flux
 //!   rope models.
 //! - [`TTGeometry`] A tapered-toroidal geometry with an elliptical cross-section and internal
-//!   coordinates (μ, ν, ) for flux rope models.
+//!   coords (μ, ν, ) for flux rope models.
 //! - [`SPHGeometry`] A spherical geometry with internal coordiantes (r, ϕ, θ) for spheromak models.
 //! - [`SPHUGeometry`] A unit sphere with internal coordiantes (r, ϕ, θ) for global heliospheric models.
 //!
 //! Each geometry is associated with a fixed coordinate system state type, which enables the description of time-varying coordatinate systems.
-//! The coordinate system state types must be initialized from the coordinate system parameters using an implementation of [`OcnusCoords::initialize_cs`].
+//! The coordinate system state types must be initialized from the coordinate system parameters using an implementation of [`Coordinates::initialize_cs`].
 
 mod sphgm;
 mod ttgm;
@@ -33,12 +33,9 @@ use nalgebra::{
 };
 
 /// A trait that is shared by all coordinate systems describing a model geometry.
-///
-/// Each coordinate system is associated with a single coordinate system state type `CSST`.
-pub trait OcnusCoords<T, const D: usize, CSST>
+pub trait Coordinates<T, const D: usize>
 where
     T: Copy + RealField,
-    Self: Send + Sync,
 {
     /// Coordinate system parameter names.
     const PARAMS: SVector<&'static str, D>;
@@ -46,18 +43,21 @@ where
     /// Coordinate system parameter name count.
     const PARAMS_COUNT: usize = D;
 
+    /// Coordinate system state type.
+    type CSST;
+
     /// Computes the local contravariant basis vectors.
     fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<[Vector3<T>; 3]>;
 
     /// Computes the local contravariant basis vectors and returns the normalized vectors.
     fn contravariant_basis_normalized<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<[Vector3<T>; 3]> {
         let [dmu, dnu, ds] = Self::contravariant_basis(ics, params, cs_state)?;
 
@@ -68,9 +68,9 @@ where
     fn covariant_basis(
         _ics: &VectorView3<T>,
         _params: &SVectorView<T, D>,
-        _state: &CSST,
+        _state: &Self::CSST,
     ) -> Option<[Vector3<T>; 3]> {
-        unimplemented!("computation of the covariant basis vectors is currently not implemented")
+        unimplemented!("covariant basis vectors are currently not implemented")
     }
 
     /// Create a vector from contravariant components.
@@ -78,7 +78,7 @@ where
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>>
     where
         SVector<T, 3>: Sum,
@@ -99,7 +99,7 @@ where
         ics: &VectorView3<T>,
         components: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>>
     where
         SVector<T, 3>: Sum,
@@ -119,7 +119,7 @@ where
     fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<T>;
 
     /// Initialize the coordinate system state.
@@ -127,21 +127,21 @@ where
     /// This function may panic for invalid parameter inputs.
     fn initialize_cs<RStride: Dim, CStride: Dim>(
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &mut CSST,
+        cs_state: &mut Self::CSST,
     );
 
-    /// Transform external coordinates `ecs` into the internal coordinates `ics`.
+    /// Transform external coords `ecs` into the internal coords `ics`.
     fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>>;
 
-    /// Transform internal coordinates `ics` into cartesian coordinates `ecs`.
+    /// Transform internal coords `ics` into cartesian coords `ecs`.
     fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
         params: &VectorView<T, Const<D>, RStride, CStride>,
-        cs_state: &CSST,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>>;
 
     /// Test the implemented trait functions.
@@ -151,9 +151,9 @@ where
         params: &VectorView<T, Const<D>, RStride, CStride>,
         delta_h: T,
     ) where
-        CSST: Default,
+        Self::CSST: Default,
     {
-        let mut cs_state = CSST::default();
+        let mut cs_state = Self::CSST::default();
 
         Self::initialize_cs(&params.as_view(), &mut cs_state);
 

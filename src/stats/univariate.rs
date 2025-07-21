@@ -1,6 +1,5 @@
 use crate::stats::{Density, DensityRange};
 use derive_more::{Deref, DerefMut, IntoIterator};
-use log::error;
 use nalgebra::{RealField, SVector, SVectorView};
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal, Uniform, uniform::SampleUniform};
@@ -47,15 +46,13 @@ where
 impl<T, const D: usize> Density<T, D> for &MultivariateDensity<T, D>
 where
     T: Copy + RealField + SampleUniform + RealField,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, D>>
-    where
-        StandardNormal: Distribution<T>,
-    {
+    fn draw_sample(&self, rng: &mut impl Rng, max_attempts: usize) -> Option<SVector<T, D>> {
         let mut sample = SVector::<T, D>::zeros();
 
         for i in 0..D {
-            sample[i] = match Density::<T, 1>::draw_sample::<A>(&(&self.0[i]), rng) {
+            sample[i] = match Density::<T, 1>::draw_sample(&(&self.0[i]), rng, max_attempts) {
                 Some(sample) => sample[0],
                 None => return None,
             };
@@ -97,7 +94,7 @@ where
     }
 }
 
-/// An algebraic data type for univariate probability density functions.
+/// An algebraic data type (ADT) that contains all univariate probability density functions.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "content")]
@@ -115,17 +112,15 @@ where
 impl<T> Density<T, 1> for &UnivariateDensity<T>
 where
     T: Copy + RealField + SampleUniform,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, 1>>
-    where
-        StandardNormal: Distribution<T>,
-    {
+    fn draw_sample(&self, rng: &mut impl Rng, max_attempts: usize) -> Option<SVector<T, 1>> {
         let sample = match self {
-            UnivariateDensity::Constant(pdf) => pdf.draw_sample::<A>(rng),
-            UnivariateDensity::Cosine(pdf) => pdf.draw_sample::<A>(rng),
-            UnivariateDensity::Normal(pdf) => pdf.draw_sample::<A>(rng),
-            UnivariateDensity::Reciprocal(pdf) => pdf.draw_sample::<A>(rng),
-            UnivariateDensity::Uniform(pdf) => pdf.draw_sample::<A>(rng),
+            UnivariateDensity::Constant(pdf) => pdf.draw_sample(rng, max_attempts),
+            UnivariateDensity::Cosine(pdf) => pdf.draw_sample(rng, max_attempts),
+            UnivariateDensity::Normal(pdf) => pdf.draw_sample(rng, max_attempts),
+            UnivariateDensity::Reciprocal(pdf) => pdf.draw_sample(rng, max_attempts),
+            UnivariateDensity::Uniform(pdf) => pdf.draw_sample(rng, max_attempts),
         }?;
 
         Some(sample)
@@ -173,7 +168,7 @@ where
     #[allow(clippy::new_ret_no_self)]
     pub fn new(constant: T) -> UnivariateDensity<T> {
         UnivariateDensity::Constant(Self {
-            range: SVector::from([DensityRange::new((constant, constant))]),
+            range: SVector::from([DensityRange::new(constant, constant)]),
         })
     }
 }
@@ -182,12 +177,12 @@ impl<T> Density<T, 1> for &ConstantDensity<T>
 where
     T: Copy + RealField + RealField,
 {
-    fn draw_sample<const A: usize>(&self, _rng: &mut impl Rng) -> Option<SVector<T, 1>> {
-        Some(SVector::from([self.range[0].min()]))
+    fn draw_sample(&self, _rng: &mut impl Rng, _max_attempts: usize) -> Option<SVector<T, 1>> {
+        Some(SVector::from([self.range[0].min]))
     }
 
     fn get_constants(&self) -> SVector<T, 1> {
-        SVector::from([self.range[0].min()])
+        SVector::from([self.range[0].min])
     }
 
     fn get_range(&self) -> SVector<DensityRange<T>, 1> {
@@ -218,12 +213,10 @@ where
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(minamax: (T, T)) -> Option<UnivariateDensity<T>> {
-        let range = DensityRange::new(minamax);
+    pub fn new(min: T, max: T) -> Option<UnivariateDensity<T>> {
+        let range = DensityRange::new(min, max);
 
-        if (range.min() < -T::frac_pi_2())
-            || (range.max() > T::frac_pi_2())
-            || (range.min() > range.max())
+        if (range.min < -T::frac_pi_2()) || (range.max > T::frac_pi_2()) || (range.min > range.max)
         {
             None
         } else {
@@ -237,16 +230,14 @@ where
 impl<T> Density<T, 1> for &CosineDensity<T>
 where
     T: Copy + RealField + SampleUniform,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, 1>>
-    where
-        StandardNormal: Distribution<T>,
-    {
+    fn draw_sample(&self, rng: &mut impl Rng, _max_attempts: usize) -> Option<SVector<T, 1>> {
         // The range is limited to the interval [-π/2, π/2].
         // This invariant is guaranteed by the constructor.
 
         let uniform =
-            Uniform::new_inclusive(self.range[0].min().sin(), self.range[0].max().sin()).unwrap();
+            Uniform::new_inclusive(self.range[0].min.sin(), self.range[0].max.sin()).unwrap();
 
         Some(SVector::from([rng.sample(uniform).asin()]))
     }
@@ -285,10 +276,10 @@ where
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(mean: T, std_dev: T, minamax: (T, T)) -> Option<UnivariateDensity<T>> {
-        let range = DensityRange::new(minamax);
+    pub fn new(mean: T, std_dev: T, min: T, max: T) -> Option<UnivariateDensity<T>> {
+        let range = DensityRange::new(min, max);
 
-        if (range.min() > mean) || (range.max() < mean) || (range.min() > range.max()) {
+        if (range.min > mean) || (range.max < mean) || (range.min > range.max) {
             None
         } else {
             Some(UnivariateDensity::Normal(Self {
@@ -303,11 +294,9 @@ where
 impl<T> Density<T, 1> for &NormalDensity<T>
 where
     T: Copy + RealField + SampleUniform,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, 1>>
-    where
-        StandardNormal: Distribution<T>,
-    {
+    fn draw_sample(&self, rng: &mut impl Rng, max_attempts: usize) -> Option<SVector<T, 1>> {
         let normal = StandardNormal;
 
         let sample = {
@@ -315,17 +304,12 @@ where
             let mut candidate = self.std_dev * rng.sample(normal) + self.mean;
 
             // Continsouly draw candidates until a sample is drawn within the valid range.
-            while (self.range[0].min() > candidate) | (candidate > self.range[0].max()) {
+            while (self.range[0].min > candidate) | (candidate > self.range[0].max) {
                 candidate = rng.sample(normal);
 
                 attempts += 1;
 
-                if attempts > 99 {
-                    error!(
-                        "NormalDensity::draw_sample has failed to draw a valid sample after {} tries",
-                        attempts
-                    );
-
+                if attempts > max_attempts {
                     return None;
                 }
             }
@@ -368,10 +352,10 @@ where
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(minamax: (T, T)) -> Option<UnivariateDensity<T>> {
-        let range = DensityRange::new(minamax);
+    pub fn new(min: T, max: T) -> Option<UnivariateDensity<T>> {
+        let range = DensityRange::new(min, max);
 
-        if (range.min() <= T::zero()) || (range.max() < T::zero()) || (range.min() > range.max()) {
+        if (range.min <= T::zero()) || (range.max < T::zero()) || (range.min > range.max) {
             None
         } else {
             Some(UnivariateDensity::Reciprocal(Self {
@@ -384,18 +368,16 @@ where
 impl<T> Density<T, 1> for &ReciprocalDensity<T>
 where
     T: Copy + RealField + SampleUniform,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, 1>>
-    where
-        StandardNormal: Distribution<T>,
-    {
-        if (self.range[0].min() < T::zero()) || (self.range[0].max() < T::zero()) {
+    fn draw_sample(&self, rng: &mut impl Rng, _max_attempts: usize) -> Option<SVector<T, 1>> {
+        if (self.range[0].min < T::zero()) || (self.range[0].max < T::zero()) {
             return None;
         }
 
         // Inverse transform sampling.
-        let ratio = self.range[0].max() / self.range[0].min();
-        let cdf_inv = |u: T| self.range[0].min() * (ratio.ln() * u).exp();
+        let ratio = self.range[0].max / self.range[0].min;
+        let cdf_inv = |u: T| self.range[0].min * (ratio.ln() * u).exp();
         let uniform = Uniform::new_inclusive(T::zero(), T::one()).unwrap();
 
         Some(SVector::from([cdf_inv(rng.sample(uniform))]))
@@ -414,7 +396,7 @@ where
             return (-T::one()).sqrt();
         }
 
-        T::one() / (x[0] * (self.range[0].max().ln() - self.range[0].min().ln()))
+        T::one() / (x[0] * (self.range[0].max.ln() - self.range[0].min.ln()))
     }
 }
 
@@ -433,10 +415,10 @@ where
 {
     /// Create a new [`UnivariateDensity`].
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(minamax: (T, T)) -> Option<UnivariateDensity<T>> {
-        let range = SVector::from([DensityRange::new(minamax)]);
+    pub fn new(min: T, max: T) -> Option<UnivariateDensity<T>> {
+        let range = SVector::from([DensityRange::new(min, max)]);
 
-        if range[0].min() >= range[0].max() {
+        if range[0].min >= range[0].max {
             None
         } else {
             Some(UnivariateDensity::Uniform(Self { range }))
@@ -447,12 +429,10 @@ where
 impl<T> Density<T, 1> for &UniformDensity<T>
 where
     T: Copy + RealField + SampleUniform,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, 1>>
-    where
-        StandardNormal: Distribution<T>,
-    {
-        let uniform = Uniform::new_inclusive(self.range[0].min(), self.range[0].max()).unwrap();
+    fn draw_sample(&self, rng: &mut impl Rng, _max_attempts: usize) -> Option<SVector<T, 1>> {
+        let uniform = Uniform::new_inclusive(self.range[0].min, self.range[0].max).unwrap();
 
         Some(SVector::from([rng.sample(uniform)]))
     }
@@ -476,6 +456,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::obsty::Observable;
+
     use super::*;
     use approx::ulps_eq;
     use rand::SeedableRng;
@@ -487,10 +469,10 @@ mod tests {
 
         let uvpdf = &MultivariateDensity::<f32, 5>::new(&[
             ConstantDensity::new(1.0),
-            CosineDensity::new((0.1, 0.2)).unwrap(),
-            NormalDensity::new(0.1, 0.25, (-0.5, 1.5)).unwrap(),
-            ReciprocalDensity::new((0.1, 0.5)).unwrap(),
-            UniformDensity::new((1.0, 2.0)).unwrap(),
+            CosineDensity::new(0.1, 0.2).unwrap(),
+            NormalDensity::new(0.1, 0.25, -0.5, 1.5).unwrap(),
+            ReciprocalDensity::new(0.1, 0.5).unwrap(),
+            UniformDensity::new(1.0, 2.0).unwrap(),
         ]);
 
         assert!(ulps_eq!(
@@ -499,18 +481,16 @@ mod tests {
         ));
 
         assert!(
-            (&uvpdf)
+            !(&uvpdf)
                 .relative_density(&SVector::from([1.0, 0.05, 0.15, 0.2, 1.5]).as_view())
-                .is_nan()
+                .is_valid()
         );
 
         assert!(ulps_eq!(
-            (&uvpdf).draw_sample::<100>(&mut rng).unwrap(),
+            (&uvpdf).draw_sample(&mut rng, 100).unwrap(),
             SVector::from([1.0, 0.1810371, 0.2788901, 0.1174904, 1.7462168,])
         ));
 
-        assert!(
-            (&uvpdf).validate_sample(&(&uvpdf).draw_sample::<100>(&mut rng).unwrap().as_view())
-        );
+        assert!((&uvpdf).validate_sample(&(&uvpdf).draw_sample(&mut rng, 100).unwrap().as_view()));
     }
 }

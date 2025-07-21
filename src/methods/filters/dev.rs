@@ -1,72 +1,54 @@
 use crate::{
-    base::{OcnusModel, OcnusModelError, ScObs},
-    methods::filters::{ParticleFilter, ParticleFilterError, ParticleFilterSettings},
-    obser::{NullNoise, OcnusObser},
+    base::{Model, ModelError, ScConf},
+    math::quantiles,
+    methods::filters::ParticleFilter,
+    obsty::{NullNoise, Observable},
     stats::Density,
 };
-
-use itertools::Itertools;
 use log::info;
-use nalgebra::{DMatrix, DVectorView, Dyn, RealField, SVector, Scalar, U1};
+use nalgebra::{RealField, SVector, Scalar};
 use num_traits::{AsPrimitive, Zero};
 use rand::{Rng, SeedableRng};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
-use std::{
-    iter::Sum,
-    ops::{AddAssign, Mul, Sub},
-    time::Instant,
-};
+use std::{iter::Sum, ops::AddAssign, time::Instant};
 
-impl<M, T, const D: usize, FMST, CSST, OT> ParticleFilter<M, T, D, FMST, CSST, OT>
+impl<T, M, const D: usize, OT> ParticleFilter<T, M, D, OT>
 where
-    M: OcnusModel<T, D, FMST, CSST>,
-    T: Copy
-        + for<'x> Mul<&'x T, Output = T>
-        + RealField
-        + SampleUniform
-        + for<'x> Sub<&'x T, Output = T>
-        + Sum
-        + for<'x> Sum<&'x T>,
-    for<'x> &'x T: Mul<&'x T, Output = T>,
-    FMST: Clone + Default + Send,
-    CSST: Clone + Default + Send,
-    OT: AddAssign + OcnusObser + Scalar + Zero,
+    M: Clone + Model<T, D> + Sync,
+    T: Copy + RealField + SampleUniform + Sum,
+    M::FMST: std::fmt::Debug + Clone + Default + Send,
+    M::CSST: std::fmt::Debug + Clone + Default + Send,
+    OT: AddAssign + Observable + Scalar + Zero,
     StandardNormal: Distribution<T>,
     usize: AsPrimitive<T>,
 {
-    /// A single iteration of an differential evolution algorithm (not a particle filter).
+    /// A single iteration of an differential evolution algorithm (not a particle filter!).
     ///
-    /// The algorithm assumes that `ensbl_errors` field is appropriately filled.
+    /// The algorithm assumes that `errors` field is appropriately filled so that
+    /// a comparison with the previous generation can be made.
     pub fn diff_ev_iter<EF, OF>(
         &mut self,
-        settings: &ParticleFilterSettings<T>,
         (mutation, recombination): (T, T),
         obs_func: &OF,
         err_func: &EF,
-    ) -> Result<usize, ParticleFilterError<T>>
+    ) -> Result<usize, ModelError<T>>
     where
-        M: OcnusModel<T, D, FMST, CSST>,
-        EF: Fn(&DVectorView<OT>) -> T + Sync,
-        OF: Fn(&M, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>
+        M: Model<T, D>,
+        T: AsPrimitive<f64>,
+        EF: Fn(&[OT], &[OT]) -> T + Sync,
+        OF: Fn(&M, &ScConf<T>, &SVector<T, D>, &M::FMST, &M::CSST) -> Result<OT, ModelError<T>>
             + Sync,
     {
         let start = Instant::now();
 
-        let ensemble_size = settings.ensemble_size;
-        let series = &settings.series;
-
-        let mut target_ensbl = self.ensbl.take().expect("ensemble is not initialized");
-        let mut target_output = self.ensbl_output.take().unwrap();
-        let mut target_errors = self.ensbl_errors.take().unwrap();
-
-        let mut temp_ensbl = target_ensbl.clone();
-        let mut temp_output = DMatrix::<OT>::zeros(series.len(), ensemble_size);
+        let mut temp_ensbl = self.ensbl.clone();
+        let mut temp_obser = self.obser.clone();
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(self.rseed);
 
-        let constants = (&target_ensbl.ptpdf)
+        let constants = (&self.ensbl.ptpdf)
             .get_constants()
             .iter()
             .map(|c| c.is_finite())
@@ -79,112 +61,101 @@ where
             ddx = rng.random_range(0..D);
         }
 
-        // Choose indices for recombination particles.
-        let ddx_a = vec![rng.random_range(0..settings.ensemble_size); settings.ensemble_size];
-        let ddx_b = vec![rng.random_range(0..settings.ensemble_size); settings.ensemble_size];
-        let thresholds =
-            vec![T::from_f64(rng.random_range(0.0..1.0)).unwrap(); settings.ensemble_size];
+        // Choose indices for recombining the particles.
+        let ddx_a = vec![rng.random_range(0..self.ensbl.len()); self.ensbl.len()];
+        let ddx_b = vec![rng.random_range(0..self.ensbl.len()); self.ensbl.len()];
+        let thresholds = vec![T::from_f64(rng.random_range(0.0..1.0)).unwrap(); self.ensbl.len()];
 
         temp_ensbl
             .ptpdf
-            .particles_mut()
-            .par_column_iter_mut()
+            .par_iter_mut()
             .enumerate()
             .chunks(128)
             .for_each(|mut chunks| {
                 chunks.iter_mut().for_each(|(idx, new_col)| {
                     new_col[(ddx, 0)] += mutation
-                        * (target_ensbl.ptpdf.particles()[(ddx, ddx_a[*idx])]
-                            - target_ensbl.ptpdf.particles()[(ddx, ddx_b[*idx])])
+                        * (self.ensbl.ptpdf.get_particle(ddx_a[*idx])[ddx]
+                            - self.ensbl.ptpdf.get_particle(ddx_b[*idx])[ddx])
                 });
             });
 
-        self.model
-            .as_ref()
-            .unwrap()
-            .initialize_states_ensbl(&mut temp_ensbl)?;
+        self.model.initialize_states_ensbl(&mut temp_ensbl)?;
 
-        self.model.as_ref().unwrap().simulate_ensbl(
-            series,
+        self.model.simulate_ensbl(
             &mut temp_ensbl,
+            &mut temp_obser,
             obs_func,
-            &mut temp_output.as_view_mut(),
-            None::<&mut NullNoise<T>>,
+            &mut None::<&mut NullNoise<T>>,
         )?;
 
-        let mutated = temp_output
-            .par_column_iter()
-            .zip(target_errors.par_iter_mut())
+        let refdt = Vec::<OT>::from_iter(self.obser.refdt().iter().cloned());
+
+        let mutated = temp_obser
+            .par_ensbl_iter()
+            .zip(self.errors.par_iter_mut())
             .zip(thresholds.par_iter())
-            .zip(target_ensbl.ptpdf.particles_mut().par_column_iter_mut())
-            .zip(temp_ensbl.ptpdf.particles().par_column_iter())
-            .zip(target_output.par_column_iter_mut())
+            .zip(self.ensbl.ptpdf.par_iter_mut())
+            .zip(temp_ensbl.ptpdf.par_iter())
+            .zip(self.obser.par_ensbl_iter_mut())
             .chunks(128)
             .map(|mut chunks| {
                 chunks
                     .iter_mut()
-                    .map(|(((((out, error), threshold), col), temp_col), temp_out)| {
-                        let value = err_func(&out.as_view::<Dyn, U1, U1, Dyn>());
+                    .map(
+                        |((((((_, temp_out), error), threshold), pt), temp_pt), (_, out))| {
+                            let value = err_func(&refdt, temp_out.as_slice());
 
-                        if ((value < **error) && (**threshold < recombination))
-                            && self
-                                .model
-                                .as_ref()
-                                .unwrap()
-                                .model_prior()
-                                .validate_sample(temp_col)
-                        {
-                            col[(ddx, 0)] = temp_col[(ddx, 0)];
-                            **error = value;
-                            temp_out.set_column(0, out);
-                            1
-                        } else {
-                            0
-                        }
-                    })
+                            if ((value < **error) && (**threshold < recombination))
+                                && self.model.model_prior().validate_sample(temp_pt)
+                            {
+                                pt[(ddx, 0)] = temp_pt[(ddx, 0)];
+                                **error = value;
+                                out.set_column(0, temp_out);
+                                1
+                            } else {
+                                0
+                            }
+                        },
+                    )
                     .sum::<usize>()
             })
             .sum::<usize>();
 
-        target_ensbl
-            .ptpdf
-            .weights_mut()
-            .iter_mut()
-            .for_each(|value| *value = T::one() / T::from_usize(ensemble_size).unwrap());
+        self.ensbl.ptpdf.update_weights(&vec![
+            T::one() / T::from_usize(self.ensbl.len()).unwrap();
+            self.ensbl.len()
+        ]);
 
         // Update covariance matrix.
-        target_ensbl.ptpdf.update_mvpdf();
-
-        let target_errors_sorted = target_errors
-            .iter()
-            .sorted_by(|a, b| a.partial_cmp(b).unwrap())
-            .copied()
-            .collect::<Vec<T>>();
+        self.ensbl.ptpdf.update_mvpdf();
 
         // Compute quantiles for logging purposes.
-        let eps_1 = target_errors_sorted[(ensemble_size as f64 * 0.34) as usize];
-        let eps_2 = target_errors_sorted[(ensemble_size as f64 * 0.50) as usize];
-        let eps_3 = target_errors_sorted[(ensemble_size as f64 * 0.68) as usize];
+        let quantiles = quantiles(
+            &self.errors,
+            &[
+                T::from_f64(0.34).unwrap(),
+                T::from_f64(0.50).unwrap(),
+                T::from_f64(0.68).unwrap(),
+            ],
+        );
+
+        let (q_low, q_mid, q_hgh) = (quantiles[0], quantiles[1], quantiles[2]);
 
         info!(
             "diff_ev_iter\n\teps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\tmutated = {:.1} / {}",
-            eps_1,
-            eps_2,
-            eps_3,
-            T::from_f64((ensemble_size * series.len()) as f64 / 1e6).unwrap(),
+            q_low,
+            q_mid,
+            q_hgh,
+            T::from_f64((self.ensbl.len() * self.obser.len()) as f64 / 1e6).unwrap(),
             T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
             mutated,
-            ensemble_size
+            self.ensbl.len()
         );
 
         self.rseed += 1;
 
-        self.ensbl = Some(target_ensbl);
-        self.ensbl_output = Some(target_output);
-        self.ensbl_errors = Some(target_errors);
-
         self.iter += 1;
-        self.truns += ensemble_size;
+        self.truns += self.ensbl.len();
 
         Ok(mutated)
     }
@@ -192,22 +163,22 @@ where
     /// A loop of differential evolution steps with various aborting criteria.
     pub fn diff_ev_loop<EF, OF>(
         &mut self,
-        settings: &ParticleFilterSettings<T>,
+        max_iterations: usize,
         (mutation, recombination): (T, T),
         obs_func: &OF,
         err_func: &EF,
-    ) -> Result<Vec<usize>, ParticleFilterError<T>>
+    ) -> Result<Vec<usize>, ModelError<T>>
     where
-        M: OcnusModel<T, D, FMST, CSST>,
-        T: AsPrimitive<usize>,
-        EF: Fn(&DVectorView<OT>) -> T + Sync,
-        OF: Fn(&M, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>
+        M: Model<T, D>,
+        T: AsPrimitive<f64> + AsPrimitive<usize>,
+        EF: Fn(&[OT], &[OT]) -> T + Sync,
+        OF: Fn(&M, &ScConf<T>, &SVector<T, D>, &M::FMST, &M::CSST) -> Result<OT, ModelError<T>>
             + Sync,
     {
         let mut mutated = Vec::new();
 
-        for _ in 0..settings.max_iterations {
-            let result = self.diff_ev_iter(settings, (mutation, recombination), obs_func, err_func);
+        for _ in 0..max_iterations {
+            let result = self.diff_ev_iter((mutation, recombination), obs_func, err_func);
 
             match result {
                 Ok(new_mutated) => {

@@ -1,51 +1,52 @@
-//! # Statistics sub-module for the **ocnus** framework.
+//! # Statistics module for the **ocnus** framework.
 //!
-//! This module introduces the [`Density`] trait, which is the trait that is shared by all joint or univariate probability density functions.
-//! The three main implemented probability density functions are:
-//! - [`MultivariateDensity`] A joint probability density function defined by a set of univariate proability density functions.
-//! - [`MultivariateNormalDensity`] A joint probability density function defined by a [`CovMatrix`](`covmatrix::CovMatrix`).
-//! - [`ParticleDensity`] A joint probability density function defined by an ensemble of particles.
+//! This module introduces, and contains implementations of, the [`Density`] trait, which is used to describe probability density functions (PDFs).
 //!
-//! All univariate density functions are summarized within the [`UnivariateDensity`] ADT, and these types should not be used by their own.
+//! There are currently three implementations of the [`Density`] trait, i.e. probability density functions, which are:
+//! - [`MultivariateDensity`] A joint probability density function defined by a set of independent univariate PDFs.
+//! - [`MultivariateNormalDensity`] A joint normal distribution defined by a [`CovMatrix`](`crate::math::CovMatrix`).
+//! - [`ParticleDensity`] A joint probability density function defined by an ensemble of particles or samples.
+//!
+//! All univariate density functions are summarized within the [`UnivariateDensity`] ADT, and as such these types are not intended to be used on their own.
 
 mod normal;
 mod particles;
-mod simple;
+mod univariate;
+
+use std::ops::Sub;
 
 pub use normal::*;
 pub use particles::*;
-pub use simple::*;
+use serde::{Deserialize, Serialize};
+pub use univariate::*;
 
 use nalgebra::{RealField, SVector, SVectorView};
 use rand::Rng;
-use rand_distr::{Distribution, StandardNormal};
-use serde::{Deserialize, Serialize};
 
 /// A trait that is shared by all probability density functions.
 pub trait Density<T, const D: usize>: Sync
 where
     T: Copy + RealField,
 {
-    /// Draw a random sample (vector) from the underlying density.
+    /// Draw a random sample from the underlying density.
     ///
-    /// This function is limited to `A` sampling attempts, and returns None if the sampling process fails.
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, D>>
-    where
-        StandardNormal: Distribution<T>;
+    /// This function is limited to `max_attempts` sampling attempts,
+    /// and returns None if no valid samples are drawn.
+    fn draw_sample(&self, rng: &mut impl Rng, max_attempts: usize) -> Option<SVector<T, D>>;
 
-    /// Returns the constant values for each dimension,
-    /// returns NaN for each dimensions that is not fixed.
+    /// Returns the constant values for each dimension and
+    /// returns NaN for respective dimensions that are not constant.
     fn get_constants(&self) -> SVector<T, D>;
 
-    /// Returns the minimum and maximum valid values for each dimension.
+    /// Returns the valid parameter range for each dimension.
     fn get_range(&self) -> SVector<DensityRange<T>, D>;
 
     /// Calculates or estimates a relative density value at a specific position `x`.
     ///
-    /// If the position `x` is outside the valid range, this function returns NaN.
+    /// Returns NaN if the position `x` is outside the valid range, which can be retrieved using [`Density::get_range`].
     fn relative_density(&self, x: &SVectorView<T, D>) -> T;
 
-    /// Validate a random sample vector by checking the sample w.r.t. to the valid range.
+    /// Validate a random sample by checking whether the parameter values are within the valid range.
     fn validate_sample(&self, sample: &SVectorView<T, D>) -> bool {
         sample
             .iter()
@@ -55,54 +56,52 @@ where
                 if constant.is_finite() {
                     acc & (value == constant)
                 } else {
-                    acc & ((&range.min() <= value) & (value <= &range.max()))
+                    acc & ((&range.min <= value) & (value <= &range.max))
                 }
             })
     }
-
-    /// Same as [`validate_sample`](`crate::stats::Density::validate_sample`), except that a boolean array is returned where each violating dimension is flagged.
-    fn validate_sample_flags(&self, sample: &SVectorView<T, D>) -> SVector<bool, D> {
-        SVector::from_iterator(
-            sample
-                .iter()
-                .zip(self.get_range().iter())
-                .zip(self.get_constants().iter())
-                .map(|((value, range), constant)| {
-                    if constant.is_finite() {
-                        value == constant
-                    } else {
-                        (&range.min() <= value) & (value <= &range.max())
-                    }
-                }),
-        )
-    }
 }
 
-/// Defines the valid parameter range for a probability density function.
+/// Defines the valid parameter range `[min, max]` for a probability density function.
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct DensityRange<T>((T, T));
+pub struct DensityRange<T> {
+    /// The minimum inclusive value of the range.
+    pub min: T,
+
+    /// The maximum inclusive value of the range.
+    pub max: T,
+}
 
 impl<T> DensityRange<T>
 where
     T: Copy + PartialOrd,
 {
-    /// The maximum value of the range.
-    pub fn max(&self) -> T {
-        self.0.1
+    /// Returns an un-bounded range.
+    pub fn inf() -> Self
+    where
+        T: RealField,
+    {
+        Self {
+            min: -T::one() / T::zero(),
+            max: T::one() / T::zero(),
+        }
     }
 
-    /// The minimum value of the range.
-    pub fn min(&self) -> T {
-        self.0.0
+    /// Returns the length of the range, not be confused with the common function `len`.
+    pub fn length(&self) -> T
+    where
+        T: Sub<T, Output = T>,
+    {
+        self.max - self.min
     }
 
     /// Create a new [`DensityRange`].
-    pub fn new(minamax: (T, T)) -> Self {
+    pub fn new(min: T, max: T) -> Self {
         assert!(
-            minamax.0 <= minamax.1,
+            min <= max,
             "minimum value must be smaller or equal than the maximum value"
         );
 
-        Self(minamax)
+        Self { min, max }
     }
 }

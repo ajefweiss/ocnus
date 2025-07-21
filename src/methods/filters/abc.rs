@@ -1,35 +1,24 @@
 use crate::{
-    base::{OcnusEnsbl, OcnusModel, OcnusModelError, ScObs},
+    base::{Model, ModelError, ScConf},
+    math::{normalize, quantiles},
     methods::filters::{ParticleFilter, ParticleFilterError, ParticleFilterSettings},
-    obser::{NullNoise, OcnusNoise, OcnusObser},
-    stats::{Density, ParticleDensity},
+    obsty::{NoiseModel, NullNoise, Observable},
+    stats::Density,
 };
-use itertools::Itertools;
-use log::{debug, info};
-use nalgebra::{DMatrix, DVectorView, Dyn, RealField, SVector, Scalar, U1};
+use log::info;
+use nalgebra::{RealField, SVector, Scalar};
 use num_traits::{AsPrimitive, Zero};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
-use std::{
-    iter::Sum,
-    ops::{AddAssign, Mul, Sub},
-    time::Instant,
-};
+use std::{iter::Sum, ops::AddAssign, time::Instant};
 
-impl<M, T, const D: usize, FMST, CSST, OT> ParticleFilter<M, T, D, FMST, CSST, OT>
+impl<T, M, const D: usize, OT> ParticleFilter<T, M, D, OT>
 where
-    M: OcnusModel<T, D, FMST, CSST>,
-    T: Copy
-        + for<'x> Mul<&'x T, Output = T>
-        + RealField
-        + SampleUniform
-        + for<'x> Sub<&'x T, Output = T>
-        + Sum
-        + for<'x> Sum<&'x T>,
-    for<'x> &'x T: Mul<&'x T, Output = T>,
-    FMST: Clone + Default + Send,
-    CSST: Clone + Default + Send,
-    OT: AddAssign + OcnusObser + Scalar + Zero,
+    M: Model<T, D> + Sync,
+    T: Copy + RealField + SampleUniform + Sum,
+    M::FMST: std::fmt::Debug + Clone + Default + Send,
+    M::CSST: std::fmt::Debug + Clone + Default + Send,
+    OT: AddAssign + Observable + Scalar + Zero,
     StandardNormal: Distribution<T>,
     usize: AsPrimitive<T>,
 {
@@ -42,210 +31,133 @@ where
         err_func: (&EF, T),
     ) -> Result<(T, T), ParticleFilterError<T>>
     where
-        M: OcnusModel<T, D, FMST, CSST>,
-        NM: OcnusNoise<T, OT> + Sync,
-        EF: Fn(&DVectorView<OT>) -> T + Sync,
-        OF: Fn(&M, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>
+        M: Model<T, D>,
+        T: AsPrimitive<f64>,
+        NM: NoiseModel<T, OT> + Sync,
+        EF: Fn(&[OT], &[OT]) -> T + Sync,
+        OF: Fn(&M, &ScConf<T>, &SVector<T, D>, &M::FMST, &M::CSST) -> Result<OT, ModelError<T>>
             + Sync,
     {
         let start = Instant::now();
 
-        let ensemble_size = settings.ensemble_size;
-        let series = &settings.series;
-        let sim_ensemble_size = settings.simulation_ensemble_size;
-
-        let mut counter = 0;
-        let mut iteration: usize = 0;
-
-        let mut target_ensbl = self.ensbl.take().expect("ensemble is not initialized");
-        let mut target_output = self
-            .ensbl_output
-            .take()
-            .unwrap_or(DMatrix::zeros(series.len(), ensemble_size));
-        let mut target_filter_values = Vec::<T>::with_capacity(ensemble_size);
-
-        let mut temp_ensbl = OcnusEnsbl::new(
-            sim_ensemble_size,
-            self.model.as_ref().unwrap().model_prior().get_range(),
-        );
-        let mut temp_output = DMatrix::<OT>::zeros(series.len(), sim_ensemble_size);
-
         // Copy the density and increase the size of the multivariate normal density estimate.
-        let mut density_old = target_ensbl.ptpdf.clone() * settings.expl_factor;
+        let mut density_old = self.ensbl.ptpdf.clone() * settings.expl_factor;
 
-        while counter != target_ensbl.len() {
-            self.model
-                .as_ref()
-                .unwrap()
-                .initialize_ensbl::<500, ParticleDensity<T, D>>(
-                    &mut temp_ensbl,
-                    Some(&density_old),
-                    1 + self.rseed + 23 * iteration as u64,
-                )?;
+        let flt_func = |arg1: &[OT], arg2: &[OT]| {
+            let value = err_func.0(arg1, arg2);
 
-            self.model.as_ref().unwrap().simulate_ensbl(
-                series,
-                &mut temp_ensbl,
-                obs_func,
-                &mut temp_output.as_view_mut(),
-                Some(noise),
-            )?;
+            (value < err_func.1, value)
+        };
 
-            let mut flags = vec![true; sim_ensemble_size];
-            let filter_values = temp_output
-                .par_column_iter()
-                .zip(flags.par_iter_mut())
-                .chunks(M::RCS)
-                .map(|mut chunks| {
-                    chunks
-                        .iter_mut()
-                        .map(|(out, flag)| {
-                            let value = err_func.0(&out.as_view::<Dyn, U1, U1, Dyn>());
+        let (filter_values, iterations) = self.pf_filter(
+            settings,
+            &flt_func,
+            obs_func,
+            Some(&density_old),
+            &mut Some(noise),
+            settings.max_attempts,
+            23,
+        )?;
 
-                            **flag = value < err_func.1;
-
-                            value
-                        })
-                        .collect::<Vec<T>>()
-                })
-                .flatten()
-                .collect::<Vec<T>>();
-
-            let mut indices_valid = flags
-                .into_iter()
-                .enumerate()
-                .filter_map(|(idx, flag)| if flag { Some(idx) } else { None })
-                .collect::<Vec<usize>>();
-
-            debug!("valid: {}", indices_valid.len());
-
-            // Remove excessive ensemble members.
-            if counter + indices_valid.len() > target_ensbl.len() {
-                debug!(
-                    "removing excessive ensemble members simulations n={}",
-                    counter + indices_valid.len() - target_ensbl.len()
-                );
-                indices_valid.drain((target_ensbl.len() - counter)..indices_valid.len());
-            }
-
-            // Copy over results.
-            indices_valid.iter().enumerate().for_each(|(edx, idx)| {
-                target_ensbl
-                    .ptpdf
-                    .particles_mut()
-                    .set_column(counter + edx, &temp_ensbl.ptpdf.particles().column(*idx));
-
-                target_filter_values.push(filter_values[*idx]);
-            });
-
-            counter += indices_valid.len();
-
-            iteration += 1;
-
-            if start.elapsed().as_millis() as f64 / 1e3 > settings.simulation_time_limit {
-                info!(
-                    "pf_abc_iter aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\tsamples = {:.1} / {}",
-                    (iteration * sim_ensemble_size * series.len()) as f64 / 1e6,
-                    start.elapsed().as_millis() as f64 / 1e3,
-                    counter,
-                    ensemble_size,
-                );
-
-                self.ensbl = Some(target_ensbl);
-                self.ensbl_output = Some(target_output);
-                self.ensbl_errors = Some(target_filter_values);
-
-                return Err(ParticleFilterError::TimeLimitExceeded {
-                    elapsed: start.elapsed().as_millis() as f64 / 1e3,
-                    limit: settings.simulation_time_limit,
-                });
-            }
-        }
-
-        if !target_filter_values.is_empty() {
-            let filter_values_sorted = target_filter_values
-                .iter()
-                .sorted_by(|a, b| a.partial_cmp(b).unwrap())
-                .copied()
-                .collect::<Vec<T>>();
-
-            // Compute quantiles for logging purposes.
-            let eps_1 = filter_values_sorted[(ensemble_size as f64 * 0.34) as usize];
-            let eps_2 = filter_values_sorted[(ensemble_size as f64 * 0.50) as usize];
-            let eps_3 = filter_values_sorted[(ensemble_size as f64 * 0.68) as usize];
-
-            // Reset the multivariate normal density estimate of the old density.
-            target_ensbl.ptpdf.from_transition(
-                &density_old,
-                Some(&self.model.as_ref().unwrap().model_prior()),
-            );
-
-            density_old *= T::one() / settings.expl_factor;
-
-            // Compute the effective sample size.
-            let ess = T::one()
-                / target_ensbl
-                    .ptpdf
-                    .weights()
-                    .iter()
-                    .map(|value| value.powi(2))
-                    .sum::<T>();
-
-            let kld = target_ensbl
+        // Calculate new weights using prior and importance weights.
+        let new_weights = normalize(
+            &self
+                .ensbl
                 .ptpdf
-                .kullback_leibler_divergence(&density_old)
-                .expect("failed to compute the kl div");
+                .par_iter()
+                .map(|params| {
+                    self.model.model_prior().relative_density(&params)
+                        / density_old
+                            .iter()
+                            .zip(density_old.weights().iter())
+                            .map(|(params_old, weight_old)| {
+                                let delta = params - params_old;
 
-            info!(
-                "pf_abc_iter\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
-                kld,
-                eps_1,
-                eps_2,
-                eps_3,
-                T::from_f64((iteration * sim_ensemble_size * series.len()) as f64 / 1e6).unwrap(),
-                T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
-                ess,
-                ensemble_size,
-            );
+                                (weight_old.ln()
+                                    - (delta.transpose()
+                                        * density_old.covmatrix().pseudo_inverse()
+                                        * delta)[(0, 0)])
+                                    .exp()
+                            })
+                            .sum::<T>()
+                })
+                .collect::<Vec<T>>(),
+        );
 
-            self.rseed += 1;
+        self.ensbl.ptpdf.update_weights(new_weights.as_slice());
 
-            self.model
-                .as_ref()
-                .unwrap()
-                .initialize_states_ensbl(&mut target_ensbl)?;
+        self.ensbl.ptpdf.update_mvpdf();
 
-            self.model.as_ref().unwrap().simulate_ensbl(
-                series,
-                &mut target_ensbl,
-                obs_func,
-                &mut target_output.as_view_mut(),
-                None::<&mut NullNoise<T>>,
-            )?;
+        density_old *= T::one() / settings.expl_factor;
 
-            self.ensbl = Some(target_ensbl);
-            self.ensbl_output = Some(target_output);
-            self.ensbl_errors = Some(target_filter_values);
+        // Compute the effective sample size.
+        let ess = T::one()
+            / self
+                .ensbl
+                .ptpdf
+                .weights()
+                .iter()
+                .map(|value| value.powi(2))
+                .sum::<T>();
 
-            self.iter += 1;
-            self.truns += iteration * sim_ensemble_size;
-
-            Ok((ess, kld))
-        } else {
-            info!(
-                "pf_abc_iter\n\tKL delta: {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
-                0.0,
-                T::from_f64((iteration * sim_ensemble_size * series.len()) as f64 / 1e6).unwrap(),
-                T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
-            );
-
-            self.rseed += 1;
-
-            self.ensbl = Some(target_ensbl);
-            self.ensbl_output = Some(target_output);
-
-            Err(ParticleFilterError::Nothing)
+        if ess < T::from_usize(self.ensbl.len()).unwrap() * settings.eff_particle_threshold_factor {
+            return Err(ParticleFilterError::InsufficientParticles(ess));
         }
+
+        let kld = self
+            .ensbl
+            .ptpdf
+            .kullback_leibler_divergence(&density_old)
+            .expect("failed to compute the kl div");
+
+        // Compute quantiles for logging purposes.
+        let quantiles = quantiles(
+            &filter_values,
+            &[
+                T::from_f64(0.34).unwrap(),
+                T::from_f64(0.50).unwrap(),
+                T::from_f64(0.68).unwrap(),
+            ],
+        );
+
+        let (q_low, q_mid, q_hgh) = (quantiles[0], quantiles[1], quantiles[2]);
+
+        info!(
+            "pf_abc_iter\n\tKL delta: {:.3} | eps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
+            kld,
+            q_low,
+            q_mid,
+            q_hgh,
+            T::from_f64(
+                (iterations
+                    * self.ensbl.len()
+                    * settings.simulation_ensemble_size_factor
+                    * self.obser.len()) as f64
+                    / 1e6
+            )
+            .unwrap(),
+            T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
+            ess,
+            self.ensbl.len(),
+        );
+
+        self.rseed += 1;
+
+        self.model.initialize_states_ensbl(&mut self.ensbl)?;
+
+        self.model.simulate_ensbl(
+            &mut self.ensbl,
+            &mut self.obser,
+            obs_func,
+            &mut None::<&mut NullNoise<T>>,
+        )?;
+
+        self.errors = filter_values;
+
+        self.iter += 1;
+        self.truns += iterations * self.ensbl.len() * settings.simulation_ensemble_size_factor;
+
+        Ok((ess, kld))
     }
 
     /// A loop of approximate Bayesian Computation particle filtering steps with various aborting criteria.
@@ -257,15 +169,20 @@ where
         err_func: &EF,
     ) -> Result<(Vec<T>, Vec<T>), ParticleFilterError<T>>
     where
-        M: OcnusModel<T, D, FMST, CSST>,
-        T: AsPrimitive<usize>,
-        NM: OcnusNoise<T, OT> + Sync,
-        EF: Fn(&DVectorView<OT>) -> T + Sync,
-        OF: Fn(&M, &ScObs<T>, &SVector<T, D>, &FMST, &CSST) -> Result<OT, OcnusModelError<T>>
+        M: Model<T, D>,
+        T: AsPrimitive<f64> + AsPrimitive<usize>,
+        NM: NoiseModel<T, OT> + Sync,
+        EF: Fn(&[OT], &[OT]) -> T + Sync,
+        OF: Fn(&M, &ScConf<T>, &SVector<T, D>, &M::FMST, &M::CSST) -> Result<OT, ModelError<T>>
             + Sync,
     {
         let mut ess = Vec::new();
         let mut kld = Vec::new();
+
+        info!(
+            "pf_abc_loop starting, maximum {} iterations",
+            settings.max_iterations
+        );
 
         for _ in 0..settings.max_iterations {
             let threshold = self.error_quantile(settings.error_quantile).unwrap();

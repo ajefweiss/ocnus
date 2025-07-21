@@ -1,0 +1,22 @@
+[package]
+name = "ocnus-py"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "ocnus_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
+numpy = { version = "*", features = ["nalgebra"] }
+ocnus = { path = "../" }
+paste = "*"
+pyo3 = "*"
+pyo3-log = "*"
+rayon = "*"
+serde_json5 = "*"
+
+[features]
+f32 = []

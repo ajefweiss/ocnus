@@ -1,10 +1,11 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use nalgebra::DMatrix;
+use nalgebra::Vector3;
 use ocnus::{
-    base::{OcnusEnsbl, OcnusModel, ScObs, ScObsConf, ScObsSeries},
+    base::{Model, ScConf, ScObs},
+    methods::filters::ParticleFilter,
     models::WSAHUXModel,
-    obser::{MeasureInSituPlasmaBulkVelocity, NullNoise, ObserVec},
-    stats::{ConstantDensity, Density, MultivariateDensity},
+    obsty::{MeasInSituPBV, NullNoise},
+    stats::{ConstantDensity, MultivariateDensity},
 };
 use std::{hint::black_box, path::Path, time::Duration};
 
@@ -26,32 +27,34 @@ fn benchmark_wsahux_f32(c: &mut Criterion) {
         .join("data")
         .join("wsapy_NSO-GONG_CR2047_0_NSteps90.json");
 
-    let range = (&prior).get_range();
     let mut model = WSAHUXModel::<f32, 215, _>::from_file(prior, path, 2.0).unwrap();
 
     model.limit_latitude(1.0);
 
-    let sc = ScObsSeries::<f32>::from_iterator(
-        (0..150).map(|i| ScObs::new((14400 * i) as f32, ScObsConf::Position([1.0, 0.0, 0.0]))),
-    );
+    let sc = ScObs::from_iterator((0..150).map(|i| {
+        (
+            (14400 * i) as f32,
+            ScConf::Position(Vector3::new(1.0, 0.0, 0.0)),
+        )
+    }));
+
+    let mut pf = ParticleFilter::new(sc.clone(), model.clone(), ENSEMBLE_SIZE, 42);
 
     let mut group = c.benchmark_group("wsahux_bench");
 
-    let mut ensbl = OcnusEnsbl::new(ENSEMBLE_SIZE, range);
-    let mut output = DMatrix::<ObserVec<_, 1>>::zeros(sc.len(), ENSEMBLE_SIZE);
-
     group
         .significance_level(0.05)
-        .sample_size(50)
-        .measurement_time(Duration::from_secs(5));
+        .sample_size(250)
+        .measurement_time(Duration::from_secs(25));
 
     group.throughput(Throughput::Elements(ENSEMBLE_SIZE as u64));
     group.bench_function("wsahux_initialize", |b| {
         b.iter(|| {
             model
-                .initialize_ensbl::<100, _>(
-                    black_box(&mut ensbl),
+                .initialize_ensbl(
+                    black_box(&mut pf.ensbl),
                     black_box(None::<&MultivariateDensity<f32, 8>>),
+                    1000,
                     42,
                 )
                 .unwrap();
@@ -62,19 +65,19 @@ fn benchmark_wsahux_f32(c: &mut Criterion) {
     group.bench_function("wsahux_simulate", |b| {
         b.iter(|| {
             model
-                .initialize_ensbl::<100, _>(
-                    black_box(&mut ensbl),
+                .initialize_ensbl(
+                    black_box(&mut pf.ensbl),
                     black_box(None::<&MultivariateDensity<f32, 8>>),
+                    1000,
                     42,
                 )
                 .unwrap();
             model
                 .simulate_ensbl(
-                    &sc,
-                    &mut ensbl,
+                    &mut pf.ensbl,
+                    &mut pf.obser,
                     &WSAHUXModel::<f32, 215, MultivariateDensity<f32, 8>>::observe_pbv,
-                    &mut output.as_view_mut(),
-                    None::<&mut NullNoise<f32>>,
+                    &mut None::<&mut NullNoise<f32>>,
                 )
                 .unwrap();
         });

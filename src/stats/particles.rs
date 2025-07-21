@@ -1,16 +1,20 @@
-use crate::stats::{Density, DensityRange, MultivariateNormalDensity};
-use covmatrix::CovMatrix;
+use crate::{
+    math::CovMatrix,
+    stats::{Density, DensityRange, MultivariateNormalDensity},
+};
 use nalgebra::{
     Const, DVector, Dyn, Matrix, MatrixView, RealField, SVector, SVectorView, U1, VecStorage,
+    ViewStorage,
+    iter::{ColumnIter, ColumnIterMut},
+    par_iter::{ParColumnIter, ParColumnIterMut},
 };
 use num_traits::AsPrimitive;
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal, Uniform, uniform::SampleUniform};
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     iter::Sum,
-    ops::{Mul, MulAssign, Sub},
+    ops::{Mul, MulAssign},
 };
 
 /// A probability density function defined by an ensemble of particles.
@@ -33,7 +37,7 @@ where
     /// Valid parameter range.
     range: SVector<DensityRange<T>, D>,
 
-    /// Particle ensemble weights
+    /// Ensemble weights.
     weights: DVector<T>,
 }
 
@@ -73,27 +77,29 @@ where
     /// Create a [`ParticleDensity`] from an ensemble of particles.
     pub fn from_vectors(
         vectors: &MatrixView<T, Const<D>, Dyn>,
-        range: SVector<DensityRange<T>, D>,
+        opt_range: Option<&SVector<DensityRange<T>, D>>,
         opt_weights: Option<DVector<T>>,
     ) -> Option<Self>
     where
-        T: for<'x> Mul<&'x T, Output = T>
-            + for<'x> Sub<&'x T, Output = T>
-            + Sum
-            + for<'x> Sum<&'x T>,
-        for<'x> &'x T: Mul<&'x T, Output = T>,
+        T: Sum,
         StandardNormal: Distribution<T>,
         usize: AsPrimitive<T>,
     {
         let mvpdf = match &opt_weights {
             Some(weights) => MultivariateNormalDensity::from_vectors::<U1, Const<D>>(
                 &vectors.as_view(),
-                range,
+                match opt_range {
+                    Some(range) => *range,
+                    None => SVector::from([DensityRange::inf(); D]),
+                },
                 Some(weights.as_slice()),
             ),
             None => MultivariateNormalDensity::from_vectors::<U1, Const<D>>(
                 &vectors.as_view(),
-                range,
+                match opt_range {
+                    Some(range) => *range,
+                    None => SVector::from([DensityRange::inf(); D]),
+                },
                 None,
             ),
         }?;
@@ -102,7 +108,10 @@ where
             kde: None,
             mvpdf,
             particles: vectors.clone_owned(),
-            range,
+            range: match opt_range {
+                Some(range) => *range,
+                None => SVector::from([DensityRange::inf(); D]),
+            },
             weights: if let Some(weights) = opt_weights {
                 weights.clone()
             } else {
@@ -111,79 +120,38 @@ where
         })
     }
 
-    /// Update `self` assuming a transition
-    /// from another [`ParticleDensity`] with optional prior.
-    pub fn from_transition<P>(&mut self, other: &Self, opt_prior: Option<&P>)
-    where
-        T: for<'x> Mul<&'x T, Output = T>
-            + SampleUniform
-            + for<'x> Sub<&'x T, Output = T>
-            + Sum
-            + for<'x> Sum<&'x T>,
-        P: Density<T, D>,
-        for<'x> &'x T: Mul<&'x T, Output = T>,
-        usize: AsPrimitive<T>,
-    {
-        let covmat_inv = other.mvpdf.pseudo_inverse();
+    /// Return a view to all values of a model parameter.
+    pub fn get_param_values(
+        &self,
+        index: usize,
+    ) -> Matrix<T, U1, Dyn, ViewStorage<T, U1, Dyn, U1, Const<D>>> {
+        self.particles.row(index)
+    }
 
-        let mut weights_vector = vec![T::zero(); self.particles.ncols()];
-
-        weights_vector
-            .par_iter_mut()
-            .zip(self.particles.par_column_iter())
-            .for_each(|(weight, params_new)| {
-                *weight = {
-                    let value = other
-                        .particles
-                        .column_iter()
-                        .zip(other.weights.iter())
-                        .map(|(params_old, weight_old)| {
-                            let delta = params_new - params_old;
-
-                            (weight_old.ln() - (delta.transpose() * covmat_inv * delta)[(0, 0)])
-                                .exp()
-                        })
-                        .sum::<T>();
-
-                    if let Some(prior) = opt_prior {
-                        (T::one() / value) * prior.relative_density(&params_new)
-                    } else {
-                        T::one() / value
-                    }
-                }
-            });
-
-        let mut weights = DVector::from(weights_vector);
-
-        let weights_total = weights.iter().sum::<T>();
-
-        weights
-            .iter_mut()
-            .for_each(|weight| *weight /= weights_total);
-
-        let mvpdf = MultivariateNormalDensity::from_vectors::<_, _>(
-            &self.particles.as_view::<_, _, U1, Dyn>(),
-            self.range,
-            Some(weights.as_slice()),
-        )
-        .unwrap();
-
-        self.mvpdf = mvpdf;
-        self.weights = weights;
-
-        if self.kde.is_some() {
-            self.set_kde_covmatrix();
-        }
+    /// Return a view to and individual particle
+    pub fn get_particle(&self, index: usize) -> SVectorView<T, D> {
+        self.particles.column(index)
     }
 
     /// Returns true if the density contains no particles.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Iterate through all particles of the ensemble .
+    pub fn iter(&self) -> ColumnIter<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
+        self.particles.column_iter()
+    }
+
+    /// Mutably iterate through all particles of the ensemble .
+    pub fn iter_mut(&mut self) -> ColumnIterMut<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
+        self.particles.column_iter_mut()
+    }
+
     /// Estimate the Kullback-Leibler divergence between two [`ParticleDensity`] using the multivariate normal estimates.
     pub fn kullback_leibler_divergence(&self, other: &ParticleDensity<T, D>) -> Option<T>
     where
-        T: Sum + for<'x> Sum<&'x T>,
+        T: Sum,
     {
         self.mvpdf.kullback_leibler_divergence(&other.mvpdf)
     }
@@ -198,17 +166,19 @@ where
         self.mvpdf.mean()
     }
 
-    /// Returns a reference to the particles matrix.
-    pub fn particles(&self) -> &Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
-        &self.particles
+    /// Iterate through all particles of the ensemble in parallel.
+    pub fn par_iter(&self) -> ParColumnIter<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
+        self.particles.par_column_iter()
     }
 
-    /// Returns a reference to the particles matrix.
-    pub fn particles_mut(&mut self) -> &mut Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
-        &mut self.particles
+    /// Mutably iterate through all particles of the ensemble in parallel.
+    pub fn par_iter_mut(
+        &mut self,
+    ) -> ParColumnIterMut<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
+        self.particles.par_column_iter_mut()
     }
 
-    /// Resample from existing particles.
+    /// Draw a single sample (vector) from the ensemble of particles.
     pub fn resample(&self, rng: &mut impl Rng) -> SVector<T, D>
     where
         T: SampleUniform,
@@ -244,19 +214,25 @@ where
         offset.into_owned()
     }
 
+    /// Return a reference to the underlying particle matrix.
+    pub fn particles(&self) -> &Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>> {
+        &self.particles
+    }
+
     /// Set the kernel density estimator covariance matrix.
     pub fn set_kde_covmatrix(&mut self) {
         self.kde = Some(self.mvpdf.generate_kde_covmatrix(self.particles.ncols()));
     }
 
-    /// Update estimated [`CovMatrix`].
+    /// Set an individual particle.
+    pub fn set_particle(&mut self, index: usize, vector: &SVectorView<T, D>) {
+        self.particles.set_column(index, vector)
+    }
+
+    /// Update estimated [`CovMatrix`] from the ensemble of particles.
     pub fn update_mvpdf(&mut self)
     where
-        T: for<'x> Mul<&'x T, Output = T>
-            + for<'x> Sub<&'x T, Output = T>
-            + Sum
-            + for<'x> Sum<&'x T>,
-        for<'x> &'x T: Mul<&'x T, Output = T>,
+        T: Sum,
         usize: AsPrimitive<T>,
     {
         let mvpdf = MultivariateNormalDensity::from_vectors::<U1, Const<D>>(
@@ -269,25 +245,28 @@ where
         self.mvpdf = mvpdf;
     }
 
+    /// Update the particle weights.
+    pub fn update_weights(&mut self, weights: &[T]) {
+        assert!(
+            self.len() == weights.len(),
+            "number of weights must be equal to the ensemble size"
+        );
+
+        self.weights = DVector::from_iterator(self.len(), weights.iter().copied());
+    }
+
     /// Returns a reference to the particle weights.
     pub fn weights(&self) -> &DVector<T> {
         &self.weights
-    }
-
-    /// Returns a mutable reference to the particle weights.
-    pub fn weights_mut(&mut self) -> &mut DVector<T> {
-        &mut self.weights
     }
 }
 
 impl<T, const D: usize> Density<T, D> for &ParticleDensity<T, D>
 where
     T: Copy + RealField + SampleUniform + Sum,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, D>>
-    where
-        StandardNormal: Distribution<T>,
-    {
+    fn draw_sample(&self, rng: &mut impl Rng, max_attempts: usize) -> Option<SVector<T, D>> {
         let uniform = Uniform::new(T::zero(), T::one()).unwrap();
 
         let offset = {
@@ -316,7 +295,8 @@ where
             self.particles.column(pdx)
         };
 
-        self.mvpdf.draw_sample_with_offset::<A>(&offset, rng)
+        self.mvpdf
+            .draw_sample_with_offset(&offset, rng, max_attempts)
     }
 
     fn get_constants(&self) -> SVector<T, D> {
@@ -401,14 +381,14 @@ mod tests {
 
         let mvpdf_0 = MultivariateNormalDensity::from_vectors::<Dyn, U2>(
             &array_0.as_view(),
-            SVector::from([DensityRange((-0.75, 0.75)); 2]),
+            SVector::from([DensityRange::new(-0.75, 0.75); 2]),
             None,
         )
         .unwrap();
 
         let mut ptpdf_0 = ParticleDensity::from_vectors(
             &array_0.as_view(),
-            SVector::from([DensityRange((-0.75, 0.75)); 2]),
+            Some(&SVector::from([DensityRange::new(-0.75, 0.75); 2])),
             None,
         )
         .unwrap();
@@ -442,7 +422,7 @@ mod tests {
 
         let mut ptpdf = ParticleDensity::from_vectors(
             &array.as_view(),
-            SVector::from([DensityRange((-0.75, 0.75)); 3]),
+            Some(&SVector::from([DensityRange::new(-0.75, 0.75); 3])),
             None,
         )
         .unwrap();
@@ -450,9 +430,9 @@ mod tests {
         ptpdf.set_kde_covmatrix();
 
         assert!(
-            ptpdf
+            !ptpdf
                 .density(&SVector::from([0.2, -0.15, 0.35]).as_view())
-                .is_nan()
+                .is_finite()
         );
 
         assert!(ulps_eq!(
@@ -461,7 +441,7 @@ mod tests {
         ));
 
         assert!(ulps_eq!(
-            (&ptpdf).draw_sample::<100>(&mut rng).unwrap(),
+            (&ptpdf).draw_sample(&mut rng, 100).unwrap(),
             SVector::from([-0.51040643, 0.0, -0.25138772])
         ));
     }

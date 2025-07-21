@@ -1,6 +1,7 @@
-use crate::stats::{Density, DensityRange};
-use covmatrix::CovMatrix;
-use log::error;
+use crate::{
+    math::CovMatrix,
+    stats::{Density, DensityRange},
+};
 use nalgebra::{Const, Dim, Dyn, MatrixView, RealField, SMatrix, SVector, SVectorView, Scalar, U1};
 use num_traits::AsPrimitive;
 use rand::Rng;
@@ -60,10 +61,11 @@ where
     }
 
     /// Draw a random sample vector from the underlying density using a custom offset instead of the mean.
-    pub fn draw_sample_with_offset<const A: usize>(
+    pub fn draw_sample_with_offset(
         &self,
         offset: &SVectorView<T, D>,
         rng: &mut impl Rng,
+        max_attempts: usize,
     ) -> Option<SVector<T, D>>
     where
         StandardNormal: Distribution<T>,
@@ -84,21 +86,7 @@ where
 
             attempts += 1;
 
-            if attempts > A {
-                error!(
-                    "MultivariateNormalDensity::draw_sample_with_offset has failed to draw a valid sample after {} tries",
-                    attempts
-                );
-
-                // easy debug output
-                // error!(
-                //     "\n\tproposal={}\n\toffset={}\n\t{:?}",
-                //     &proposal,
-                //     &offset,
-                //     self.get_range()
-                // );
-                // error!("\n\tmatrix={}", self.covm.matrix());
-
+            if attempts > max_attempts {
                 return None;
             }
         }
@@ -116,17 +104,13 @@ where
     }
 
     /// Create a [`MultivariateNormalDensity`] from an ensemble of particles.
-    pub fn from_vectors<'a, RStride: Dim, CStride: Dim>(
+    pub fn from_vectors<RStride: Dim, CStride: Dim>(
         vectors: &MatrixView<T, Const<D>, Dyn, RStride, CStride>,
         range: SVector<DensityRange<T>, D>,
         opt_weights: Option<&[T]>,
     ) -> Option<Self>
     where
-        T: for<'x> Mul<&'x T, Output = T>
-            + for<'x> Sub<&'x T, Output = T>
-            + Sum
-            + for<'x> Sum<&'x T>,
-        for<'x> &'x T: Mul<&'x T, Output = T>,
+        T: Sum,
         usize: AsPrimitive<T>,
     {
         let covm = CovMatrix::from_vectors(vectors, opt_weights, true)?;
@@ -173,7 +157,7 @@ where
     /// Compute the Kullback-Leibler divergence between two [`MultivariateNormalDensity`].
     pub fn kullback_leibler_divergence(&self, other: &MultivariateNormalDensity<T, D>) -> Option<T>
     where
-        T: Sum + for<'x> Sum<&'x T>,
+        T: Sum,
     {
         let mut l_0 = *self.covm.l().unwrap();
         let mu_0 = &self.mean;
@@ -220,7 +204,7 @@ where
         let y = l_1.clone().solve_lower_triangular(&(mu_1 - mu_0)).unwrap();
 
         Some(
-            (m.iter().sum::<T>() - T::from_usize(p_nonzero).unwrap()
+            (m.iter().copied().sum::<T>() - T::from_usize(p_nonzero).unwrap()
                 + y.norm()
                 + T::from_usize(2).unwrap()
                     * l_1
@@ -253,11 +237,9 @@ where
 impl<T, const D: usize> Density<T, D> for &MultivariateNormalDensity<T, D>
 where
     T: Copy + RealField,
+    StandardNormal: Distribution<T>,
 {
-    fn draw_sample<const A: usize>(&self, rng: &mut impl Rng) -> Option<SVector<T, D>>
-    where
-        StandardNormal: Distribution<T>,
-    {
+    fn draw_sample(&self, rng: &mut impl Rng, max_attempts: usize) -> Option<SVector<T, D>> {
         let normal = StandardNormal;
 
         let mut proposal = self.mean
@@ -274,12 +256,7 @@ where
 
             attempts += 1;
 
-            if attempts > A {
-                error!(
-                    "MultivariateNormalDensity::draw_sample has failed to draw a valid sample after {} tries",
-                    attempts
-                );
-
+            if attempts > max_attempts {
                 return None;
             }
         }
@@ -394,6 +371,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::obsty::Observable;
+
     use super::*;
     use approx::ulps_eq;
     use nalgebra::{Matrix, SVector, U3, VecStorage};
@@ -421,7 +400,7 @@ mod tests {
         let mvpdf = &MultivariateNormalDensity::from_covmatrix(
             covm,
             SVector::from([0.1, 0.0, 0.25]),
-            SVector::from([DensityRange::new((-0.75, 0.75)); 3]),
+            SVector::from([DensityRange::new(-0.75, 0.75); 3]),
         );
 
         assert!(ulps_eq!(
@@ -430,21 +409,21 @@ mod tests {
         ));
 
         assert!(
-            mvpdf
+            !mvpdf
                 .relative_density(&SVector::from([0.2f32, 0.1, 0.35]).as_view())
-                .is_nan()
+                .is_valid()
         );
 
         assert!(ulps_eq!(
-            mvpdf.draw_sample::<100>(&mut rng).unwrap(),
+            mvpdf.draw_sample(&mut rng, 100).unwrap(),
             SVector::from([-0.4150916, 0.0, 0.4898513])
         ));
 
-        assert!(mvpdf.validate_sample(&mvpdf.draw_sample::<100>(&mut rng).unwrap().as_view()));
+        assert!(mvpdf.validate_sample(&mvpdf.draw_sample(&mut rng, 100).unwrap().as_view()));
 
         let mvpdf_ensbl = MultivariateNormalDensity::from_vectors::<Dyn, U3>(
             &array.as_view(),
-            SVector::from([DensityRange::new((-0.75, 0.75)); 3]),
+            SVector::from([DensityRange::new(-0.75, 0.75); 3]),
             None,
         )
         .unwrap();
@@ -484,13 +463,13 @@ mod tests {
 
         let mvpdf_1 = MultivariateNormalDensity::from_vectors::<Dyn, U3>(
             &array_1.as_view(),
-            SVector::from([DensityRange::new((-2.0, 2.0)); 3]),
+            SVector::from([DensityRange::new(-2.0, 2.0); 3]),
             None,
         )
         .unwrap();
         let mvpdf_2 = MultivariateNormalDensity::from_vectors::<Dyn, U3>(
             &array_2.as_view(),
-            SVector::from([DensityRange::new((-2.0, 2.0)); 3]),
+            SVector::from([DensityRange::new(-2.0, 2.0); 3]),
             None,
         )
         .unwrap();

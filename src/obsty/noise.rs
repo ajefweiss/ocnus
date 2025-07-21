@@ -1,18 +1,19 @@
-use crate::{base::ScObsSeries, obser::OcnusObser};
+use crate::{base::ScObs, obsty::Observable};
 use nalgebra::{DVector, Scalar};
 use num_traits::Zero;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use serde::{Deserialize, Serialize};
-use std::{marker::PhantomData, ops::AddAssign};
+use std::marker::PhantomData;
 
-/// A trait that is shared by all observation noise models.
-pub trait OcnusNoise<T, O>
+/// A trait that is shared by all noise models.
+pub trait NoiseModel<T, OT>
 where
-    O: AddAssign + OcnusObser,
+    T: Copy + Scalar,
+    OT: Observable,
 {
-    /// Generate a random noise time-series.
-    fn generate_noise(&self, series: &ScObsSeries<T>, rng: &mut impl Rng) -> DVector<O>;
+    /// Generate a random noise time-scobs.
+    fn generate_noise(&self, scobs: &ScObs<T, OT>, rng: &mut impl Rng) -> DVector<OT>;
 
     /// Get randon number seed.
     fn get_random_seed(&self) -> u64;
@@ -32,13 +33,13 @@ pub struct NullNoise<T> {
     _data: PhantomData<T>,
 }
 
-impl<T, O> OcnusNoise<T, O> for NullNoise<T>
+impl<T, OT> NoiseModel<T, OT> for NullNoise<T>
 where
-    T: PartialOrd,
-    O: AddAssign + OcnusObser + Scalar + Zero,
+    T: Copy + PartialOrd + Scalar,
+    OT: Observable + Scalar + Zero,
 {
-    fn generate_noise(&self, series: &ScObsSeries<T>, _rng: &mut impl Rng) -> DVector<O> {
-        DVector::zeros(series.len())
+    fn generate_noise(&self, scobs: &ScObs<T, OT>, _rng: &mut impl Rng) -> DVector<OT> {
+        DVector::zeros(scobs.len())
     }
 
     fn get_random_seed(&self) -> u64 {

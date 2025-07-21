@@ -10,13 +10,13 @@ crate-type = ["lib"]
 
 [dependencies]
 chrono = "*"
-covmatrix = { path = "../rs-covmat" }
 derive_builder = "*"
 derive_more = { version = "*", features = ["full"] }
 itertools = "*"
 log = "*"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
 num-traits = "*"
+paste = "*"
 rand = "*"
 rand_distr = "*"
 rand_xoshiro = "*"
@@ -34,6 +34,12 @@ directories = "*"
 dyn-fmt = "*"
 env_logger = "*"
 plotters = "*"
+
+[workspace]
+members = [
+    "ocnus-py",
+]
+resolver = "2"
 
 [profile.bench]
 opt-level = 3

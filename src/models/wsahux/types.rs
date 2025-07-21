@@ -16,9 +16,6 @@ where
     /// Latitudes
     pub lat_1d: DMatrix<T>,
 
-    /// Polarity map,
-    pub pols: DMatrix<T>,
-
     /// Corohonal hole distance map.
     pub dmap: DMatrix<T>,
 
@@ -43,10 +40,10 @@ where
 /// A full WSA-HUX state data structure.
 /// The const generic `R` is the maximum radius in solar radii.
 #[allow(missing_docs)]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WSAState<T, const R: usize>
 where
-    T: Clone + Scalar,
+    T: Copy + Scalar,
 {
     pub angle: T,
     pub wsahux: Vec<WSASlice<T, R>>,
@@ -86,7 +83,7 @@ where
 #[derive(Clone, Debug, Deref, DerefMut, Deserialize, Serialize)]
 pub struct WSASlice<T, const R: usize>(pub DMatrix<T>)
 where
-    T: Clone + Scalar;
+    T: Copy + Scalar;
 
 impl<T, const R: usize> WSASlice<T, R>
 where

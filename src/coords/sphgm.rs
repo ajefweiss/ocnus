@@ -1,4 +1,4 @@
-use crate::coords::{OcnusCoords, param_value};
+use crate::coords::{Coordinates, param_value};
 use nalgebra::{ArrayStorage, Dim, RealField, SVector, U0, U4, Vector3, VectorView, VectorView3};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
@@ -44,7 +44,7 @@ where
     }
 }
 
-impl<T> OcnusCoords<T, 4, SPHState<T>> for SPHGeometry<T>
+impl<T> Coordinates<T, 4> for SPHGeometry<T>
 where
     T: Copy + RealField,
 {
@@ -52,10 +52,12 @@ where
         [["center_x0", "center_y0", "center_z0", "radius_0"]; 1],
     ));
 
+    type CSST = SPHState<T>;
+
     fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         _params: &VectorView<T, U4, RStride, CStride>,
-        cs_state: &SPHState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<[Vector3<T>; 3]> {
         let radius = cs_state.radius;
 
@@ -83,7 +85,7 @@ where
     fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         _params: &VectorView<T, U4, RStride, CStride>,
-        cs_state: &SPHState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<T> {
         let radius = cs_state.radius;
 
@@ -95,7 +97,7 @@ where
 
     fn initialize_cs<RStride: Dim, CStride: Dim>(
         params: &VectorView<T, U4, RStride, CStride>,
-        cs_state: &mut SPHState<T>,
+        cs_state: &mut Self::CSST,
     ) {
         let x0 = param_value("center_x0", &Self::PARAMS, params).unwrap();
         let y0 = param_value("center_y0", &Self::PARAMS, params).unwrap();
@@ -111,7 +113,7 @@ where
     fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
         _params: &VectorView<T, U4, RStride, CStride>,
-        cs_state: &SPHState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>> {
         let center = cs_state.center;
         let radius = cs_state.radius;
@@ -132,7 +134,7 @@ where
     fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
         _params: &VectorView<T, U4, RStride, CStride>,
-        cs_state: &SPHState<T>,
+        cs_state: &Self::CSST,
     ) -> Option<Vector3<T>> {
         let center = cs_state.center;
         let radius = cs_state.radius;
@@ -148,11 +150,13 @@ where
     }
 }
 
-impl<T> OcnusCoords<T, 0, ()> for SPHUGeometry<T>
+impl<T> Coordinates<T, 0> for SPHUGeometry<T>
 where
     T: Copy + RealField,
 {
     const PARAMS: SVector<&'static str, 0> = SVector::from_array_storage(ArrayStorage([[]; 1]));
+
+    type CSST = ();
 
     fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,

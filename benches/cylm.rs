@@ -1,10 +1,11 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use nalgebra::DMatrix;
+use nalgebra::Vector3;
 use ocnus::{
-    base::{OcnusEnsbl, OcnusModel, ScObs, ScObsConf, ScObsSeries},
+    base::{Model, ScConf, ScObs},
+    methods::filters::ParticleFilter,
     models::CCLFFModel,
-    obser::{MeasureInSituMagneticFields, NullNoise, ObserVec},
-    stats::{ConstantDensity, Density, MultivariateDensity, UniformDensity},
+    obsty::{MeasInSituMag, NullNoise, ObserVec},
+    stats::{ConstantDensity, MultivariateDensity, UniformDensity},
 };
 use std::{hint::black_box, time::Duration};
 
@@ -12,17 +13,16 @@ const ENSEMBLE_SIZE: usize = 2_usize.pow(16);
 
 fn benchmark_lff_f32(c: &mut Criterion) {
     let prior = MultivariateDensity::<_, 8>::new(&[
-        UniformDensity::new((-1.0, 1.0)).unwrap(),
-        UniformDensity::new((0.5, 1.0)).unwrap(),
-        UniformDensity::new((0.05, 0.1)).unwrap(),
-        UniformDensity::new((0.1, 0.5)).unwrap(),
+        UniformDensity::new(-1.0, 1.0).unwrap(),
+        UniformDensity::new(0.5, 1.0).unwrap(),
+        UniformDensity::new(0.05, 0.1).unwrap(),
+        UniformDensity::new(0.1, 0.5).unwrap(),
         ConstantDensity::new(1125.0),
-        UniformDensity::new((5.0, 100.0)).unwrap(),
-        UniformDensity::new((-2.4, 2.4)).unwrap(),
-        UniformDensity::new((0.0, 1.0)).unwrap(),
+        UniformDensity::new(5.0, 100.0).unwrap(),
+        UniformDensity::new(-2.4, 2.4).unwrap(),
+        UniformDensity::new(0.0, 1.0).unwrap(),
     ]);
 
-    let range = (&prior).get_range();
     let model = CCLFFModel::new(prior);
 
     #[allow(clippy::excessive_precision)]
@@ -39,30 +39,30 @@ fn benchmark_lff_f32(c: &mut Criterion) {
         ObserVec::from([-4.30711573, -12.61217154, 5.78382821]),
     ];
 
-    let sc = ScObsSeries::<f32>::from_iterator((0..refobs.len()).map(|i| {
-        ScObs::new(
+    let sc = ScObs::from_iterator((0..refobs.len()).map(|i| {
+        (
             224640.0 + i as f32 * 3600.0 * 2.0,
-            ScObsConf::Position([1.0, 0.0, 0.0]),
+            ScConf::Position(Vector3::new(1.0, 0.0, 0.0)),
         )
     }));
 
-    let mut group = c.benchmark_group("cylm_lff_bench");
+    let mut pf = ParticleFilter::new(sc.clone(), model.clone(), ENSEMBLE_SIZE, 42);
 
-    let mut data = OcnusEnsbl::new(ENSEMBLE_SIZE, range);
-    let mut output = DMatrix::<ObserVec<f32, 3>>::zeros(sc.len(), ENSEMBLE_SIZE);
+    let mut group = c.benchmark_group("cylm_lff_bench");
 
     group
         .significance_level(0.05)
-        .sample_size(50)
-        .measurement_time(Duration::from_secs(5));
+        .sample_size(250)
+        .measurement_time(Duration::from_secs(25));
 
     group.throughput(Throughput::Elements(ENSEMBLE_SIZE as u64));
     group.bench_function("cylm_lff_initialize", |b| {
         b.iter(|| {
             model
-                .initialize_ensbl::<100, MultivariateDensity<f32, 8>>(
-                    black_box(&mut data),
+                .initialize_ensbl::<MultivariateDensity<f32, 8>>(
+                    black_box(&mut pf.ensbl),
                     black_box(None),
+                    1000,
                     42,
                 )
                 .unwrap();
@@ -73,19 +73,19 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     group.bench_function("cylm_lff_simulate", |b| {
         b.iter(|| {
             model
-                .initialize_ensbl::<100, MultivariateDensity<f32, 8>>(
-                    black_box(&mut data),
+                .initialize_ensbl::<MultivariateDensity<f32, 8>>(
+                    black_box(&mut pf.ensbl),
                     black_box(None),
+                    1000,
                     42,
                 )
                 .unwrap();
             model
                 .simulate_ensbl(
-                    &sc,
-                    &mut data,
+                    &mut pf.ensbl,
+                    &mut pf.obser,
                     &CCLFFModel::<f32, MultivariateDensity<f32, 8>>::observe_mag3,
-                    &mut output.as_view_mut(),
-                    None::<&mut NullNoise<f32>>,
+                    &mut None::<&mut NullNoise<f32>>,
                 )
                 .unwrap();
         });
