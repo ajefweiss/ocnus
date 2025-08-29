@@ -34,4 +34,105 @@ macro_rules! concat_strs {
     }};
 }
 
+// Re-implement the Coordinates trait because we have no inheritance.
+// Here we make use of the fact that the parameters for the coords are at the front
+// and we pass on smaller fixed views of each parameter vector.
+macro_rules! reimpl_coords {
+    ($model:ident, $coords: ident, $params: expr) => {
+        impl<T, P> Coordinates<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }> for $model<T, P>
+        where
+            T: Copy + RealField,
+        {
+            const PARAMS: SVector<&'static str, { $coords::<f32>::PARAMS_COUNT + $params.len() }> =
+                SVector::from_array_storage(concat_strs!($coords::<f32>::PARAMS, $params));
+
+            type CSST = XCState<T>;
+
+            fn contravariant_basis<RStride: Dim, CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &Self::CSST,
+            ) -> Option<[Vector3<T>; 3]> {
+                $coords::contravariant_basis(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn detg<RStride: Dim, CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &Self::CSST,
+            ) -> Option<T> {
+                $coords::detg(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn initialize_cs<RStride: Dim, CStride: Dim>(
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &mut Self::CSST,
+            ) {
+                $coords::initialize_cs(
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
+                ics: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &Self::CSST,
+            ) -> Option<Vector3<T>> {
+                $coords::transform_ics_to_ecs(
+                    ics,
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+
+            fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
+                ecs: &VectorView3<T>,
+                params: &VectorView<
+                    T,
+                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
+                    RStride,
+                    CStride,
+                >,
+                cs_state: &Self::CSST,
+            ) -> Option<Vector3<T>> {
+                $coords::transform_ecs_to_ics(
+                    ecs,
+                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
+                    cs_state,
+                )
+            }
+        }
+    };
+}
+
 pub(crate) use concat_strs;
+pub(crate) use reimpl_coords;

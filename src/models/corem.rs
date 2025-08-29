@@ -2,12 +2,15 @@ use crate::{
     base::{Model, ModelError, ScConf},
     coords::{Coordinates, TTGeometry, TTState, param_value},
     models::concat_strs,
-    obsty::{ICSCoordsBasis, MeasInSituMag, ObserVec},
+    obsty::{
+        InSituMagnetometer, InSituPlasmaBulkVelocity, InSituPlasmaDensity, ObserVec,
+        RemoteWhiteLight,
+    },
     stats::{Density, DensityRange},
 };
-use nalgebra::{Const, Dim, RealField, SVector, U1, Vector3, VectorView, VectorView3};
+use nalgebra::{Const, Dim, RealField, SVector, U1, U11, Vector3, VectorView, VectorView3};
 use num_traits::AsPrimitive;
-use rand_distr::uniform::SampleUniform;
+use rand_distr::{Distribution, StandardUniform, uniform::SampleUniform};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, iter::Sum, marker::PhantomData};
 
@@ -76,7 +79,32 @@ where
     }
 }
 
-impl<T, P> MeasInSituMag<T, 11> for COREModel<T, P>
+impl<T, P> InSituPlasmaDensity<T, 11> for COREModel<T, P>
+where
+    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    for<'x> &'x P: Density<T, 11>,
+{
+    fn observe_np_ics(
+        &self,
+        ics: &VectorView3<T>,
+        _params: &SVector<T, 11>,
+        _fm_state: &Self::FMST,
+        cs_state: &Self::CSST,
+    ) -> T {
+        T::one() / cs_state.major_radius / cs_state.minor_radius.powi(2)
+            * match ics[0].partial_cmp(&T::one()).unwrap() {
+                Ordering::Less => ics[0].powi(2),
+                Ordering::Equal => T::one(),
+                Ordering::Greater => match ics[0].partial_cmp(&T::from_f64(1.25).unwrap()).unwrap()
+                {
+                    Ordering::Less => T::from_f64(2.0).unwrap() - ics[0].powi(3),
+                    _ => T::zero(),
+                },
+            }
+    }
+}
+
+impl<T, P> InSituMagnetometer<T, 11> for COREModel<T, P>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
     for<'x> &'x P: Density<T, 11>,
@@ -88,10 +116,7 @@ where
         fm_state: &Self::FMST,
         cs_state: &Self::CSST,
     ) -> Result<ObserVec<T, 3>, ModelError<T>> {
-        let sc_pos = Vector3::from(match scconf {
-            ScConf::Position(r) => *r,
-            ScConf::PositionViewport((r, ..)) => *r,
-        });
+        let sc_pos = scconf.position();
 
         let q = match Self::transform_ecs_to_ics(
             &sc_pos.as_view(),
@@ -184,6 +209,31 @@ where
     }
 }
 
+impl<T, P> InSituPlasmaBulkVelocity<T, 11> for COREModel<T, P>
+where
+    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    for<'x> &'x P: Density<T, 11>,
+{
+    fn observe_pbv(
+        &self,
+        _scconf: &ScConf<T>,
+        _params: &SVector<T, 11>,
+        fm_state: &Self::FMST,
+        _cs_state: &Self::CSST,
+    ) -> Result<ObserVec<T, 1>, ModelError<T>> {
+        Ok(ObserVec::from([fm_state.velocity]))
+    }
+}
+
+impl<T, P> RemoteWhiteLight<T, 11> for COREModel<T, P>
+where
+    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    P: Sync,
+    for<'x> &'x P: Density<T, 11>,
+    StandardUniform: Distribution<T>,
+{
+}
+
 // Re-implement the Coordinates trait because we have no inheritance.
 // Here we make use of the fact that the parameters for the coords are at the front
 // and we pass on smaller fixed views of each parameter vector.
@@ -200,7 +250,7 @@ where
 
     fn contravariant_basis<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<11>, RStride, CStride>,
+        params: &VectorView<T, U11, RStride, CStride>,
         cs_state: &Self::CSST,
     ) -> Option<[Vector3<T>; 3]> {
         TTGeometry::contravariant_basis(
@@ -212,7 +262,7 @@ where
 
     fn detg<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<11>, RStride, CStride>,
+        params: &VectorView<T, U11, RStride, CStride>,
         cs_state: &Self::CSST,
     ) -> Option<T> {
         TTGeometry::detg(
@@ -223,7 +273,7 @@ where
     }
 
     fn initialize_cs<RStride: Dim, CStride: Dim>(
-        params: &VectorView<T, Const<11>, RStride, CStride>,
+        params: &VectorView<T, U11, RStride, CStride>,
         cs_state: &mut Self::CSST,
     ) {
         TTGeometry::initialize_cs(
@@ -234,7 +284,7 @@ where
 
     fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
         ics: &VectorView3<T>,
-        params: &VectorView<T, Const<11>, RStride, CStride>,
+        params: &VectorView<T, U11, RStride, CStride>,
         cs_state: &Self::CSST,
     ) -> Option<Vector3<T>> {
         TTGeometry::transform_ics_to_ecs(
@@ -246,7 +296,7 @@ where
 
     fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
         ecs: &VectorView3<T>,
-        params: &VectorView<T, Const<11>, RStride, CStride>,
+        params: &VectorView<T, U11, RStride, CStride>,
         cs_state: &Self::CSST,
     ) -> Option<Vector3<T>> {
         TTGeometry::transform_ecs_to_ics(
@@ -269,7 +319,7 @@ where
     fn forward(
         &self,
         time_step: T,
-        params: &VectorView<T, Const<11>, U1, Const<11>>,
+        params: &VectorView<T, U11, U1, U11>,
         fm_state: &mut Self::FMST,
         cs_state: &mut Self::CSST,
     ) -> Result<(), ModelError<T>> {
@@ -316,7 +366,7 @@ where
 
     fn initialize_states(
         &self,
-        params: &VectorView<T, Const<11>, U1, Const<11>>,
+        params: &VectorView<T, U11, U1, U11>,
         fm_state: &mut Self::FMST,
         cs_state: &mut Self::CSST,
     ) -> Result<(), ModelError<T>> {
@@ -334,55 +384,17 @@ where
         Ok(())
     }
 
-    fn observe_ics_basis(
-        &self,
-        scconf: &ScConf<T>,
-        params: &VectorView<T, Const<11>>,
-        _fm_state: &Self::FMST,
-        cs_state: &Self::CSST,
-    ) -> Result<ICSCoordsBasis<T>, ModelError<T>> {
-        let sc_pos = Vector3::from(match scconf {
-            ScConf::Position(r) => *r,
-            ScConf::PositionViewport((r, ..)) => *r,
-        });
-
-        let q = match Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state) {
-            Some(value) => value,
-            None => {
-                return Err(ModelError::CoordinateTransform(sc_pos.into_owned()));
-            }
-        };
-
-        let (mu, nu, s) = (q[0], q[1], q[2]);
-
-        let [e1, e2, e3] =
-            Self::contravariant_basis(&Vector3::from([mu, nu, s]).as_view(), params, cs_state)
-                .expect("failed to construct contravariant basis");
-
-        Ok(ICSCoordsBasis::<T>::from([
-            mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
-        ]))
-    }
-
     fn model_prior(&self) -> impl Density<T, 11> {
         &self.0
     }
 }
-
-// impl_core_forward_model!(
-//     COREModel,
-//     TTGeometry,
-//     ,
-//     core_obs,
-//     ""
-// );
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         base::{ModelEnsbl, Obser, ScObs},
-        obsty::NullNoise,
+        obsty::{ICSCoordsBasis, NullNoise},
         stats::{ConstantDensity, MultivariateDensity, UniformDensity},
     };
     use approx::ulps_eq;

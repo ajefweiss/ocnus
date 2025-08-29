@@ -34,9 +34,9 @@ pub trait Model<T, const D: usize>: Coordinates<T, D>
 where
     T: Copy + RealField,
 {
-    /// The base rayon chunk size that is used for any parallel iterators.
+    /// Default rayon chunk size that is used for any parallel iterators.
     ///
-    /// Operations may use multiples of this value.
+    /// Certain operations may use multiples of this value.
     const RCS: usize;
 
     /// Forward modeling state type.
@@ -54,7 +54,7 @@ where
     /// Returns the valid model parameter range.
     fn get_range(&self) -> SVector<DensityRange<T>, D>;
 
-    /// Initialize the model parameters, the coordinate system and forward model states.
+    /// Initialize the model parameters, and both the coordinate system and forward model states.
     fn initialize<P>(
         &self,
         params: &mut SVectorViewMut<T, D>,
@@ -75,7 +75,7 @@ where
         Ok(())
     }
 
-    /// Initialize the model parameters, the coordinate system and forward model states for an ensemble.
+    /// Initialize the model parameters, and both the coordinate system and forward model states for an ensemble.
     fn initialize_ensbl<P>(
         &self,
         ensbl: &mut ModelEnsbl<T, Self, D>,
@@ -101,7 +101,7 @@ where
             .chunks(Self::RCS)
             .enumerate()
             .try_for_each(|(cdx, mut chunks)| {
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 17) as u64);
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 310248241) as u64);
 
                 chunks
                     .iter_mut()
@@ -130,7 +130,7 @@ where
         Ok(())
     }
 
-    /// Initialize the model parameters
+    /// Initialize the model parameters.
     fn initialize_params(
         &self,
         params: &mut SVectorViewMut<T, D>,
@@ -180,7 +180,7 @@ where
             .chunks(Self::RCS)
             .enumerate()
             .try_for_each(|(cdx, mut chunks)| {
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 17) as u64);
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 213161503) as u64);
 
                 chunks.iter_mut().try_for_each(|params| {
                     self.initialize_params(params, opt_pdf, max_attempts, &mut rng)?;
@@ -250,16 +250,35 @@ where
     /// Returns a reference to the underlying model prior.
     fn model_prior(&self) -> impl Density<T, D>;
 
-    /// Return internal coords and the basis vectors at the location of the observation.
+    /// Return internal coordinates and the basis vectors at the location of the observer.
     fn observe_ics_basis(
         &self,
         scconf: &ScConf<T>,
         params: &SVectorView<T, D>,
-        fm_state: &Self::FMST,
         cs_state: &Self::CSST,
-    ) -> Result<ICSCoordsBasis<T>, ModelError<T>>;
+    ) -> Result<ICSCoordsBasis<T>, ModelError<T>> {
+        let sc_pos = scconf.position();
 
-    /// Resample the model parameters, and re-initialize the coordinate system and forward model states for an ensemble.
+        let q = match Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state) {
+            Some(value) => value,
+            None => {
+                return Err(ModelError::CoordinateTransform(sc_pos.into_owned()));
+            }
+        };
+
+        let (mu, nu, s) = (q[0], q[1], q[2]);
+
+        let [e1, e2, e3] =
+            Self::contravariant_basis(&Vector3::from([mu, nu, s]).as_view(), params, cs_state)
+                .expect("failed to construct contravariant basis");
+
+        Ok(ICSCoordsBasis::<T>::from([
+            mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
+        ]))
+    }
+
+    /// Resample the model parameters, and re-initialize both the coordinate system and forward
+    /// model states for an ensemble.
     fn resample_ensbl(
         &self,
         ensbl: &mut ModelEnsbl<T, Self, D>,
@@ -283,7 +302,7 @@ where
             .chunks(Self::RCS)
             .enumerate()
             .try_for_each(|(cdx, mut chunks)| {
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 17) as u64);
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(rseed + (cdx * 679389209) as u64);
 
                 chunks
                     .iter_mut()
@@ -308,7 +327,7 @@ where
     }
 
     /// Perform a forward simulation and generate synthetic observables `OT` for the
-    /// given spacecraft observers using a generating function `OF`.
+    /// given spacecraft observers for a given generating function `OF`.
     fn simulate<OT, OF>(
         &self,
         scobs: &ScObs<T, OT>,
@@ -357,7 +376,7 @@ where
     }
 
     /// Perform an ensemble forward simulation and generate synthetic observables `OT` for the
-    /// given spacecraft observers using a generating function `OF` and noise model `NM`.
+    /// given spacecraft observers for a given generating function `OF` and noise model `NM`.
     fn simulate_ensbl<OT, OF, NM>(
         &self,
         ensbl: &mut ModelEnsbl<T, Self, D>,
@@ -430,7 +449,7 @@ where
                 .chunks(Self::RCS)
                 .enumerate()
                 .for_each(|(cdx, mut chunks)| {
-                    let mut rng = noise.initialize_rng(29 * cdx as u64, 17);
+                    let mut rng = noise.initialize_rng(29 * cdx as u64, 23);
 
                     chunks.iter_mut().for_each(|(scobs, col)| {
                         col.iter_mut()
@@ -451,7 +470,7 @@ where
         Ok(())
     }
 
-    /// Perform a forward simulation and return the internal coords and basis vectors for
+    /// Perform a forward simulation and return the internal coordinates and basis vectors for
     /// the given spacecraft observers.
     fn simulate_ics_basis<OT>(
         &self,
@@ -476,7 +495,7 @@ where
                 return Err(ModelError::NegativeTimeStep(time_step));
             } else {
                 self.forward(time_step, params, fm_state, cs_state)?;
-                *obs = self.observe_ics_basis(scconf, params, fm_state, cs_state)?;
+                *obs = self.observe_ics_basis(scconf, params, cs_state)?;
             }
 
             Ok::<(), ModelError<T>>(())
@@ -523,7 +542,7 @@ where
                                     self.forward(time_step, params, fm_state, cs_state)?;
 
                                     out[(0, 0)] =
-                                        self.observe_ics_basis(scconf, params, fm_state, cs_state)?;
+                                        self.observe_ics_basis(scconf, params, cs_state)?;
 
                                     Ok::<(), ModelError<T>>(())
                                 },

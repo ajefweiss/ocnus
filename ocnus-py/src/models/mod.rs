@@ -1,7 +1,9 @@
-mod vector;
+mod mag3;
+mod remote;
 mod wsahux;
 
-pub use vector::*;
+pub use mag3::*;
+pub use remote::*;
 pub use wsahux::*;
 
 macro_rules! unroll_model_errors {

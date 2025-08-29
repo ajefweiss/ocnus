@@ -7,6 +7,7 @@ mod models;
 mod noise;
 mod obser;
 mod stats;
+mod util;
 
 pub use covm::*;
 pub use models::*;
@@ -32,7 +33,10 @@ fn ocnus_py(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyPrior>()?;
     m.add_class::<PyObserVecNoise>()?;
     m.add_class::<PyUnivariate>()?;
+    m.add_class::<PyDiagObser>()?;
     m.add_class::<PyObser>()?;
+    m.add_class::<PyMagObser>()?;
+    m.add_class::<PyImageObser>()?;
     m.add_class::<PyMagScObs>()?;
     m.add_class::<PyScObs>()?;
     m.add_class::<PyMagScObs>()?;
@@ -40,18 +44,21 @@ fn ocnus_py(m: &Bound<PyModule>) -> PyResult<()> {
 
     m.add_class::<NC16Ensbl>()?;
     m.add_class::<NC16Model>()?;
-    m.add_class::<NC16Obser>()?;
     m.add_class::<NC16ParticleFilter>()?;
 
     m.add_class::<ECHEnsbl>()?;
     m.add_class::<ECHModel>()?;
-    m.add_class::<ECHObser>()?;
     m.add_class::<ECHParticleFilter>()?;
 
     m.add_class::<COREEnsbl>()?;
     m.add_class::<COREModel>()?;
-    m.add_class::<COREObser>()?;
     m.add_class::<COREParticleFilter>()?;
+
+    m.add_class::<COREWLEnsbl>()?;
+    m.add_class::<COREWLModel>()?;
+
+    m.add_class::<CORERHOEnsbl>()?;
+    m.add_class::<CORERHOModel>()?;
 
     m.add_class::<WSAHUX215Ensbl>()?;
     m.add_class::<WSAHUX215Model>()?;

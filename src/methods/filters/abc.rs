@@ -23,7 +23,7 @@ where
     usize: AsPrimitive<T>,
 {
     /// A single iteration of an approximate Bayesian Computation particle filter algorithm.
-    pub fn pf_abc_iter<NM, EF, OF>(
+    pub fn pf_abc<NM, EF, OF>(
         &mut self,
         settings: &ParticleFilterSettings<T>,
         noise: &mut NM,
@@ -49,15 +49,24 @@ where
             (value < err_func.1, value)
         };
 
-        let (filter_values, iterations) = self.pf_filter(
+        let (filter_values, iterations) = match self.pf_filter(
             settings,
             &flt_func,
             obs_func,
             Some(&density_old),
             &mut Some(noise),
             settings.max_attempts,
-            23,
-        )?;
+            6361,
+        ) {
+            Ok(result) => result,
+            Err(err) => {
+                // Replace underlying particle density with previous particle density.
+                density_old *= T::one() / settings.expl_factor;
+                self.ensbl.ptpdf = density_old.clone();
+
+                return Err(err);
+            }
+        };
 
         // Calculate new weights using prior and importance weights.
         let new_weights = normalize(
@@ -101,6 +110,9 @@ where
                 .sum::<T>();
 
         if ess < T::from_usize(self.ensbl.len()).unwrap() * settings.eff_particle_threshold_factor {
+            // Replace underlying particle density with previous particle density.
+            self.ensbl.ptpdf = density_old.clone();
+
             return Err(ParticleFilterError::InsufficientParticles(ess));
         }
 
@@ -141,8 +153,6 @@ where
             self.ensbl.len(),
         );
 
-        self.rseed += 1;
-
         self.model.initialize_states_ensbl(&mut self.ensbl)?;
 
         self.model.simulate_ensbl(
@@ -152,7 +162,7 @@ where
             &mut None::<&mut NullNoise<T>>,
         )?;
 
-        self.errors = filter_values;
+        self.errors = self.obser.errors(err_func.0);
 
         self.iter += 1;
         self.truns += iterations * self.ensbl.len() * settings.simulation_ensemble_size_factor;
@@ -161,13 +171,15 @@ where
     }
 
     /// A loop of approximate Bayesian Computation particle filtering steps with various aborting criteria.
+    #[allow(clippy::type_complexity)]
     pub fn pf_abc_loop<NM, EF, OF>(
         &mut self,
+        error_quantile: T,
         settings: &ParticleFilterSettings<T>,
         noise: &mut NM,
         obs_func: &OF,
         err_func: &EF,
-    ) -> Result<(Vec<T>, Vec<T>), ParticleFilterError<T>>
+    ) -> Result<(Vec<T>, Vec<T>, Vec<T>), ParticleFilterError<T>>
     where
         M: Model<T, D>,
         T: AsPrimitive<f64> + AsPrimitive<usize>,
@@ -178,6 +190,7 @@ where
     {
         let mut ess = Vec::new();
         let mut kld = Vec::new();
+        let mut eps = Vec::new();
 
         info!(
             "pf_abc_loop starting, maximum {} iterations",
@@ -185,19 +198,20 @@ where
         );
 
         for _ in 0..settings.max_iterations {
-            let threshold = self.error_quantile(settings.error_quantile).unwrap();
+            let threshold = self.error_quantile(error_quantile).unwrap();
 
-            let result = self.pf_abc_iter(settings, noise, obs_func, (err_func, threshold));
+            let result = self.pf_abc(settings, noise, obs_func, (err_func, threshold));
 
             match result {
                 Ok((new_ess, new_kld)) => {
                     ess.push(new_ess);
                     kld.push(new_kld);
+                    eps.push(threshold)
                 }
                 Err(err) => return Err(err),
             }
         }
 
-        Ok((ess, kld))
+        Ok((ess, kld, eps))
     }
 }

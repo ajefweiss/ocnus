@@ -1,6 +1,6 @@
-use crate::Float;
+use crate::{util::array_to_matrix, Float};
 use nalgebra::Dyn;
-use numpy::PyReadonlyArray2;
+use numpy::{ndarray::Dim, PyReadonlyArray2};
 use ocnus::math::CovMatrix;
 use pyo3::{exceptions::PyValueError, prelude::*};
 
@@ -13,7 +13,7 @@ impl PyCovMatrix {
     #[new]
     /// Create a new [`PyCovMatrix`] from a 2-dimensional NumPy array.
     fn new(array: PyReadonlyArray2<Float>) -> PyResult<Self> {
-        let matrix = array.try_as_matrix::<Dyn, Dyn, Dyn, Dyn>().unwrap();
+        let matrix = array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn, Dyn, Dyn>(array)?;
 
         let result = ocnus::math::CovMatrix::new(matrix, true);
 

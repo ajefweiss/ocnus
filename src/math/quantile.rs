@@ -20,3 +20,17 @@ where
 
     results
 }
+
+/// Return the larget `n` values of a slice.
+pub fn largest_n<T>(values: &[T], n: usize) -> Vec<T>
+where
+    T: Copy + PartialOrd,
+{
+    let valus_sorted = values
+        .iter()
+        .sorted_by(|a, b| a.partial_cmp(b).unwrap())
+        .copied()
+        .collect::<Vec<T>>();
+
+    Vec::from(&valus_sorted[(values.len() - n)..])
+}

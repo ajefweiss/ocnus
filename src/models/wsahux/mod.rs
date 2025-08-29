@@ -4,9 +4,9 @@ pub use types::*;
 
 use crate::{
     base::{Model, ModelError, ScConf},
-    coords::{Coordinates, SPHUGeometry, param_value},
+    coords::{Coordinates, SPHUGeometry, param_value_static},
     models::concat_strs,
-    obsty::{ICSCoordsBasis, MeasInSituPBV, ObserVec},
+    obsty::{InSituPlasmaBulkVelocity, ObserVec},
     stats::{Density, DensityRange},
 };
 use nalgebra::{Const, Dim, RealField, SVector, U1, U8, Vector3, VectorView, VectorView3};
@@ -24,14 +24,14 @@ where
     T: Copy + RealField,
 {
     // Extract parameters using their identifiers.
-    let a1 = param_value("a1", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a2 = param_value("a2", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a3 = param_value("a3", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a4 = param_value("a4", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a5 = param_value("a5", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a6 = param_value("a6", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a7 = param_value("a7", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
-    let a8 = param_value("a8", names, &params.as_view::<Const<D>, U1, U1, Const<D>>()).unwrap();
+    let a1 = param_value_static("a1", names, params).unwrap();
+    let a2 = param_value_static("a2", names, params).unwrap();
+    let a3 = param_value_static("a3", names, params).unwrap();
+    let a4 = param_value_static("a4", names, params).unwrap();
+    let a5 = param_value_static("a5", names, params).unwrap();
+    let a6 = param_value_static("a6", names, params).unwrap();
+    let a7 = param_value_static("a7", names, params).unwrap();
+    let a8 = param_value_static("a8", names, params).unwrap();
 
     a1 + a2 / (T::one() + efs).powf(a3)
         * (a4 - a5 * (-(T::from_f32(180.0).unwrap() * dist / T::pi() / a6).powf(a7)).exp()).powf(a8)
@@ -126,7 +126,7 @@ where
     }
 }
 
-impl<T, const R: usize, P> MeasInSituPBV<T, 8, WSAState<T, R>, ()> for WSAHUXModel<T, R, P>
+impl<T, const R: usize, P> InSituPlasmaBulkVelocity<T, 8> for WSAHUXModel<T, R, P>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField,
     for<'x> &'x P: Density<T, 8>,
@@ -138,10 +138,7 @@ where
         fm_state: &Self::FMST,
         cs_state: &Self::CSST,
     ) -> Result<ObserVec<T, 1>, ModelError<T>> {
-        let sc_pos = Vector3::from(match scconf {
-            ScConf::Position(r) => *r,
-            ScConf::PositionViewport((r, ..)) => *r,
-        });
+        let sc_pos = scconf.position();
 
         let q = match Self::transform_ecs_to_ics(
             &sc_pos.as_view(),
@@ -336,36 +333,6 @@ where
             });
 
         Ok(())
-    }
-
-    fn observe_ics_basis(
-        &self,
-        scconf: &ScConf<T>,
-        params: &VectorView<T, U8>,
-        _fm_state: &Self::FMST,
-        cs_state: &Self::CSST,
-    ) -> Result<ICSCoordsBasis<T>, ModelError<T>> {
-        let sc_pos = Vector3::from(match scconf {
-            ScConf::Position(r) => *r,
-            ScConf::PositionViewport((r, ..)) => *r,
-        });
-
-        let q = match Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state) {
-            Some(value) => value,
-            None => {
-                return Err(ModelError::CoordinateTransform(sc_pos.into_owned()));
-            }
-        };
-
-        let (mu, nu, s) = (q[0], q[1], q[2]);
-
-        let [e1, e2, e3] =
-            Self::contravariant_basis(&Vector3::from([mu, nu, s]).as_view(), params, cs_state)
-                .expect("failed to construct contravariant basis");
-
-        Ok(ICSCoordsBasis::<T>::from([
-            mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
-        ]))
     }
 
     fn model_prior(&self) -> impl Density<T, 8> {

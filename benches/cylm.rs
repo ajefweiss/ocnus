@@ -4,7 +4,7 @@ use ocnus::{
     base::{Model, ScConf, ScObs},
     methods::filters::ParticleFilter,
     models::CCLFFModel,
-    obsty::{MeasInSituMag, NullNoise, ObserVec},
+    obsty::{InSituMagnetometer, NullNoise, ObserVec},
     stats::{ConstantDensity, MultivariateDensity, UniformDensity},
 };
 use std::{hint::black_box, time::Duration};

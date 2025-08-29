@@ -20,7 +20,7 @@ pub use particles::*;
 use serde::{Deserialize, Serialize};
 pub use univariate::*;
 
-use nalgebra::{RealField, SVector, SVectorView};
+use nalgebra::{RealField, SVector, SVectorView, SVectorViewMut};
 use rand::Rng;
 
 /// A trait that is shared by all probability density functions.
@@ -28,6 +28,23 @@ pub trait Density<T, const D: usize>: Sync
 where
     T: Copy + RealField,
 {
+    /// Clip sample to the minimum or maximum boundary values.
+    fn clip_sample(&self, sample: &mut SVectorViewMut<T, D>) {
+        sample
+            .iter_mut()
+            .zip(self.get_range().iter())
+            .zip(self.get_constants().iter())
+            .for_each(|((value, range), constant)| {
+                if !constant.is_finite() {
+                    if *value <= range.min {
+                        *value = range.min
+                    } else if *value >= range.max {
+                        *value = range.max
+                    }
+                }
+            })
+    }
+
     /// Draw a random sample from the underlying density.
     ///
     /// This function is limited to `max_attempts` sampling attempts,

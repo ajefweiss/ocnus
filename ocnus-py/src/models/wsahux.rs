@@ -1,15 +1,18 @@
 use crate::{
     models::{unroll_model_errors, unroll_pf_errors},
+    util::array_to_matrix,
     Float, PyCovMatrix, PyDiagObser, PyObser, PyObserVecNoise, PyScObs, PyUnivariate,
 };
 use nalgebra::{DMatrix, Dyn, SVector};
-use numpy::{PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods, ToPyArray};
+use numpy::{
+    ndarray::Dim, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods, ToPyArray,
+};
 use ocnus::{
     base::{Model, ModelEnsbl, ModelError, Obser},
     coords::Coordinates,
     methods::filters::{ParticleFilter, ParticleFilterError, ParticleFilterSettings},
     models::{self, WSAHUXModel, WSAInputData},
-    obsty::{observec_rmsep, ICSCoordsBasis, MeasInSituPBV, NullNoise, ObserVec},
+    obsty::{observec_rmsep, ICSCoordsBasis, InSituPlasmaBulkVelocity, NullNoise, ObserVec},
     stats::MultivariateDensity,
 };
 use paste::paste;
@@ -51,10 +54,7 @@ impl PyWSAInputData {
         let lat_count = dmap.shape()[1];
 
         let lon_1d = match opt_lon_1d {
-            Some(lon_1d) => lon_1d
-                .try_as_matrix::<Dyn, Dyn, Dyn, Dyn>()
-                .unwrap()
-                .clone_owned(),
+            Some(lon_1d) => array_to_matrix::<Dim<[usize; 1]>, Dyn, Dyn, Dyn, Dyn>(lon_1d)?,
             None => DMatrix::from_iterator(
                 lon_count,
                 1,
@@ -64,10 +64,7 @@ impl PyWSAInputData {
         };
 
         let lat_1d = match opt_lat_1d {
-            Some(lat_1d) => lat_1d
-                .try_as_matrix::<Dyn, Dyn, Dyn, Dyn>()
-                .unwrap()
-                .clone_owned(),
+            Some(lat_1d) => array_to_matrix::<Dim<[usize; 1]>, Dyn, Dyn, Dyn, Dyn>(lat_1d)?,
             None => DMatrix::from_iterator(
                 lat_count,
                 1,
@@ -80,14 +77,8 @@ impl PyWSAInputData {
         Ok(Self(WSAInputData {
             lon_1d,
             lat_1d,
-            dmap: dmap
-                .try_as_matrix::<Dyn, Dyn, Dyn, Dyn>()
-                .unwrap()
-                .clone_owned(),
-            efs: efs
-                .try_as_matrix::<Dyn, Dyn, Dyn, Dyn>()
-                .unwrap()
-                .clone_owned(),
+            dmap: array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn, Dyn, Dyn>(dmap)?,
+            efs: array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn, Dyn, Dyn>(efs)?,
             lat_indices: opt_lat_indices.unwrap_or_default(),
         }))
     }
@@ -112,11 +103,16 @@ macro_rules! impl_wsahux_model {
                 }
 
                 #[allow(missing_docs)]
-                pub fn set_particle(&mut self, index: usize, values: &Bound<PyAny>) {
-                    let iter = values.try_iter().expect("values must be iterable").map(|py_obj| py_obj.unwrap().extract::<Float>().unwrap());
+                pub fn set_particle(&mut self, index: usize, values: &Bound<PyAny>) -> PyResult<()> {
+                    let iter = match values.try_iter() {
+                        Ok(value) => value.map(|py_obj| py_obj.unwrap().extract::<Float>().unwrap()),
+                        Err(..) => return Err(PyValueError::new_err("values argument must be iterable")),
+                    };
                     let vector = SVector::<Float, $dim>::from_iterator(iter);
 
                     self.0.ptpdf.set_particle(index, &vector.as_view());
+
+                    Ok(())
                 }
             }
         }
@@ -166,6 +162,11 @@ macro_rules! impl_wsahux_model {
             #[pymethods]
             impl [<$name $rcount ParticleFilter>] {
                 #[allow(missing_docs)]
+                pub fn copy(&self) -> Self {
+                    self.clone()
+                }
+
+                #[allow(missing_docs)]
                 pub fn errors(&self) -> Vec<Float> {
                     self.pf.errors.clone()
                 }
@@ -183,24 +184,13 @@ macro_rules! impl_wsahux_model {
                 }
 
                 #[allow(missing_docs)]
-                pub fn [<$obsname _abc_rmse>]<'py>(&mut self, py: Python<'py>, noise: &mut PyObserVecNoise) -> PyResult<(Vec<Float>, Vec<Float>)> {
+                pub fn [<$obsname _abc_rmse>]<'py>(&mut self, py: Python<'py>, noise: &mut PyObserVecNoise, threshold: Float) -> PyResult<(Float, Float)> {
                     let error = |o1: &[ObserVec<Float, $vdim>], o2: &[ObserVec<Float, $vdim>]| {
                         observec_rmsep(o1, o2)
                     };
 
                     py.allow_threads(|| {
-                        unroll_pf_errors!(self.pf.pf_abc_loop(&self.settings, &mut noise.0, &$simulate, &error))
-                    })
-                }
-
-                #[allow(missing_docs)]
-                pub fn [<$obsname _abc_iter_rmse>]<'py>(&mut self, py: Python<'py>, noise: &mut PyObserVecNoise, threshold: Float) -> PyResult<(Float, Float)> {
-                    let error = |o1: &[ObserVec<Float, $vdim>], o2: &[ObserVec<Float, $vdim>]| {
-                        observec_rmsep(o1, o2)
-                    };
-
-                    py.allow_threads(|| {
-                        unroll_pf_errors!(self.pf.pf_abc_iter(&self.settings, &mut noise.0, &$simulate, (&error, threshold)))
+                        unroll_pf_errors!(self.pf.pf_abc(&self.settings, &mut noise.0, &$simulate, (&error, threshold)))
                     })
                 }
 
@@ -211,7 +201,7 @@ macro_rules! impl_wsahux_model {
                     };
 
                     py.allow_threads(|| {
-                        unroll_model_errors!(self.pf.diff_ev_loop(max_iterations, (mutation_factor, recombination_factor), &$simulate, &error))
+                        unroll_model_errors!(self.pf.pf_dev_loop(max_iterations, (mutation_factor, recombination_factor), &$simulate, &error))
                     })
                 }
 
@@ -254,7 +244,7 @@ macro_rules! impl_wsahux_model {
                 }
 
                 #[allow(missing_docs)]
-                pub fn [<$obsname _sir_mvllh>](&mut self, covm: &PyCovMatrix) -> PyResult<(Vec<usize>, Vec<Float>)> {
+                pub fn [<$obsname _sir_mvllh>](&mut self, covm: &PyCovMatrix) -> PyResult<(Vec<Float>, Vec<usize>, Vec<Float>)> {
                     let llh = |o1: &[ObserVec<Float, $vdim>], o2: &[ObserVec<Float, $vdim>]| {
                         covm.0.observec_log_likelihood(o1, o2)
                     };
@@ -263,12 +253,12 @@ macro_rules! impl_wsahux_model {
                 }
 
                 #[allow(missing_docs)]
-                pub fn [<$obsname _sir_iter_mvllh>](&mut self, covm: &PyCovMatrix) -> PyResult<(usize, Float)> {
+                pub fn [<$obsname _sir_iter_mvllh>](&mut self, covm: &PyCovMatrix) -> PyResult<(Float, usize, Float)> {
                     let llh = |o1: &[ObserVec<Float, $vdim>], o2: &[ObserVec<Float, $vdim>]| {
                         covm.0.observec_log_likelihood(o1, o2)
                     };
 
-                    unroll_pf_errors!(self.pf.pf_sir_iter(&self.settings, &$simulate, &llh))
+                    unroll_pf_errors!(self.pf.pf_sir(&self.settings, &$simulate, &llh))
                 }
 
                 #[allow(missing_docs)]
@@ -335,10 +325,6 @@ macro_rules! impl_wsahux_model {
                             [<$name $rcount ParticleFilter>] {
                                 pf: ParticleFilter::new(scobs.0.clone(), self.0.clone(), size, initial_seed),
                                 settings: ParticleFilterSettings {
-                                    error_quantile: match kwargs.get_item("error_quantile")? {
-                                        Some(value) => value.extract()?,
-                                        None => 0.25
-                                    },
                                     expl_factor: match kwargs.get_item("expl_factor")? {
                                         Some(value) => value.extract()?,
                                         None => 2.0
@@ -353,7 +339,7 @@ macro_rules! impl_wsahux_model {
                                     },
                                     eff_particle_threshold_factor: match kwargs.get_item("eff_particle_threshold_factor")? {
                                         Some(value) => value.extract()?,
-                                        None => 0.1
+                                        None => 0.05
                                     },
                                     simulation_ensemble_size_factor: match kwargs.get_item("simulation_ensemble_size_factor")? {
                                         Some(value) => value.extract()?,
@@ -363,6 +349,10 @@ macro_rules! impl_wsahux_model {
                                         Some(value) => value.extract()?,
                                         None => 10.0
                                     },
+                                    simulation_time_prediction: match kwargs.get_item("simulation_time_prediction")? {
+                                        Some(value) => value.extract()?,
+                                        None => true
+                                    },
                                 }
                             }
                         },
@@ -370,13 +360,13 @@ macro_rules! impl_wsahux_model {
                             [<$name $rcount ParticleFilter>] {
                                 pf: ParticleFilter::new(scobs.0.clone(), self.0.clone(), size, initial_seed),
                                 settings: ParticleFilterSettings {
-                                    error_quantile: 0.25,
                                     expl_factor: 2.0,
                                     max_attempts: 250,
                                     max_iterations: 10,
-                                    eff_particle_threshold_factor: 0.1,
+                                    eff_particle_threshold_factor: 0.05,
                                     simulation_ensemble_size_factor: 4,
-                                    simulation_time_limit: 10.0
+                                    simulation_time_limit: 10.0,
+                                    simulation_time_prediction: true,
                                 },
                             }
                         }
@@ -389,16 +379,6 @@ macro_rules! impl_wsahux_model {
 
                     self.0.simulate_ensbl(&mut ensbl.0, &mut obser.0, &$simulate,  &mut None::<&mut NullNoise<Float>>).unwrap();
                 }
-
-                // #[allow(missing_docs)]
-                // pub fn [<$obsname _fisher>]<'py>(&self, py: Python<'py>, scobs: &PyScObs, values: &Bound<PyAny>, covm: &PyCovMatrix) -> Bound<'py, PyArray2<Float>> {
-                //     let iter = values.try_iter().expect("values must be iterable").map(|py_obj| py_obj.unwrap().extract::<Float>().unwrap());
-                //     let vector = SVector::<Float, $dim>::from_iterator(iter);
-
-                //     let matrix = self.0.[<fisher_ $obsname>](&scobs.0, &vector.as_view::<Const<$dim>, U1, U1, Const<$dim>>(), &covm.0).unwrap();
-
-                //     matrix.transpose().to_pyarray(py)
-                // }
             }
         }
     };

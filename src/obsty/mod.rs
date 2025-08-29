@@ -21,13 +21,15 @@
 //! Traits that define shared observation quantities for multiple models.
 //!
 //! Currently implemented measurement traits:
-//! - [`MeasInSituMag`] In situ magnetic field measurements.
-//! - [`MeasInSituPBV`] In situ plasma bulk velocity measurements.
+//! - [`InSituMagnetometer`] In situ magnetic field measurements.
+//! - [`InSituPlasmaBulkVelocity`] In situ plasma bulk velocity measurements.
 
+mod image;
 mod meas;
 mod noise;
 mod vector;
 
+pub use image::*;
 pub use meas::*;
 pub use noise::*;
 pub use vector::*;

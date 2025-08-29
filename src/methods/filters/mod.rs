@@ -12,12 +12,13 @@ use crate::{
 };
 use derive_builder::Builder;
 use log::{debug, info};
-use nalgebra::{RealField, SVector, Scalar};
+use nalgebra::{Const, Dyn, Matrix, VecStorage};
+use nalgebra::{DVector, RealField, SVector, Scalar};
 use num_traits::AsPrimitive;
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{io::Write, iter::Sum, ops::AddAssign, time::Instant};
+use std::{cmp::Ordering, io::Write, iter::Sum, ops::AddAssign, time::Instant};
 use thiserror::Error;
 
 /// Errors associated with particle filters methods.
@@ -88,6 +89,27 @@ where
     usize: AsPrimitive<T>,
     OT: Observable,
 {
+    /// Create a new [`ParticleFilter`] from a given set of particles.
+    pub fn from_particles(
+        scobs: ScObs<T, OT>,
+        model: M,
+        particles: Matrix<T, Const<D>, Dyn, VecStorage<T, Const<D>, Dyn>>,
+        opt_weights: Option<DVector<T>>,
+        initial_seed: u64,
+    ) -> Self {
+        let size = particles.ncols();
+
+        Self {
+            ensbl: ModelEnsbl::from_particles(particles, Some(&model.get_range()), opt_weights),
+            errors: Vec::with_capacity(size),
+            iter: 0,
+            model,
+            obser: Obser::new(scobs, size),
+            rseed: initial_seed,
+            truns: 0,
+        }
+    }
+
     /// Create a new [`ParticleFilter`].
     pub fn new(scobs: ScObs<T, OT>, model: M, size: usize, initial_seed: u64) -> Self {
         Self {
@@ -195,6 +217,7 @@ where
                         .iter_mut()
                         .map(|((_, out), flag)| {
                             let (result, value) = flt_func(self.obser.refdt(), out.as_slice());
+
                             **flag = result;
 
                             value
@@ -210,8 +233,6 @@ where
                 .enumerate()
                 .filter_map(|(idx, flag)| if flag { Some(idx) } else { None })
                 .collect::<Vec<usize>>();
-
-            debug!("valid: {}", indices.len());
 
             // Remove excessive ensemble members.
             if counter + indices.len() > self.ensbl.len() {
@@ -236,9 +257,10 @@ where
 
             counter += indices.len();
 
+            self.rseed += 1;
             iteration += 1;
 
-            // Abort if simulation time is above the given limit.
+            // Abort if simulation time is above the given limit (or is estimated to be above).
             if start.elapsed().as_millis() as f64 / 1e3 > settings.simulation_time_limit {
                 info!(
                     "pf_filter aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\tcollected samples = {:.1} / {}",
@@ -256,13 +278,44 @@ where
                     elapsed: start.elapsed().as_millis() as f64 / 1e3,
                     limit: settings.simulation_time_limit,
                 });
+            } else if (counter == 0)
+                || (settings.simulation_time_prediction
+                    && ((self.ensbl.len() / counter) as f64 * start.elapsed().as_millis() as f64
+                        / 1e3
+                        > settings.simulation_time_limit))
+            {
+                let estimated_time = match counter.cmp(&0) {
+                    Ordering::Equal => f64::INFINITY,
+                    _ => {
+                        (self.ensbl.len() / counter) as f64 * start.elapsed().as_millis() as f64
+                            / 1e3
+                    }
+                };
+
+                info!(
+                    "pf_filter pre-emptively aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\ttotal predicted duration: {:.2}\n\tcollected samples = {:.1} / {}",
+                    (iteration
+                        * self.ensbl.len()
+                        * settings.simulation_ensemble_size_factor
+                        * self.obser.len()) as f64
+                        / 1e6,
+                    start.elapsed().as_millis() as f64 / 1e3,
+                    estimated_time,
+                    counter,
+                    self.ensbl.len(),
+                );
+
+                return Err(ParticleFilterError::TimeLimitExceeded {
+                    elapsed: estimated_time,
+                    limit: settings.simulation_time_limit,
+                });
             }
         }
 
         Ok((target_filter_values, iteration))
     }
 
-    /// Initialize the ensemble data with a filtering function `FF`.
+    /// Initialize the ensemble data with an optional filtering function `FF`.
     pub fn pf_initialize_ensbl<FF, OF>(
         &mut self,
         flt_func: &FF,
@@ -284,7 +337,7 @@ where
             None::<&MultivariateDensity<T, D>>,
             &mut None::<&mut NullNoise<T>>,
             settings.max_attempts,
-            17,
+            7573,
         )?;
 
         // Compute quantiles for logging purposes.
@@ -314,8 +367,6 @@ where
             .unwrap(),
             T::from_f64(start.elapsed().as_millis() as f64 / 1e3).unwrap(),
         );
-
-        self.rseed += 1;
 
         // Re-estimate the covariance matrix for the ensemble of particles.
         self.ensbl.ptpdf.update_mvpdf();
@@ -368,10 +419,6 @@ pub struct ParticleFilterSettings<T>
 where
     T: Copy + RealField,
 {
-    /// Quantile of error values to use for next iteration cut-off (ABC only).
-    #[builder(default = T::from_f64(0.2).unwrap())]
-    pub error_quantile: T,
-
     /// Multiplier for the transition kernel (covariance matrix), a higher value leads to a better
     /// exploration of the parameter space but slower convergence. For ABC the "optimal" value is 2.0
     /// (see Filippi et al. 2013), although lower values can also be used.
@@ -386,11 +433,9 @@ where
     pub max_iterations: usize,
 
     /// Effecetive particle threshold factor.
-    #[builder(default = T::from_f64(0.1).unwrap())]
+    #[builder(default = T::from_f64(0.05).unwrap())]
     pub eff_particle_threshold_factor: T,
 
-    // /// Observation time-scobs that is used for the forward simulations.
-    // pub scobs: ScObs<T, OT>,
     /// Simulation ensemble size used for each sub-iteration, this value should be a multiple of `ensemble_size`.
     #[builder(default = 4)]
     pub simulation_ensemble_size_factor: usize,
@@ -398,4 +443,8 @@ where
     /// Maximum simulation time limit (in seconds) for each iteration.
     #[builder(default = 5.0)]
     pub simulation_time_limit: f64,
+
+    /// Attempt to predict the simulation time from a single sub-iteration instead of using the full time limit.
+    #[builder(default = true)]
+    pub simulation_time_prediction: bool,
 }

@@ -5,7 +5,7 @@ use crate::{
     obsty::{NullNoise, Observable},
     stats::Density,
 };
-use log::info;
+use log::debug;
 use nalgebra::{RealField, SVector, Scalar};
 use num_traits::{AsPrimitive, Zero};
 use rand::{Rng, SeedableRng};
@@ -28,7 +28,7 @@ where
     ///
     /// The algorithm assumes that `errors` field is appropriately filled so that
     /// a comparison with the previous generation can be made.
-    pub fn diff_ev_iter<EF, OF>(
+    pub fn pf_dev<EF, OF>(
         &mut self,
         (mutation, recombination): (T, T),
         obs_func: &OF,
@@ -75,7 +75,10 @@ where
                 chunks.iter_mut().for_each(|(idx, new_col)| {
                     new_col[(ddx, 0)] += mutation
                         * (self.ensbl.ptpdf.get_particle(ddx_a[*idx])[ddx]
-                            - self.ensbl.ptpdf.get_particle(ddx_b[*idx])[ddx])
+                            - self.ensbl.ptpdf.get_particle(ddx_b[*idx])[ddx]);
+
+                    // Clip values if they go beyond the valid boundaries.
+                    self.model.model_prior().clip_sample(new_col);
                 });
             });
 
@@ -141,8 +144,8 @@ where
 
         let (q_low, q_mid, q_hgh) = (quantiles[0], quantiles[1], quantiles[2]);
 
-        info!(
-            "diff_ev_iter\n\teps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\tmutated = {:.1} / {}",
+        debug!(
+            "dev_iter\n\teps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\tmutated = {:.1} / {}",
             q_low,
             q_mid,
             q_hgh,
@@ -152,16 +155,15 @@ where
             self.ensbl.len()
         );
 
-        self.rseed += 1;
-
         self.iter += 1;
+        self.rseed += 1;
         self.truns += self.ensbl.len();
 
         Ok(mutated)
     }
 
     /// A loop of differential evolution steps with various aborting criteria.
-    pub fn diff_ev_loop<EF, OF>(
+    pub fn pf_dev_loop<EF, OF>(
         &mut self,
         max_iterations: usize,
         (mutation, recombination): (T, T),
@@ -178,7 +180,7 @@ where
         let mut mutated = Vec::new();
 
         for _ in 0..max_iterations {
-            let result = self.diff_ev_iter((mutation, recombination), obs_func, err_func);
+            let result = self.pf_dev((mutation, recombination), obs_func, err_func);
 
             match result {
                 Ok(new_mutated) => {

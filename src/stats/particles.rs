@@ -156,7 +156,7 @@ where
         self.mvpdf.kullback_leibler_divergence(&other.mvpdf)
     }
 
-    /// Returns the number of particles, also referred to as its 'length'.
+    /// Returns the number of particles.
     pub fn len(&self) -> usize {
         self.particles.ncols()
     }

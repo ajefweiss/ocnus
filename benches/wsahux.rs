@@ -4,7 +4,7 @@ use ocnus::{
     base::{Model, ScConf, ScObs},
     methods::filters::ParticleFilter,
     models::WSAHUXModel,
-    obsty::{MeasInSituPBV, NullNoise},
+    obsty::{InSituPlasmaBulkVelocity, NullNoise},
     stats::{ConstantDensity, MultivariateDensity},
 };
 use std::{hint::black_box, path::Path, time::Duration};

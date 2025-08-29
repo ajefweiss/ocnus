@@ -260,6 +260,18 @@ where
     param_index(name, names).map(|index| params[index])
 }
 
+/// Retrieve a model parameter value by name, from a static vector.
+pub fn param_value_static<T, const D: usize>(
+    name: &str,
+    names: &SVector<&'static str, D>,
+    params: &SVector<T, D>,
+) -> Option<T>
+where
+    T: Copy,
+{
+    param_index(name, names).map(|index| params[index])
+}
+
 /// Generate unit quaternion from three successive rotations around the z, y and x-axis.
 pub fn quaternion_rot<T>(z_angle: T, y_angle: T, x_angle: T) -> UnitQuaternion<T>
 where

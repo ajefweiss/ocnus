@@ -306,7 +306,7 @@ macro_rules! impl_xcgm_geom {
                 assert!(radius > T::zero(), "radius must be positive");
 
                 cs_state.x = x_init;
-                cs_state.z = radius * y * (T::one() - (phi.sin() * theta.sin()).powi(2)).sqrt()
+                cs_state.z = -radius * y * (T::one() - (phi.sin() * theta.cos()).powi(2)).sqrt()
                     / phi.cos()
                     / theta.cos();
 

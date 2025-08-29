@@ -176,7 +176,7 @@ where
         &self.m
     }
 
-    /// Compute the multivariate likelihood using an observation vector `x` and mean vector `mu`.
+    /// Compute the multivariate likelihood for a given observation vector `x` and mean vector `mu`.
     ///
     /// The `opt_rank` arguments allows one to choose a custom matrix rank.
     pub fn log_likelihood(

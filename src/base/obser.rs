@@ -13,7 +13,8 @@ use std::{
     ops::{Add, AddAssign},
 };
 
-/// A data structure holding spacecraft observations and an appropriately sized model output array.
+/// A data structure that holds a series of spacecraft observations, with optional observation
+/// data, and an appropriately sized model output array.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Obser<T, OT>
 where
@@ -23,7 +24,7 @@ where
     /// Model output array.
     output: DMatrix<OT>,
 
-    /// Spacecraft observations.
+    /// Series of pacecraft observations.
     scobs: ScObs<T, OT>,
 }
 
@@ -32,7 +33,7 @@ where
     T: Copy + PartialOrd + Scalar,
     OT: Scalar + Zero,
 {
-    /// Return a list of error values using a given error metric.
+    /// Return a list of error values for a given error metric.
     pub fn errors<EF>(&self, func: &EF) -> Vec<T>
     where
         T: Send + Sync,
@@ -44,7 +45,7 @@ where
             .collect::<Vec<T>>()
     }
 
-    /// Return a list of error values and flags using a threshold value using a given error metric.
+    /// Return a list of error values and flags using a threshold value for a given error metric.
     pub fn errors_with_threshold<EF>(&self, func: &EF, threshold: T) -> (Vec<T>, Vec<bool>)
     where
         T: Send + Sync,
@@ -97,23 +98,6 @@ where
         Self {
             scobs,
             output: DMatrix::<OT>::zeros(slen, size),
-        }
-    }
-
-    /// Create a new [`Obser`] with custom observable type without copying the reference observations.
-    pub fn new_as<OT2>(scobs: ScObs<T, OT>, size: usize) -> Obser<T, OT2>
-    where
-        OT2: Scalar + Zero,
-    {
-        let slen = scobs.len();
-
-        Obser {
-            scobs: ScObs::<T, OT2> {
-                refdt: None,
-                tconf: scobs.tconf,
-                sorti: scobs.sorti,
-            },
-            output: DMatrix::<OT2>::zeros(slen, size),
         }
     }
 
@@ -198,13 +182,14 @@ where
     /// Position in space, in an arbitrary Solar centric coordiante system.
     Position(Vector3<T>),
     /// Position in space, in an arbitrary Solar centric coordiante system,
-    /// with 5 extra points defining a camera viewport (center, left, right, top, bottom).
-    PositionViewport((Vector3<T>, [Vector3<T>; 5])),
+    /// with 3 extra points defining a camera viewport (center, bottom left & right)
+    /// and a pixel resolution.
+    PositionViewport((Vector3<T>, [Vector3<T>; 3], (usize, usize))),
 }
 
 impl<T> ScConf<T>
 where
-    T: Copy + Scalar,
+    T: Copy + RealField + Scalar,
 {
     /// Computes distance between `self` and `other`.
     pub fn distance(&self, other: &Self) -> T
@@ -218,12 +203,63 @@ where
     pub fn position(&self) -> &Vector3<T> {
         match &self {
             ScConf::Position(r_self) => r_self,
-            ScConf::PositionViewport(rvp_self) => &rvp_self.0,
+            ScConf::PositionViewport(rvpr_self) => &rvpr_self.0,
+        }
+    }
+
+    /// Projects a position ontop of the imaging plane in unit coordinates (0, 1)^2.
+    pub fn project(&self, position: &Vector3<T>) -> (T, T) {
+        let (r, [v0, v0l, v0r], (pxl, _)) = match &self {
+            ScConf::Position(..) => panic!("no viewport defined"),
+            ScConf::PositionViewport(rvpr_self) => rvpr_self,
+        };
+
+        // Both viewplane center and plane normal.
+        let no = v0 - r;
+        let vl = v0l - r;
+        let vr = v0r - r;
+        let pc = position - r;
+
+        // Position projected ontop of the viewing plane.
+        let mfac = no.dot(&no) / pc.dot(&no);
+        let pp = pc * mfac;
+
+        if mfac < T::zero() {
+            return (T::one() / T::zero(), T::one() / T::zero());
+        }
+
+        // Angle within viewport.
+        let delta_vlr = vr - vl;
+        let delta_pvl = pp - vl;
+        let full_norm = delta_vlr.norm();
+        let act_norm = delta_pvl.norm();
+
+        let alpha = (delta_vlr.dot(&delta_pvl) / delta_vlr.norm() / delta_pvl.norm()).acos();
+
+        (
+            alpha.cos() * act_norm / full_norm * T::from_usize(*pxl).unwrap(),
+            alpha.sin() * act_norm / full_norm * T::from_usize(*pxl).unwrap(),
+        )
+    }
+
+    /// Returns the position of the spacecraft imager.
+    pub fn resolution(&self) -> usize {
+        match &self {
+            ScConf::Position(..) => panic!("no viewport defined"),
+            ScConf::PositionViewport(rvpr_self) => rvpr_self.2.0,
+        }
+    }
+
+    /// Returns the number of particle samples within an image.
+    pub fn samples(&self) -> usize {
+        match &self {
+            ScConf::Position(..) => panic!("no viewport defined"),
+            ScConf::PositionViewport(rvpr_self) => rvpr_self.2.1,
         }
     }
 }
 
-/// A scobs of spacecraft observations with optional observation data.
+/// A series of spacecraft observations with optional observation data.
 #[derive(Clone, Debug, Default, Deserialize, IntoIterator, Serialize)]
 #[serde(bound(serialize = "T: Serialize, OT: Serialize"))]
 #[serde(bound(deserialize = "T: Deserialize<'de>, OT: Deserialize<'de>"))]
@@ -241,7 +277,7 @@ where
     tconf: Vec<(T, ScConf<T>)>,
 
     /// The sorting indices that are used to recover the original [`ScObs`]
-    /// objects from a composite scobs.
+    /// objects from a composite object.
     sorti: Vec<usize>,
 }
 
@@ -338,7 +374,7 @@ where
     pub fn refdt(&self) -> &[OT] {
         self.refdt
             .as_ref()
-            .expect("no reference observations")
+            .expect("reference observations missing")
             .as_slice()
     }
 

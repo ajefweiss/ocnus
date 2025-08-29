@@ -1,9 +1,9 @@
 use crate::{
     base::{Model, ModelError, ScConf},
-    coords::{CCGeometry, Coordinates, ECGeometry, XCState, param_value},
+    coords::{CCGeometry, Coordinates, ECGeometry, XCState, param_value, param_value_static},
     math::bessel_jn,
-    models::concat_strs,
-    obsty::{ICSCoordsBasis, MeasInSituMag, ObserVec},
+    models::{concat_strs, reimpl_coords},
+    obsty::{InSituMagnetometer, ObserVec},
     stats::{Density, DensityRange},
 };
 use nalgebra::{Const, Dim, RealField, SVector, U1, Vector3, VectorView, VectorView3};
@@ -78,33 +78,13 @@ where
     T: Copy + RealField,
 {
     // Extract parameters using their identifiers.
-    let b = param_value(
-        "b_scale",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
+    let b = param_value_static("b_scale", names, params).unwrap();
 
-    let tau = param_value(
-        "tau",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
+    let tau = param_value_static("tau", names, params).unwrap();
 
-    let c10 = param_value(
-        "c10",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
+    let c10 = param_value_static("c10", names, params).unwrap();
 
-    let radius = param_value(
-        "radius",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
+    let radius = param_value_static("radius", names, params).unwrap();
 
     let (mu, _nu, _z) = (q[0], q[1], q[2]);
 
@@ -112,7 +92,7 @@ where
         Some(ord) => match ord {
             Ordering::Greater => Ok(((-T::one()).sqrt(), (-T::one()).sqrt())),
             _ => {
-                let chi_nc16 = b * radius / c10 * mu;
+                let chi_nc16 = -b * radius / c10 * mu;
 
                 let xi_nc16: T = T::two_pi() * mu * radius.powi(2) * b * (tau - mu.powi(2));
 
@@ -180,36 +160,11 @@ where
     T: Copy + RealField,
 {
     // Extract parameters using their identifiers.
-    let radius = param_value(
-        "radius",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
-    let b = param_value(
-        "b_scale",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
-    let lambda = param_value(
-        "lambda",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
-    let alpha_signed = param_value(
-        "alpha",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
-    let tau = param_value(
-        "tau",
-        names,
-        &params.as_view::<Const<D>, U1, U1, Const<D>>(),
-    )
-    .unwrap();
+    let radius = param_value_static("radius", names, params).unwrap();
+    let b = param_value_static("b_scale", names, params).unwrap();
+    let lambda = param_value_static("lambda", names, params).unwrap();
+    let alpha_signed = param_value_static("alpha", names, params).unwrap();
+    let tau = param_value_static("tau", names, params).unwrap();
 
     let (alpha, sign) = match alpha_signed
         .partial_cmp(&T::zero())
@@ -264,7 +219,7 @@ macro_rules! impl_cylm {
             }
         }
 
-        impl<T, P> MeasInSituMag<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>
+        impl<T, P> InSituMagnetometer<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }>
             for $model<T, P>
         where
             T: Copy + Default + RealField + SampleUniform + Sum,
@@ -279,10 +234,7 @@ macro_rules! impl_cylm {
                 _fm_state: &Self::FMST,
                 cs_state: &Self::CSST,
             ) -> Result<ObserVec<T, 3>, ModelError<T>> {
-                let sc_pos = Vector3::from(match scconf {
-                    ScConf::Position(r) => *r,
-                    ScConf::PositionViewport((r, ..)) => *r,
-                });
+                let sc_pos = scconf.position();
 
                 let q = match Self::transform_ecs_to_ics(
                     &sc_pos.as_view(),
@@ -361,101 +313,7 @@ macro_rules! impl_cylm {
             }
         }
 
-        // Re-implement the Coordinates trait because we have no inheritance.
-        // Here we make use of the fact that the parameters for the coords are at the front
-        // and we pass on smaller fixed views of each parameter vector.
-        impl<T, P> Coordinates<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }> for $model<T, P>
-        where
-            T: Copy + RealField,
-        {
-            const PARAMS: SVector<&'static str, { $coords::<f32>::PARAMS_COUNT + $params.len() }> =
-                SVector::from_array_storage(concat_strs!($coords::<f32>::PARAMS, $params));
-
-            type CSST = XCState<T>;
-
-            fn contravariant_basis<RStride: Dim, CStride: Dim>(
-                ics: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
-                cs_state: &Self::CSST,
-            ) -> Option<[Vector3<T>; 3]> {
-                $coords::contravariant_basis(
-                    ics,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
-                    cs_state,
-                )
-            }
-
-            fn detg<RStride: Dim, CStride: Dim>(
-                ics: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
-                cs_state: &Self::CSST,
-            ) -> Option<T> {
-                $coords::detg(
-                    ics,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
-                    cs_state,
-                )
-            }
-
-            fn initialize_cs<RStride: Dim, CStride: Dim>(
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
-                cs_state: &mut Self::CSST,
-            ) {
-                $coords::initialize_cs(
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
-                    cs_state,
-                )
-            }
-
-            fn transform_ics_to_ecs<RStride: Dim, CStride: Dim>(
-                ics: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
-                cs_state: &Self::CSST,
-            ) -> Option<Vector3<T>> {
-                $coords::transform_ics_to_ecs(
-                    ics,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
-                    cs_state,
-                )
-            }
-
-            fn transform_ecs_to_ics<RStride: Dim, CStride: Dim>(
-                ecs: &VectorView3<T>,
-                params: &VectorView<
-                    T,
-                    Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>,
-                    RStride,
-                    CStride,
-                >,
-                cs_state: &Self::CSST,
-            ) -> Option<Vector3<T>> {
-                $coords::transform_ecs_to_ics(
-                    ecs,
-                    &params.fixed_rows::<{ $coords::<f32>::PARAMS_COUNT }>(0),
-                    cs_state,
-                )
-            }
-        }
+        reimpl_coords!($model, $coords, $params);
 
         impl<T, P> Model<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }> for $model<T, P>
         where
@@ -501,39 +359,6 @@ macro_rules! impl_cylm {
                 Ok(())
             }
 
-            fn observe_ics_basis(
-                &self,
-                scconf: &ScConf<T>,
-                params: &VectorView<T, Const<{ $coords::<f32>::PARAMS_COUNT + $params.len() }>>,
-                _fm_state: &Self::FMST,
-                cs_state: &Self::CSST,
-            ) -> Result<ICSCoordsBasis<T>, ModelError<T>> {
-                let sc_pos = Vector3::from(match scconf {
-                    ScConf::Position(r) => *r,
-                    ScConf::PositionViewport((r, ..)) => *r,
-                });
-
-                let q = match Self::transform_ecs_to_ics(&sc_pos.as_view(), params, cs_state) {
-                    Some(value) => value,
-                    None => {
-                        return Err(ModelError::CoordinateTransform(sc_pos.into_owned()));
-                    }
-                };
-
-                let (mu, nu, s) = (q[0], q[1], q[2]);
-
-                let [e1, e2, e3] = Self::contravariant_basis(
-                    &Vector3::from([mu, nu, s]).as_view(),
-                    params,
-                    cs_state,
-                )
-                .expect("failed to construct contravariant basis");
-
-                Ok(ICSCoordsBasis::<T>::from([
-                    mu, nu, s, e1[0], e1[1], e1[2], e2[0], e2[1], e2[2], e3[0], e3[1], e3[2],
-                ]))
-            }
-
             fn model_prior(
                 &self,
             ) -> impl Density<T, { $coords::<f32>::PARAMS_COUNT + $params.len() }> {
@@ -570,7 +395,7 @@ impl_cylm!(
 impl_cylm!(
     ECHModel,
     ECGeometry,
-    "Elliptic-cylindrical uniform twist magnetic flux rope model.",
+    "Elliptic-cylindrical hybrid flux rope model.",
     ["velocity", "b_scale", "lambda", "alpha", "tau"],
     ec_hybrid_obs
 );

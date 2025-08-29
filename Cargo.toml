@@ -3,6 +3,15 @@ name = "ocnus"
 version = "0.1.0"
 edition = "2024"
 
+authors = ["Andreas J. Weiss <ajefweiss@gmail.com>"]
+description = "A Heliospheric Modeling Framework for magnetic flux rope and solar wind models"
+homepage = "https://github.com/ajefweiss/ocnus/"
+repository = "https://github.com/ajefweiss/ocnus/"
+readme = "README.md"
+categories = ["science"]
+keywords = ["heliophysics", "solar wind", "magnetic flux rope"]
+license = "MIT License"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "ocnus"

@@ -1107,6 +1107,7 @@ dependencies = [
 name = "ocnus-py"
 version = "0.1.0"
 dependencies = [
+ "log",
  "nalgebra",
  "numpy",
  "ocnus",

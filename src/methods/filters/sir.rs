@@ -25,12 +25,12 @@ where
     usize: AsPrimitive<T>,
 {
     /// A single iteration of an sequential importance resampling particle filter algorithm.
-    pub fn pf_sir_iter<LF, OF>(
+    pub fn pf_sir<LF, OF>(
         &mut self,
         settings: &ParticleFilterSettings<T>,
         obs_func: &OF,
         llh_func: &LF,
-    ) -> Result<(usize, T), ParticleFilterError<T>>
+    ) -> Result<(T, usize, T), ParticleFilterError<T>>
     where
         LF: Fn(&[ObserVec<T, N>], &[ObserVec<T, N>]) -> T + Sync,
         OF: Fn(
@@ -65,15 +65,24 @@ where
             (value.is_finite(), value)
         };
 
-        let (interim_likelihood_values, iterations) = sub_pf.pf_filter(
+        let (interim_likelihood_values, iterations) = match sub_pf.pf_filter(
             settings,
             &flt_func,
             obs_func,
             Some(&density_old),
             &mut None::<&mut NullNoise<T>>,
             settings.max_attempts,
-            27,
-        )?;
+            7901,
+        ) {
+            Ok(result) => result,
+            Err(err) => {
+                // Replace underlying particle density with previous particle density.
+                density_old *= T::one() / settings.expl_factor;
+                self.ensbl.ptpdf = density_old.clone();
+
+                return Err(err);
+            }
+        };
 
         // Offset log-likelihood values to reduce precision issues.
         let llh_max = *interim_likelihood_values
@@ -107,7 +116,6 @@ where
 
         // Compute the effective sample size from the interim weights
         let ess = T::one() / interim_weights.iter().map(|value| value.powi(2)).sum::<T>();
-        info!("pf_sir_iter interim ess = {}", ess);
 
         // Update interim weights.
         sub_pf
@@ -124,7 +132,7 @@ where
             .expect("failed to compute the kl div");
 
         self.model
-            .resample_ensbl(&mut self.ensbl, &sub_pf.ensbl.ptpdf, self.rseed + 37)?;
+            .resample_ensbl(&mut self.ensbl, &sub_pf.ensbl.ptpdf, self.rseed + 1877)?;
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(self.rseed);
 
@@ -182,23 +190,23 @@ where
             self.ensbl.len(),
         );
 
-        self.rseed += 1;
-
         self.errors = self.obser.errors(llh_func);
 
         self.iter += 1;
+        self.rseed += 1;
         self.truns += iterations * self.ensbl.len() * settings.simulation_ensemble_size_factor;
 
-        Ok((uniques, kld))
+        Ok((ess, uniques, kld))
     }
 
     /// A loop of sequential importance re-sampling steps with various aborting criteria.
+    #[allow(clippy::type_complexity)]
     pub fn pf_sir_loop<LF, OF>(
         &mut self,
         settings: &ParticleFilterSettings<T>,
         obs_func: &OF,
         llh_func: &LF,
-    ) -> Result<(Vec<usize>, Vec<T>), ParticleFilterError<T>>
+    ) -> Result<(Vec<T>, Vec<usize>, Vec<T>), ParticleFilterError<T>>
     where
         LF: Fn(&[ObserVec<T, N>], &[ObserVec<T, N>]) -> T + Sync,
         OF: Fn(
@@ -210,14 +218,16 @@ where
             ) -> Result<ObserVec<T, N>, ModelError<T>>
             + Sync,
     {
+        let mut esss = Vec::new();
         let mut uniques = Vec::new();
         let mut kld = Vec::new();
 
         for _ in 0..settings.max_iterations {
-            let result = self.pf_sir_iter(settings, obs_func, llh_func);
+            let result = self.pf_sir(settings, obs_func, llh_func);
 
             match result {
-                Ok((new_uniques, new_kld)) => {
+                Ok((new_ess, new_uniques, new_kld)) => {
+                    esss.push(new_ess);
                     uniques.push(new_uniques);
                     kld.push(new_kld);
                 }
@@ -225,6 +235,6 @@ where
             }
         }
 
-        Ok((uniques, kld))
+        Ok((esss, uniques, kld))
     }
 }

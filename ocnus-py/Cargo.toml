@@ -9,6 +9,7 @@ name = "ocnus_py"
 crate-type = ["cdylib"]
 
 [dependencies]
+log = "0.4.27"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
 numpy = { version = "*", features = ["nalgebra"] }
 ocnus = { path = "../" }

@@ -1,11 +1,11 @@
-use crate::Float;
+use crate::{util::array_to_matrix, Float};
 use nalgebra::{DMatrix, Dyn, Vector3, U1};
-use numpy::{PyArray2, PyReadonlyArray1, PyReadonlyArray2, ToPyArray};
+use numpy::{ndarray::Dim, PyArray2, PyReadonlyArray1, PyReadonlyArray2, ToPyArray};
 use ocnus::{
     base::{Obser, ScConf, ScObs},
-    obsty::{ICSCoordsBasis, ObserVec},
+    obsty::{ICSCoordsBasis, ObserImg, ObserVec},
 };
-use pyo3::{prelude::*, types::PyType};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
 #[allow(missing_docs)]
 #[derive(Clone)]
@@ -14,12 +14,6 @@ pub struct PyDiagObser(pub Obser<Float, ICSCoordsBasis<Float>>);
 
 #[pymethods]
 impl PyDiagObser {
-    #[allow(missing_docs)]
-    #[new]
-    pub fn new(scobs: &PyMagScObs, size: usize) -> PyResult<Self> {
-        Ok(Self(Obser::new(scobs.0.as_scobs(), size)))
-    }
-
     #[allow(missing_docs)]
     pub fn __getitem__<'py>(&self, py: Python<'py>, key: usize) -> Bound<'py, PyArray2<Float>> {
         let column = self.0.get_output(key);
@@ -43,7 +37,7 @@ impl PyObser {
     #[allow(missing_docs)]
     #[new]
     pub fn new(scobs: &PyScObs, size: usize) -> PyResult<Self> {
-        Ok(Self(Obser::new(scobs.0.as_scobs(), size)))
+        Ok(Self(Obser::new(scobs.0.clone(), size)))
     }
 
     #[allow(missing_docs)]
@@ -69,7 +63,7 @@ impl PyMagObser {
     #[allow(missing_docs)]
     #[new]
     pub fn new(scobs: &PyMagScObs, size: usize) -> PyResult<Self> {
-        Ok(Self(Obser::new(scobs.0.as_scobs(), size)))
+        Ok(Self(Obser::new(scobs.0.clone(), size)))
     }
 
     #[allow(missing_docs)]
@@ -83,6 +77,34 @@ impl PyMagObser {
         );
 
         matrix.transpose().to_pyarray(py)
+    }
+}
+
+#[allow(missing_docs)]
+#[pyclass(name = "ImageObser")]
+pub struct PyImageObser(pub Obser<Float, ObserImg<Float>>);
+
+#[pymethods]
+impl PyImageObser {
+    #[allow(missing_docs)]
+    #[new]
+    pub fn new(scobs: &PyScObs, size: usize) -> PyResult<Self> {
+        Ok(Self(Obser::new(scobs.0.as_scobs(), size)))
+    }
+
+    #[allow(missing_docs)]
+    pub fn __getitem__<'py>(
+        &self,
+        py: Python<'py>,
+        key: usize,
+    ) -> Vec<Bound<'py, PyArray2<Float>>> {
+        let column = self.0.get_output(key);
+
+        Vec::from_iter(
+            column
+                .row_iter()
+                .map(|image| image[(0, 0)].transpose().to_pyarray(py)),
+        )
     }
 }
 
@@ -126,30 +148,46 @@ impl PyScObs {
     #[pyo3(signature = (timestamps, position, opt_data = None))]
     fn new(
         timestamps: Vec<Float>,
-        position: [Float; 3],
+        position: &Bound<PyAny>,
         opt_data: Option<PyReadonlyArray1<Float>>,
-    ) -> Self {
+    ) -> PyResult<Self> {
+        // Convert position(s) into appropriate data type.
+        let iter = match position.try_iter() {
+            Ok(value) => value.map(|py_obj| {
+                ScConf::PositionViewport((
+                    Vector3::from(py_obj.unwrap().extract::<[Float; 3]>().unwrap()),
+                    [
+                        Vector3::from([0.0, 0.0, 0.0]),
+                        Vector3::from([0.0, -0.5, -0.5]),
+                        Vector3::from([0.0, 0.5, -0.5]),
+                    ],
+                    (512, 1024 * 1024),
+                ))
+            }),
+            Err(..) => return Err(PyValueError::new_err("position argument must be iterable")),
+        };
+
+        // let iter = match position.try_iter() {
+        //     Ok(value) => value.map(|py_obj| {
+        //         ScConf::Position(Vector3::from(
+        //             py_obj.unwrap().extract::<[Float; 3]>().unwrap(),
+        //         ))
+        //     }),
+        //     Err(..) => return Err(PyValueError::new_err("position argument must be iterable")),
+        // };
+
         match opt_data {
             Some(data) => {
-                let matrix = data
-                    .try_as_matrix::<Dyn, U1, U1, Dyn>()
-                    .expect("failed to convert numpy array to matrix")
-                    .transpose();
+                let matrix = array_to_matrix::<Dim<[usize; 1]>, Dyn, U1, U1, Dyn>(data)?;
+
                 let observables = matrix
                     .column_iter()
                     .map(|row| ObserVec::from(row.as_slice()))
                     .collect::<Vec<ObserVec<Float, 1>>>();
 
-                Self(ScObs::from((
-                    timestamps,
-                    ScConf::Position(Vector3::from(position)),
-                    observables,
-                )))
+                Ok(Self(ScObs::from((timestamps, iter, observables))))
             }
-            None => Self(ScObs::from((
-                timestamps,
-                ScConf::Position(Vector3::from(position)),
-            ))),
+            None => Ok(Self(ScObs::from((timestamps, iter)))),
         }
     }
 
@@ -201,31 +239,29 @@ impl PyMagScObs {
         timestamps: Vec<Float>,
         position: &Bound<PyAny>,
         opt_data: Option<PyReadonlyArray2<Float>>,
-    ) -> Self {
+    ) -> PyResult<Self> {
         // Convert position(s) into appropriate data type.
-        let iter = position
-            .try_iter()
-            .expect("values must be iterable")
-            .map(|py_obj| {
+        let iter = match position.try_iter() {
+            Ok(value) => value.map(|py_obj| {
                 ScConf::Position(Vector3::from(
                     py_obj.unwrap().extract::<[Float; 3]>().unwrap(),
                 ))
-            });
+            }),
+            Err(..) => return Err(PyValueError::new_err("position argument must be iterable")),
+        };
 
         match opt_data {
             Some(data) => {
-                let matrix = data
-                    .try_as_matrix::<Dyn, Dyn, Dyn, Dyn>()
-                    .expect("failed to convert numpy array to matrix")
-                    .transpose();
+                let matrix = array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn, Dyn, Dyn>(data)?;
+
                 let observables = matrix
                     .column_iter()
                     .map(|row| ObserVec::from(row.as_slice()))
                     .collect::<Vec<ObserVec<Float, 3>>>();
 
-                Self(ScObs::from((timestamps, iter, observables)))
+                Ok(Self(ScObs::from((timestamps, iter, observables))))
             }
-            None => Self(ScObs::from((timestamps, iter))),
+            None => Ok(Self(ScObs::from((timestamps, iter)))),
         }
     }
 

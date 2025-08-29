@@ -9,7 +9,7 @@ use nalgebra::{Const, DVector, Dyn, OVector, RealField, SVector};
 use num_traits::Zero;
 use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
-use std::ops::Div;
+use std::{cmp::Ordering, ops::Div};
 use std::{
     fmt::{Debug, Display, Formatter},
     iter::Sum,
@@ -92,6 +92,22 @@ where
         } else {
             (-T::one()).sqrt()
         }
+    }
+
+    /// Calculate the norm of the vector.
+    pub fn norm(&self) -> T {
+        SVector::from(self.0).norm()
+    }
+
+    /// Return a normalized vector.
+    pub fn normalize(&self) -> Self {
+        Self::from(
+            self.0
+                .iter()
+                .map(|value| *value / SVector::from(self.0).norm())
+                .collect::<Vec<T>>()
+                .as_slice(),
+        )
     }
 
     /// Calculate the sum of squares over the entries within the observation vector.
@@ -499,6 +515,43 @@ where
     }
 }
 
+/// Normalized chi-squared error metric for the [`ObserVec`] type, as defined in Nieves-Chinchilla et al. (2019).
+pub fn observec_nchisq<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    let total_error = obser
+        .iter()
+        .zip(other)
+        .map(|(out_vec, ref_vec)| {
+            if !ref_vec.is_valid() && !out_vec.is_valid() {
+                T::zero()
+            } else if ref_vec.is_valid() && out_vec.is_valid() {
+                (ref_vec - out_vec).sum_of_squares()
+                    + (ref_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt()
+                        - out_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt())
+                    .powi(2)
+            } else {
+                T::one() / T::zero()
+            }
+        })
+        .sum::<T>();
+
+    // Correct for double NaN's
+    let normalizer = obser
+        .iter()
+        .fold(0, |acc, next| if next.is_valid() { acc + 1 } else { acc });
+
+    let b_max = obser.iter().fold(T::zero(), |acc, value| {
+        match acc.partial_cmp(&value.norm()) {
+            Some(Ordering::Less) => value.norm(),
+            _ => acc,
+        }
+    });
+
+    total_error / T::from_usize(normalizer).unwrap() / b_max.powi(2)
+}
+
 /// Mean square error (MSE) for the [`ObserVec`] type.
 pub fn observec_mse<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
 where
@@ -517,35 +570,6 @@ where
                 T::zero()
             } else if ref_vec.is_valid() && out_vec.is_valid() {
                 (ref_vec - out_vec).sum_of_squares()
-            } else {
-                T::one() / T::zero()
-            }
-        })
-        .sum::<T>()
-        / T::from_usize(normalizer * N).unwrap()
-}
-
-/// Mean square error (MSE), with absolute value included, for the [`ObserVec`] type.
-pub fn observec_tmse<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
-where
-    T: Copy + RealField + Sum,
-{
-    // Correct for double NaN's
-    let normalizer = obser
-        .iter()
-        .fold(0, |acc, next| if next.is_valid() { acc + 1 } else { acc });
-
-    obser
-        .iter()
-        .zip(other)
-        .map(|(out_vec, ref_vec)| {
-            if !ref_vec.is_valid() && !out_vec.is_valid() {
-                T::zero()
-            } else if ref_vec.is_valid() && out_vec.is_valid() {
-                (ref_vec - out_vec).sum_of_squares()
-                    + (ref_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt()
-                        - out_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt())
-                    .powi(2)
             } else {
                 T::one() / T::zero()
             }
@@ -574,40 +598,12 @@ where
     observec_mse(obser, other) / observec_mse(normalize_vector.as_slice(), other)
 }
 
-/// Mean square error (MSE), with absolute value included, percentage for the [`ObserVec`] type.
-pub fn observec_tmsep<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
-where
-    T: Copy + RealField + Sum,
-{
-    // Correct for double NaN's
-    let normalize_vector = DVector::from_iterator(
-        obser.len(),
-        obser.iter().map(|obs| {
-            if obs.is_valid() {
-                ObserVec::<T, N>::zeros()
-            } else {
-                ObserVec::default()
-            }
-        }),
-    );
-
-    observec_tmse(obser, other) / observec_tmse(normalize_vector.as_slice(), other)
-}
-
 /// Root mean square error (RMSE) for the [`ObserVec`] type.
 pub fn observec_rmse<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
 where
     T: Copy + RealField + Sum,
 {
     observec_mse(obser, other).sqrt()
-}
-
-/// Root mean square error (RMSE), with absolute value included, for the [`ObserVec`] type.
-pub fn observec_trmse<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
-where
-    T: Copy + RealField + Sum,
-{
-    observec_tmse(obser, other).sqrt()
 }
 
 /// Root mean square error (RMSE) percentage for the [`ObserVec`] type.
@@ -629,8 +625,45 @@ where
     (observec_mse(obser, other) / observec_mse(normalize_vector.as_slice(), other)).sqrt()
 }
 
+/// Mean square error (MSE), with absolute value included, for the [`ObserVec`] type.
+pub fn observec_mset<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    // Correct for double NaN's
+    let normalizer = obser
+        .iter()
+        .fold(0, |acc, next| if next.is_valid() { acc + 1 } else { acc });
+
+    obser
+        .iter()
+        .zip(other)
+        .map(|(out_vec, ref_vec)| {
+            if !ref_vec.is_valid() && !out_vec.is_valid() {
+                T::zero()
+            } else if ref_vec.is_valid() && out_vec.is_valid() {
+                (ref_vec - out_vec).sum_of_squares()
+                    + (ref_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt()
+                        - out_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt())
+                    .powi(2)
+            } else {
+                T::one() / T::zero()
+            }
+        })
+        .sum::<T>()
+        / T::from_usize(normalizer * N).unwrap()
+}
+
+/// Root mean square error (RMSE), with absolute value included, for the [`ObserVec`] type.
+pub fn observec_rmset<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
+where
+    T: Copy + RealField + Sum,
+{
+    observec_mset(obser, other).sqrt()
+}
+
 /// Root mean square error (RMSE), with absolute value included, percentage for the [`ObserVec`] type.
-pub fn observec_trmsep<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
+pub fn observec_rmsetp<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> T
 where
     T: Copy + RealField + Sum,
 {
@@ -645,7 +678,26 @@ where
         }),
     );
 
-    (observec_tmse(obser, other) / observec_tmse(normalize_vector.as_slice(), other)).sqrt()
+    (observec_mset(obser, other) / observec_mset(normalize_vector.as_slice(), other)).sqrt()
+}
+
+/// Checks for validity in between two [`ObserVec`] types.
+pub fn observec_valid<T, const N: usize>(obser: &[ObserVec<T, N>], other: &[ObserVec<T, N>]) -> bool
+where
+    T: Copy + RealField + Sum,
+{
+    obser
+        .iter()
+        .zip(other)
+        .fold(true, |acc, (out_vec, ref_vec)| {
+            if (!ref_vec.is_valid() && !out_vec.is_valid())
+                | (ref_vec.is_valid() && out_vec.is_valid())
+            {
+                acc & true
+            } else {
+                acc & false
+            }
+        })
 }
 
 #[cfg(test)]
@@ -707,6 +759,46 @@ mod tests {
             observec_msep(array_1.as_slice(), array_2.as_slice()),
             2.0 / 14.0 * 3.0
         ));
+
+        assert!(observec_valid(array_1.as_slice(), array_2.as_slice()));
+    }
+
+    #[test]
+    fn test_observec_invalids() {
+        let mut array_1 =
+            DVector::from_iterator(5, (0..5).map(|_| ObserVec::<f64, 3>::from([1.0, 2.0, 3.0])));
+
+        array_1[0] = ObserVec::default();
+
+        let mut array_2 =
+            DVector::from_iterator(5, (0..5).map(|_| ObserVec::<f64, 3>::from([2.0, 3.0, 1.0])));
+
+        assert!(!observec_valid(array_1.as_slice(), array_2.as_slice()));
+
+        array_2[0] = ObserVec::default();
+
+        assert!(observec_valid(array_1.as_slice(), array_2.as_slice()));
+
+        array_1 =
+            DVector::from_iterator(5, (0..5).map(|_| ObserVec::<f64, 3>::from([1.0, 2.0, 3.0])));
+        array_2 =
+            DVector::from_iterator(5, (0..5).map(|_| ObserVec::<f64, 3>::from([2.0, 3.0, 1.0])));
+
+        array_1[4] = ObserVec::default();
+        array_2[3] = ObserVec::default();
+        array_2[4] = ObserVec::default();
+
+        assert!(!observec_valid(array_1.as_slice(), array_2.as_slice()));
+
+        array_1[0] = ObserVec::default();
+        array_2[0] = ObserVec::default();
+        array_1[3] = ObserVec::default();
+
+        assert!(observec_valid(array_1.as_slice(), array_2.as_slice()));
+
+        array_1[2] = ObserVec::default();
+
+        assert!(!observec_valid(array_1.as_slice(), array_2.as_slice()));
     }
 
     #[test]
