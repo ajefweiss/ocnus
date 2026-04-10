@@ -1,0 +1,38 @@
+[package]
+name = "ocnus-py"
+version = "0.0.0"
+
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "ocnus_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+log.workspace = true
+nalgebra.workspace = true
+num-traits.workspace = true
+ocnus.workspace = true
+ocnus-frm.workspace = true
+ocnus-geo.workspace = true
+ocnus-swm.workspace = true
+paste.workspace = true
+prodef.workspace = true
+rayon.workspace = true
+serde_json5.workspace = true
+wcs.workspace = true
+
+numpy = { version = "0.28.0", features = ["nalgebra"] }
+prodef-py = { path = "../../../prodef-rs/prodef-py", version = "0.1.0" }
+pyo3 = { version = "0.28.2", features = ["multiple-pymethods"] }
+pyo3-log = "0.13.2"
+
+[lints]
+workspace = true
+
+[features]
+f32 = ["prodef-py/f32"]

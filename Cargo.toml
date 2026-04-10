@@ -1,26 +1,24 @@
-[package]
-name = "ocnus"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "crates/*",
+]
+resolver = "3"
 
+[workspace.package]
 authors = ["Andreas J. Weiss <ajefweiss@gmail.com>"]
-description = "A Heliospheric Modeling Framework for magnetic flux rope and solar wind models"
-homepage = "https://github.com/ajefweiss/ocnus/"
-repository = "https://github.com/ajefweiss/ocnus/"
-readme = "README.md"
-categories = ["science"]
-keywords = ["heliophysics", "solar wind", "magnetic flux rope"]
+edition = "2024"
 license = "MIT License"
+repository = "https://github.com/ajefweiss/ocnus/"
+rust-version = "1.92"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[lib]
-name = "ocnus"
-crate-type = ["lib"]
-
-[dependencies]
+[workspace.dependencies]
+approx = "*"
 chrono = "*"
+criterion = "*"
 derive_builder = "*"
 derive_more = { version = "*", features = ["full"] }
+dtw = "*"
+env_logger = "*"
 itertools = "*"
 log = "*"
 nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
@@ -35,20 +33,15 @@ serde_arrays = "*"
 serde_json5 = "*"
 typenum = "*"
 thiserror = "*"
+wcs = "*"
 
-[dev-dependencies]
-approx = "*"
-criterion = "*"
-directories = "*"
-dyn-fmt = "*"
-env_logger = "*"
-plotters = "*"
+ocnus = { path = "./crates/ocnus", version = "0.0.0" }
+ocnus-frm = { path = "./crates/ocnus-frm", version = "0.0.0" }
+ocnus-geo = { path = "./crates/ocnus-geo", version = "0.0.0" }
+ocnus-swm = { path = "./crates/ocnus-swm", version = "0.0.0" }
+prodef = { path = "/Users/ajweiss/Projects/prodef-rs" }
 
-[workspace]
-members = [
-    "ocnus-py",
-]
-resolver = "2"
+
 
 [profile.bench]
 opt-level = 3
@@ -62,14 +55,9 @@ opt-level = 3
 [profile.test]
 opt-level = 1
 
-[[bench]]
-name = "cylm"
-harness = false
+[workspace.lints.rust]
+missing_docs = "deny"
 
-[[bench]]
-name = "corem"
-harness = false
-
-[[bench]]
-name = "wsahux"
-harness = false
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"

@@ -77,3 +77,4 @@ conda
 # ocnus
 *.particles
 Cargo.lock
+archive/
