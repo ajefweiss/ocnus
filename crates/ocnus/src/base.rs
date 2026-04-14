@@ -53,7 +53,7 @@ where
     type FMST;
 
     /// Return the prior domain.
-    fn domain(&self) -> impl Domain<T, Const<P>> + 'static;
+    fn domain(&self) -> impl Domain<T, Const<P>>;
 
     /// Evolve a model state forward in time.
     fn evolve_state(
@@ -304,7 +304,7 @@ where
     }
 
     /// Returns a reference to the underlying model prior.
-    fn prior(&self) -> impl Density<T, Const<P>> + 'static;
+    fn prior(&self) -> impl Density<T, Const<P>>;
 
     /// Perform a forward simulation and generate synthetic observables `OD` for the
     /// given spacecraft observers, with configuration type `OC`, for a given generating function `OF`.

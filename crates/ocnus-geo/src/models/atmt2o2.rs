@@ -66,7 +66,7 @@ impl<T, OC, G> Plasma<T, OC, 3, 18> for AtmosphereT2O2Model<T, G>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
     OC: ObsPosition<T, 3>,
-    G: 'static + Density<T, Const<18>>,
+    G:  Density<T, Const<18>>,
     for<'a> &'a G: Density<T, Const<18>>,
     StandardNormal: Distribution<T>,
     usize: AsPrimitive<T>,

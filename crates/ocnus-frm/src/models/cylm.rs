@@ -233,7 +233,7 @@ macro_rules! impl_cylm {
         where
             T: Copy + Default + RealField + SampleUniform + Sum,
             OC: ObsPosition<T, 3>,
-            G: 'static + Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
+            G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             StandardNormal: Distribution<T>,
             usize: AsPrimitive<T>,
@@ -256,7 +256,7 @@ macro_rules! impl_cylm {
         impl<T, G> Model<T, 3, { $coords::<f32>::NPARAMS + $params.len() }> for $model<T, G>
         where
             T: Copy + Default + RealField + SampleUniform,
-            G: 'static + Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
+            G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             StandardNormal: Distribution<T>,
             usize: AsPrimitive<T>,
@@ -265,9 +265,7 @@ macro_rules! impl_cylm {
 
             type FMST = ();
 
-            fn domain(
-                &self,
-            ) -> impl Domain<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> + 'static {
+            fn domain(&self) -> impl Domain<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> {
                 self.0.domain()
             }
 
@@ -298,9 +296,7 @@ macro_rules! impl_cylm {
                 Ok(())
             }
 
-            fn prior(
-                &self,
-            ) -> impl Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> + 'static {
+            fn prior(&self) -> impl Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> {
                 self.0.clone()
             }
         }

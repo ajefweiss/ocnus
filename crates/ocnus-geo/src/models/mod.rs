@@ -96,14 +96,14 @@ macro_rules! impl_atmos_model {
         impl<T, G> Model<T, 3, $params> for $model<T, G>
         where
             T: AsPrimitive<usize> + Copy + Default + RealField,
-            G: 'static + Density<T, Const<$params>>,
+            G:  Density<T, Const<$params>>,
             for<'a> &'a G: Density<T, Const<$params>>,
         {
             const RCS: usize = $params;
 
             type FMST = ();
 
-            fn domain(&self) -> impl Domain<T, Const<$params>> + 'static {
+            fn domain(&self) -> impl Domain<T, Const<$params>>  {
                 self.0.domain().clone()
             }
 
@@ -128,7 +128,7 @@ macro_rules! impl_atmos_model {
                 Ok(())
             }
 
-            fn prior(&self) -> impl Density<T, Const<$params>> + 'static {
+            fn prior(&self) -> impl Density<T, Const<$params>>  {
                 self.0.clone()
             }
         }

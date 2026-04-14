@@ -111,7 +111,7 @@ where
     #[doc = concat!("Create a new [`", stringify!(WSAHUXModel), "`].")]
     pub fn new(pdf: G, input: WSAInputData<T>, radial_resolution: T) -> Self
     where
-        G: 'static + Density<T, U8>,
+        G:  Density<T, U8>,
     {
         Self(pdf, input, radial_resolution)
     }
@@ -121,7 +121,7 @@ where
     where
         T: Copy + RealField + for<'de> Deserialize<'de>,
         L: AsRef<Path>,
-        G: 'static + Density<T, U8>,
+        G:  Density<T, U8>,
     {
         let input = serde_json5::from_str::<WSAInputData<T>>(&fs::read_to_string(path)?)
             .expect("deserialization failed");
@@ -133,7 +133,7 @@ where
 impl<T, const R: usize, G> Plasma<T, VecConf<T, 3>, 3, 8> for WSAHUXModel<T, R, G>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField,
-    G: 'static + Density<T, U8>,
+    G:  Density<T, U8>,
     for<'a> &'a G: Density<T, U8>,
 {
     fn observe_pbs_ics(
@@ -254,14 +254,14 @@ where
 impl<T, const R: usize, G> Model<T, 3, 8> for WSAHUXModel<T, R, G>
 where
     T: AsPrimitive<usize> + Copy + Default + RealField,
-    G: 'static + Density<T, U8>,
+    G:  Density<T, U8>,
     for<'a> &'a G: Density<T, U8>,
 {
     const RCS: usize = 32;
 
     type FMST = WSAState<T, R>;
 
-    fn domain(&self) -> impl Domain<T, U8> + 'static {
+    fn domain(&self) -> impl Domain<T, U8> {
         self.0.domain().clone()
     }
 
@@ -346,7 +346,7 @@ where
         Ok(())
     }
 
-    fn prior(&self) -> impl Density<T, U8> + 'static {
+    fn prior(&self) -> impl Density<T, U8> {
         self.0.clone()
     }
 }

@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "prodef"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "derive_more",
  "itertools 0.14.0",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "prodef-py"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "derive_more",
  "nalgebra",

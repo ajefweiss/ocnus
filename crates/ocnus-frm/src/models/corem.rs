@@ -119,7 +119,7 @@ macro_rules! impl_corem {
         where
             T: Copy + Default + RealField + SampleUniform + Sum,
             OC: ObsPosition<T, 3>,
-            G: 'static + Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
+            G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             StandardNormal: Distribution<T>,
             usize: AsPrimitive<T>,
@@ -149,7 +149,7 @@ macro_rules! impl_corem {
         impl<T, G> Model<T, 3, { $coords::<f32>::NPARAMS + $params.len() }> for $model<T, G>
         where
             T: Copy + Default + RealField + SampleUniform,
-            G: 'static + Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
+            G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             StandardNormal: Distribution<T>,
             usize: AsPrimitive<T>,
@@ -158,9 +158,7 @@ macro_rules! impl_corem {
 
             type FMST = COREState<T>;
 
-            fn domain(
-                &self,
-            ) -> impl Domain<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> + 'static {
+            fn domain(&self) -> impl Domain<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> {
                 self.0.domain()
             }
 
@@ -221,9 +219,7 @@ macro_rules! impl_corem {
                 Ok(())
             }
 
-            fn prior(
-                &self,
-            ) -> impl Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> + 'static {
+            fn prior(&self) -> impl Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> {
                 self.0.clone()
             }
         }
@@ -252,7 +248,7 @@ impl<T, OC, G> Plasma<T, OC, 3, 11> for COREModel<T, G>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
     OC: ObsPosition<T, 3>,
-    G: 'static + Density<T, U11>,
+    G: Density<T, U11>,
     for<'a> &'a G: Density<T, U11>,
     StandardNormal: Distribution<T>,
     usize: AsPrimitive<T>,
@@ -303,7 +299,7 @@ impl<T, OC, G> WLCamera<T, OC, 11> for COREModel<T, G>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
     OC: ObsCam<T>,
-    G: 'static + Density<T, U11>,
+    G: Density<T, U11>,
     for<'a> &'a G: Density<T, U11>,
     StandardUniform: Distribution<T>,
     StandardNormal: Distribution<T>,
@@ -315,7 +311,7 @@ impl<T, OC, G> Plasma<T, OC, 3, 13> for AGCSModel<T, G>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
     OC: ObsPosition<T, 3>,
-    G: 'static + Density<T, U13>,
+    G: Density<T, U13>,
     for<'a> &'a G: Density<T, U13>,
     StandardNormal: Distribution<T>,
     usize: AsPrimitive<T>,
@@ -370,7 +366,7 @@ impl<T, OC, G> WLCamera<T, OC, 13> for AGCSModel<T, G>
 where
     T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
     OC: ObsCam<T>,
-    G: 'static + Density<T, U13>,
+    G: Density<T, U13>,
     for<'a> &'a G: Density<T, U13>,
     StandardUniform: Distribution<T>,
     StandardNormal: Distribution<T>,

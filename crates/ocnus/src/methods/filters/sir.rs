@@ -88,9 +88,11 @@ where
 
         mvnk.mean = SVector::zeros();
 
+        let domain = self.model.domain();
+
         let ptpdf = ParticleDensity::from_view::<U1, Const<P>>(
             &self.model_ensbl.input.as_view(),
-            self.model.domain(),
+            domain.clone(),
             self.model_ensbl.opt_weights.as_deref(),
             Some(mvnk),
         )
@@ -139,7 +141,7 @@ where
 
         let sub_ptpdf = ParticleDensity::from_view::<U1, Const<P>>(
             &sub_pf.model_ensbl.input.as_view(),
-            self.model.domain(),
+            domain.clone(),
             sub_pf.model_ensbl.opt_weights.as_deref(),
             None,
         )

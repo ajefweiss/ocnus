@@ -406,7 +406,7 @@ where
     }
 
     /// Return the prior distribution of the model.
-    pub fn prior(&self) -> impl Density<T, Const<P>> + 'static {
+    pub fn prior(&self) -> impl Density<T, Const<P>> {
         self.model.prior()
     }
 
