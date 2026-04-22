@@ -1,17 +1,13 @@
-[workspace]
-members = [
-    "crates/*",
-]
-resolver = "3"
-
-[workspace.package]
+[package]
+name = "ocnus"
+version = "0.2.0"
 authors = ["Andreas J. Weiss <ajefweiss@gmail.com>"]
 edition = "2024"
 license = "MIT License"
 repository = "https://github.com/ajefweiss/ocnus/"
 rust-version = "1.92"
 
-[workspace.dependencies]
+[dependencies]
 approx = "*"
 chrono = "*"
 criterion = "*"
@@ -35,13 +31,8 @@ typenum = "*"
 thiserror = "*"
 wcs = "*"
 
-ocnus = { path = "./crates/ocnus", version = "0.0.0" }
-ocnus-frm = { path = "./crates/ocnus-frm", version = "0.0.0" }
-ocnus-geo = { path = "./crates/ocnus-geo", version = "0.0.0" }
-ocnus-swm = { path = "./crates/ocnus-swm", version = "0.0.0" }
+bayesfm = { path = "/Users/ajweiss/Projects/bayesfm-rs" }
 prodef = { path = "/Users/ajweiss/Projects/prodef-rs" }
-
-
 
 [profile.bench]
 opt-level = 3
@@ -55,9 +46,20 @@ opt-level = 3
 [profile.test]
 opt-level = 1
 
-[workspace.lints.rust]
+#[[bench]]
+#name = "corem"
+#harness = false
+#
+#[[bench]]
+#name = "cylm"
+#harness = false
+
+[lints.rust]
 missing_docs = "deny"
 
-[workspace.lints.clippy]
+[lints.clippy]
 too_many_arguments = "allow"
 type_complexity = "allow"
+
+
+
