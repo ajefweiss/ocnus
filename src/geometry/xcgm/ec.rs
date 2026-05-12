@@ -1,4 +1,4 @@
-use crate::geometry::xcgm::{XCState, impl_xcgm_geom};
+use crate::geometry::xcgm::{XCState, impl_xcgm_geometry};
 use bayesfm::geometry::{param_value, param_value_or_else, quaternion_rot};
 use nalgebra::{Const, Dim, RealField, SVector, Vector3, VectorView};
 use std::marker::PhantomData;
@@ -12,27 +12,27 @@ pub fn ec_basis<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let delta = param_value("cs_delta", names, params);
     let radius = param_value("radius", names, params);
 
     let omega = T::two_pi() * nu;
-    let com = omega.cos();
-    let som = omega.sin();
+    let com = omega.clone().cos();
+    let som = omega.clone().sin();
 
-    let denom = (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
+    let denom = (omega.clone().cos().powi(2) + (delta.clone() * omega.sin()).powi(2)).sqrt();
 
-    let nu_nom = T::two_pi() * delta * mu * radius;
+    let nu_nom = T::two_pi() * delta.clone() * mu * radius.clone();
 
     let dmu = Vector3::from([
-        delta * radius * com / denom,
+        delta.clone() * radius.clone() * com.clone() / denom.clone(),
         T::zero(),
-        delta * radius * som / denom,
+        delta.clone() * radius * som.clone() / denom.clone(),
     ]);
 
     let dnu = Vector3::from([
-        -nu_nom * delta.powi(2) * som / denom.powi(3),
+        -nu_nom.clone() * delta.powi(2) * som / denom.clone().powi(3),
         T::zero(),
         nu_nom * com / denom.powi(3),
     ]);
@@ -51,7 +51,7 @@ pub fn ec_sqrtdetg<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> T
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let delta = param_value("cs_delta", names, params);
     let radius = param_value("radius", names, params);
@@ -67,19 +67,22 @@ pub fn ec_ecs_to_ics<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let delta = param_value("cs_delta", names, params);
     let radius = param_value("radius", names, params);
 
     // Compute internal coords (mu, nu).
-    let r = (x.powi(2) + z.powi(2)).sqrt();
+    let r = (x.clone().powi(2) + z.clone().powi(2)).sqrt();
 
     let (mu, mut nu) = if r == T::zero() {
         (T::zero(), T::zero())
     } else {
         (
-            r * (x.powi(2) + z.powi(2) * delta.powi(2)).sqrt() / r / delta / radius,
+            r.clone() * (x.clone().powi(2) + z.clone().powi(2) * delta.clone().powi(2)).sqrt()
+                / r
+                / delta
+                / radius,
             z.atan2(x) / T::from_usize(2).unwrap() / T::pi(),
         )
     };
@@ -104,24 +107,25 @@ pub fn ec_ics_to_ecs<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let delta = param_value("cs_delta", names, params);
     let radius = param_value("radius", names, params);
 
     let omega = T::two_pi() * nu;
 
-    let df = mu * delta * radius / (omega.cos().powi(2) + (delta * omega.sin()).powi(2)).sqrt();
+    let df = mu * delta.clone() * radius
+        / (omega.clone().cos().powi(2) + (delta * omega.clone().sin()).powi(2)).sqrt();
 
     // Compute cartesian coords (x, y, z).
-    let x = omega.cos() * df;
+    let x = omega.clone().cos() * df.clone();
     let y = omega.sin() * df;
 
     Vector3::new(x, s, y)
 }
 
 // Implementation of the elliptic-cylindrical geometry.
-impl_xcgm_geom!(
+impl_xcgm_geometry!(
     ECGeometry,
     "Elliptic-cylindric flux rope geometry.",
     ["phi", "theta", "psi", "y_0", "cs_delta", "radius", "x_0"],
@@ -134,8 +138,8 @@ impl_xcgm_geom!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bayesfm::geometry::{BFMGeometry, BFMGeometry3D};
-    use nalgebra::{SVector, Vector3};
+    use bayesfm::geometry::{Geometry, Geometry3D};
+    use nalgebra::{SVector, U1, U3, Vector3};
 
     #[test]
     fn test_ec_coords() {
@@ -155,16 +159,19 @@ mod tests {
 
         let ics_ref = Vector3::new(0.6, 0.11, 0.5);
 
-        let ecs = ECGeometry::transform_internal_to_external(
+        let ecs = ECGeometry::transform_internal_to_external::<U1, U3, _, _>(
             &ics_ref.as_view(),
             &params.fixed_rows::<7>(0),
             &cs_state,
         )
         .unwrap();
 
-        let ics_rec =
-            ECGeometry::transform_external_to_internal(&ecs.as_view(), &params.fixed_rows::<7>(0), &cs_state)
-                .unwrap();
+        let ics_rec = ECGeometry::transform_external_to_internal::<U1, U3, _, _>(
+            &ecs.as_view(),
+            &params.fixed_rows::<7>(0),
+            &cs_state,
+        )
+        .unwrap();
 
         assert!((ics_rec - ics_ref).norm() < 1e-6);
 

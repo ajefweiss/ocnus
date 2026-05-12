@@ -16,7 +16,7 @@ use crate::instruments::Plasma;
 /// A trait that is shared by all models from which one can generate synthetic remote white light images.
 pub trait WLCamera<T, OC, const P: usize>
 where
-    T: Copy + RealField,
+    T: RealField,
     OC: Scalar,
     Self: BFModel<T, 3, P> + Plasma<T, OC, 3, P>,
 {

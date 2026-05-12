@@ -1,4 +1,4 @@
-use crate::geometry::xcgm::{XCState, impl_xcgm_geom};
+use crate::geometry::xcgm::{XCState, impl_xcgm_geometry};
 use bayesfm::geometry::{param_value, param_value_or_else, quaternion_rot};
 use nalgebra::{Const, Dim, RealField, SVector, Vector3, VectorView};
 use std::marker::PhantomData;
@@ -12,14 +12,15 @@ pub fn cc_basis<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> [Vector3<T>; 3]
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let radius = param_value("radius", names, params);
 
     let omega = T::two_pi() * nu;
 
-    let dr = Vector3::from([omega.cos(), T::zero(), omega.sin()]) * radius;
-    let dnu = Vector3::from([-omega.sin(), T::zero(), omega.cos()]) * T::two_pi() * mu * radius;
+    let dr = Vector3::from([omega.clone().cos(), T::zero(), omega.clone().sin()]) * radius.clone();
+    let dnu =
+        Vector3::from([-omega.clone().sin(), T::zero(), omega.cos()]) * T::two_pi() * mu * radius;
     let dz = Vector3::from([T::zero(), T::one(), T::zero()]);
 
     [dr, dnu, dz]
@@ -34,7 +35,7 @@ pub fn cc_sqrtdetg<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> T
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let radius = param_value("radius", names, params);
 
@@ -49,12 +50,12 @@ pub fn cc_ecs_to_ics<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let radius = param_value("radius", names, params);
 
     // Compute polar coords (mu, omega).
-    let mu = (x.powi(2) + z.powi(2)).sqrt() / radius;
+    let mu = (x.clone().powi(2) + z.clone().powi(2)).sqrt() / radius;
 
     let mut nu = if mu == T::zero() {
         T::zero()
@@ -82,21 +83,21 @@ pub fn cc_ics_to_ecs<T, const D: usize, RStride: Dim, CStride: Dim>(
     _state: &XCState<T>,
 ) -> Vector3<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let radius = param_value("radius", names, params);
 
     let omega = T::two_pi() * nu;
 
     // Compute cartesian coords (x, y, z).
-    let x = omega.cos() * mu * radius;
+    let x = omega.clone().cos() * mu.clone() * radius.clone();
     let z = omega.sin() * mu * radius;
 
     Vector3::new(x, y, z)
 }
 
 // Implementation of the circular-cylindrical geometry.
-impl_xcgm_geom!(
+impl_xcgm_geometry!(
     CCGeometry,
     "Circular-cylindric flux rope geometry.",
     ["phi", "theta", "y_0", "radius", "x_0"],
@@ -109,8 +110,8 @@ impl_xcgm_geom!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bayesfm::geometry::{BFMGeometry, BFMGeometry3D};
-    use nalgebra::{SVector, Vector3};
+    use bayesfm::geometry::{Geometry, Geometry3D};
+    use nalgebra::{SVector, U1, U3, Vector3};
 
     #[test]
     fn test_cc_coords() {
@@ -123,14 +124,14 @@ mod tests {
 
         let ics_ref = Vector3::new(0.6, 0.11, 0.5);
 
-        let ecs = CCGeometry::transform_internal_to_external(
+        let ecs = CCGeometry::transform_internal_to_external::<U1, U3, _, _>(
             &ics_ref.as_view(),
             &params.fixed_rows::<5>(0),
             &cs_state,
         )
         .unwrap();
 
-        let ics_rec = CCGeometry::transform_external_to_internal(
+        let ics_rec = CCGeometry::transform_external_to_internal::<U1, U3, _, _>(
             &ecs.as_view(),
             &params.fixed_rows::<5>(0),
             &cs_state,

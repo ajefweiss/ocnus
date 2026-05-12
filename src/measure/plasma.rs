@@ -4,7 +4,7 @@ use nalgebra::{Const, RealField, SVectorView, U1};
 /// A trait that is shared by all models that can measure the in situ plasma properties.
 pub trait Plasma<T, OC, const D: usize, const P: usize>: BFModel<T, D, P>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     /// Returns the in situ plasma bulk speed.
     fn observe_pbs(

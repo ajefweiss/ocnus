@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 from .ocnus_py import *
 
 from .mfrfilter import MFRFilter

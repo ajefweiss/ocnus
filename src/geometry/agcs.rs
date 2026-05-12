@@ -1,4 +1,4 @@
-use bayesfm::geometry::{BFMGeometry, param_value, quaternion_rot};
+use bayesfm::geometry::{Geometry, param_value, quaternion_rot};
 use nalgebra::{
     ArrayStorage, Dim, Matrix3, RealField, SMatrix, SVector, U8, UnitQuaternion, Vector3,
     VectorView, VectorView3,
@@ -9,7 +9,7 @@ use std::{fmt::Debug, marker::PhantomData};
 /// Analytical GCS axis path.
 fn agcs_gamma<T>(s: T, nfac: T, hw: T) -> Vector3<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     // Convert axial coordinate s to φ.
     let phi = hw * ((s + s) - T::one());
@@ -20,7 +20,7 @@ where
 /// Analytical GCS (un-scaled) curve speed.
 fn _agcs_vs<T>(s: T, nfac: T, hw: T) -> T
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let pis = T::pi() * s;
     let npi = nfac * T::pi();
@@ -34,7 +34,7 @@ where
 /// Analytical GCS (un-scaled) curvature.
 fn agcs_curv<T>(s: T, nfac: T, hw: T) -> T
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let pis = T::pi() * s;
     let npi = nfac * T::pi();
@@ -52,7 +52,7 @@ where
 /// Analytical GCS t vector.
 fn agcs_ts<T>(s: T, nfac: T, hw: T) -> Vector3<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     // Convert axial coordinate s to φ.
     let phi = hw * ((s + s) - T::one());
@@ -80,7 +80,7 @@ where
 /// Analytical GCS n_1/2 vector.
 fn agcs_ns<T>(s: T, nfac: T, hw: T, delta: T) -> (Vector3<T>, Vector3<T>)
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     let ts = agcs_ts(s, nfac, hw);
     let n2 = Vector3::new(T::zero(), T::zero(), T::one());
@@ -93,7 +93,7 @@ where
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AGCSState<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     /// Apex distance.
     pub rt: T,
@@ -108,20 +108,20 @@ where
 /// AGCSiED geometry.
 pub struct AGCSGeometry<T>(PhantomData<T>)
 where
-    T: Copy + RealField;
+    T: RealField;
 
 impl<T> Default for AGCSGeometry<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     fn default() -> Self {
         Self(PhantomData::<T>)
     }
 }
 
-impl<T> BFMGeometry<T, 3, 8> for AGCSGeometry<T>
+impl<T> Geometry<T, 3, 8> for AGCSGeometry<T>
 where
-    T: Copy + Default + RealField,
+    T: Default + RealField,
 {
     const PARAM_NAMES: SVector<&'static str, 8> = SVector::from_array_storage(ArrayStorage(
         [[
@@ -292,7 +292,7 @@ where
 mod tests {
     use super::*;
     use approx::ulps_eq;
-    use bayesfm::geometry::BFMGeometry3D;
+    use bayesfm::geometry::Geometry3D;
     use nalgebra::{SVector, Vector3};
 
     #[test]

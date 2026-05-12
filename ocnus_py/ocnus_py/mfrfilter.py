@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
-"""magfilter.py
+"""mfrfilter.py
 
-Implements the ```FRMagFilter``` class for an automatic fitting approach for flux rope models with magnetic field observations.
+Implements the ```MFRFilter``` class for an automatic fitting approach for flux rope models with magnetic field observations.
 """
 
 import datetime as dt
@@ -10,7 +10,7 @@ import logging as lg
 import numpy as np
 
 from collections.abc import Iterable
-from ocnus_py import Obs
+from ocnus_py import BasicConf3Series, BasicConf3
 
 
 class MFRFilter:
@@ -54,27 +54,27 @@ class MFRFilter:
                     "each sublist in timestamps must be either a list of datetimes or timestamps (floats)"
                 )
 
-        obs = None
+        conf = None
 
         for sub_timestamps, sub_trajectory in zip(timestamps, trajectory):
             # convert trajectory to numpy array
             sub_trajectory = np.array(sub_trajectory)
 
-            new_obs = Obs(timestamps=sub_timestamps, opt_position=sub_trajectory)
+            new_obs = BasicConf3Series(timestamps=sub_timestamps, opt_position=sub_trajectory)
 
-            if obs is None:
-                obs = new_obs
+            if conf is None:
+                conf = new_obs
             else:
-                obs = Obs.combine(obs, new_obs)
+                conf = BasicConf3Series.combine(conf, new_obs)
 
-        self.obs = obs
+        self.conf = conf
         self.ref_data = np.hstack(reference_data)
 
         if kwargs.get("overwrite", False):
             raise NotImplementedError("overwrite functionality not yet implemented")
         else:
-            self.filter = model.new_mag_filter(obs, self.ref_data, **kwargs)
-            self.filter.initialize(
+            self.filter = model.new_mag3_filter(BasicConf3(0.0), conf, self.ref_data.T, **kwargs)
+            self.filter.initialize_mag3(
                 metric=kwargs.get("metric", "nrmse"),
                 threshold=kwargs.get("threshold", 1.0),
             )
@@ -108,31 +108,31 @@ class MFRFilter:
                 "abort={:.3f} criterion must be within (0, 10]".format(abort)
             )
 
-        last_1sigma_error = np.quantile(self.filter.errors(), 0.34)
+        last_1sigma_error = np.quantile(self.filter.errors(), 0.1587)
 
         mutations = []
 
         while True:
             for _ in range(steps):
                 mutations.append(
-                    self.filter.dev(metric, mutation_factor, recombination_factor)
+                    self.filter.dev_mag3(metric, mutation_factor, recombination_factor)
                 )
 
-            errors = self.filter.errors()
+            errors = self.filter.errors(), 
 
             logger.info(
                 "dev_loop\n\teps: {:.3f} | {:.3f} - {:.3f} - {:.3f} (1-sigma improv {:.2f}%)".format(
                     np.min(errors),
-                    np.quantile(errors, 0.34),
+                    np.quantile(errors, 0.1587),
                     np.quantile(errors, 0.5),
-                    np.quantile(errors, 0.68),
-                    100.0 * (last_1sigma_error / np.quantile(errors, 0.34) - 1.0),
+                    np.quantile(errors, 0.8413),
+                    100.0 * (last_1sigma_error / np.quantile(errors, 0.1587) - 1.0),
                 )
             )
 
-            if 100.0 * (last_1sigma_error / np.quantile(errors, 0.34) - 1.0) < abort:
+            if 100.0 * (last_1sigma_error / np.quantile(errors, 0.1587) - 1.0) < abort:
                 break
             else:
-                last_1sigma_error = np.quantile(errors, 0.34)
+                last_1sigma_error = np.quantile(errors, 0.1587)
 
         return mutations

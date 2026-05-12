@@ -1,14 +1,15 @@
 #![allow(missing_docs)]
 
+use bayesfm::{
+    EnsembleModel, EnsembleObservations, EnsembleState,
+    conf::{BasicConf, ConfSeries},
+    noise::NullNoise,
+    obs::ObsVec,
+};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Dyn, OMatrix, SVector, U8, Vector3};
-use ocnus::{
-    base::{Model, ModelEnsbl},
-    instr::Magnetometer,
-    obs::{Obs, ObsEnsbl, conf::VecConf, data::ObsVec, noise::NullNoise},
-};
-use ocnus_frm::models::CCLFFModel;
-use prodef::multivariate::{ConstantDensity, MultivariateDensity, UniformDensity};
+use ocnus::{mag::Magnetometer, models::CCLFFModel};
+use prodef::{ConstantDensity, MultivariateDensity, SamplingMode, UniformDensity};
 use std::{hint::black_box, time::Duration};
 
 const ENSEMBLE_SIZE: usize = 2_usize.pow(16);
@@ -41,16 +42,17 @@ fn benchmark_lff_f32(c: &mut Criterion) {
         ObsVec::from([-4.30711573, -12.61217154, 5.78382821]),
     ];
 
-    let obs = Obs::from_iter((0..refobs.len()).map(|i| {
-        VecConf::new(
+    let conf = ConfSeries::from_iter((0..refobs.len()).map(|i| {
+        BasicConf::new(
             224640.0 + i as f32 * 3600.0 * 2.0,
             Vector3::new(1.0, 0.0, 0.0),
         )
     }));
 
     let mut model_ensbl =
-        ModelEnsbl::new(OMatrix::<f32, U8, Dyn>::zeros(ENSEMBLE_SIZE), None, None);
-    let mut obs_ensbl = ObsEnsbl::new(obs.clone(), ENSEMBLE_SIZE, None).unwrap();
+        EnsembleState::new(OMatrix::<f32, U8, Dyn>::zeros(ENSEMBLE_SIZE), None, None);
+    let mut obs_ensbl =
+        EnsembleObservations::new(BasicConf::default(), conf.clone(), ENSEMBLE_SIZE, None).unwrap();
 
     let mut group = c.benchmark_group("cylm_lff_bench");
 
@@ -66,21 +68,21 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 .initialize_ensbl::<MultivariateDensity<f32, U8>>(
                     black_box(&mut model_ensbl),
                     black_box(prior.clone()),
-                    1000,
+                    &SamplingMode::UntilValid { max_attempts: 1000 },
                     42,
                 )
                 .unwrap();
         });
     });
 
-    group.throughput(Throughput::Elements((ENSEMBLE_SIZE * obs.len()) as u64));
+    group.throughput(Throughput::Elements((ENSEMBLE_SIZE * conf.len()) as u64));
     group.bench_function("cylm_lff_simulate", |b| {
         b.iter(|| {
             model
                 .initialize_ensbl::<MultivariateDensity<f32, U8>>(
                     black_box(&mut model_ensbl),
                     black_box(prior.clone()),
-                    1000,
+                    &SamplingMode::UntilValid { max_attempts: 1000 },
                     42,
                 )
                 .unwrap();
@@ -88,7 +90,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 .simulate_mag3(
                     &mut model_ensbl,
                     &mut obs_ensbl,
-                    &mut None::<&mut NullNoise<f32>>,
+                    &mut None::<&mut NullNoise>,
                 )
                 .unwrap();
         });

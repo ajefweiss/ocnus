@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 /// Coordinate system state type for cylindrical models with arbitrary cross-section shapes.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct XCState<T>
 where
     T: RealField,
@@ -24,7 +24,20 @@ where
     pub q: UnitQuaternion<T>,
 }
 
-macro_rules! impl_xcgm_geom {
+impl<T> Default for XCState<T>
+where
+    T: RealField,
+{
+    fn default() -> Self {
+        Self {
+            x: T::zero(),
+            z: T::zero(),
+            q: UnitQuaternion::identity(),
+        }
+    }
+}
+
+macro_rules! impl_xcgm_geometry {
     ($model: ident, $docs: literal, $params: expr, $fn_basis: tt, $fn_sqrtdetg:tt, $fn_ics: tt, $fn_ecs: tt) => {
         #[doc=$docs]
         #[allow(non_camel_case_types)]
@@ -42,29 +55,35 @@ macro_rules! impl_xcgm_geom {
             }
         }
 
-        impl<T> bayesfm::geometry::BFMGeometry<T, 3, { $params.len() }> for $model<T>
+        impl<T> bayesfm::geometry::Geometry<T, 3, { $params.len() }> for $model<T>
         where
-            T: Copy + Default + nalgebra::RealField,
+            T: nalgebra::RealField,
         {
             const PARAM_NAMES: nalgebra::SVector<&'static str, { $params.len() }> =
                 nalgebra::SVector::from_array_storage(nalgebra::ArrayStorage([$params; 1]));
 
             type CSST = XCState<T>;
 
-            fn contravariant_basis<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                ics: &nalgebra::VectorView3<T>,
+            fn contravariant_basis<CRStride, CCStride, PRStride, PCStride>(
+                ics: &nalgebra::VectorView<T, nalgebra::Const<3>, CRStride, CCStride>,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<nalgebra::Matrix3<T>> {
-                let quaternion = cs_state.q;
+            ) -> Option<nalgebra::Matrix3<T>>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
+                let quaternion = cs_state.q.clone();
 
-                let [dmu, dnu, ds] = $fn_basis::<T, { $params.len() }, RStride, CStride>(
-                    (ics[0], ics[1], ics[2]),
+                let [dmu, dnu, ds] = $fn_basis::<T, { $params.len() }, PRStride, PCStride>(
+                    (ics[0].clone(), ics[1].clone(), ics[2].clone()),
                     &Self::PARAM_NAMES,
                     params,
                     cs_state,
@@ -77,30 +96,36 @@ macro_rules! impl_xcgm_geom {
                 ]))
             }
 
-            fn sqrt_detg<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                ics: &nalgebra::VectorView3<T>,
+            fn sqrt_detg<CRStride, CCStride, PRStride, PCStride>(
+                ics: &nalgebra::VectorView<T, nalgebra::Const<3>, CRStride, CCStride>,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<T> {
-                Some($fn_sqrtdetg::<T, { $params.len() }, RStride, CStride>(
-                    (ics[0], ics[1], ics[2]),
+            ) -> Option<T>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
+                Some($fn_sqrtdetg::<T, { $params.len() }, PRStride, PCStride>(
+                    (ics[0].clone(), ics[1].clone(), ics[2].clone()),
                     &Self::PARAM_NAMES,
                     params,
                     cs_state,
                 ))
             }
 
-            fn initialize_csst<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
+            fn initialize_csst<PRStride: nalgebra::Dim, PCStride: nalgebra::Dim>(
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &mut Self::CSST,
             ) {
@@ -114,27 +139,35 @@ macro_rules! impl_xcgm_geom {
                 assert!(radius > T::zero(), "radius must be positive");
 
                 cs_state.x = x_init;
-                cs_state.z = -radius * y * (T::one() - (phi.sin() * theta.cos()).powi(2)).sqrt()
-                    / phi.cos()
-                    / theta.cos();
+                cs_state.z = -radius
+                    * y
+                    * (T::one() - (phi.clone().sin() * theta.clone().cos()).powi(2)).sqrt()
+                    / phi.clone().cos()
+                    / theta.clone().cos();
 
                 cs_state.q = quaternion_rot(phi, psi, theta);
             }
 
-            fn transform_internal_to_external<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                ics: &nalgebra::VectorView3<T>,
+            fn transform_internal_to_external<CRStride, CCStride, PRStride, PCStride>(
+                ics: &nalgebra::VectorView<T, nalgebra::Const<3>, CRStride, CCStride>,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<nalgebra::Vector3<T>> {
-                let quaternion = cs_state.q;
+            ) -> Option<nalgebra::Vector3<T>>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
+                let quaternion = cs_state.q.clone();
 
-                let ecs_norot = $fn_ecs::<T, { $params.len() }, RStride, CStride>(
-                    (ics[0], ics[1], ics[2]),
+                let ecs_norot = $fn_ecs::<T, { $params.len() }, PRStride, PCStride>(
+                    (ics[0].clone(), ics[1].clone(), ics[2].clone()),
                     &Self::PARAM_NAMES,
                     params,
                     cs_state,
@@ -142,28 +175,43 @@ macro_rules! impl_xcgm_geom {
 
                 Some(
                     quaternion.transform_vector(&ecs_norot)
-                        + nalgebra::Vector3::new(cs_state.x, T::zero(), cs_state.z),
+                        + nalgebra::Vector3::new(cs_state.x.clone(), T::zero(), cs_state.z.clone()),
                 )
             }
 
-            fn transform_external_to_internal<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                ecs: &nalgebra::VectorView3<T>,
+            fn transform_external_to_internal<CRStride, CCStride, PRStride, PCStride>(
+                ecs: &nalgebra::VectorView<T, nalgebra::Const<3>, CRStride, CCStride>,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<nalgebra::Vector3<T>> {
-                let quaternion = cs_state.q;
+            ) -> Option<nalgebra::Vector3<T>>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
+                let quaternion = cs_state.q.clone();
 
                 let ecs_norot = quaternion.conjugate().transform_vector(
-                    &(ecs - nalgebra::Vector3::new(cs_state.x, T::zero(), cs_state.z)),
+                    &(ecs
+                        - nalgebra::Vector3::new(
+                            cs_state.x.clone(),
+                            T::zero(),
+                            cs_state.z.clone(),
+                        )),
                 );
 
-                Some($fn_ics::<T, { $params.len() }, RStride, CStride>(
-                    (ecs_norot[0], ecs_norot[1], ecs_norot[2]),
+                Some($fn_ics::<T, { $params.len() }, PRStride, PCStride>(
+                    (
+                        ecs_norot[0].clone(),
+                        ecs_norot[1].clone(),
+                        ecs_norot[2].clone(),
+                    ),
                     &Self::PARAM_NAMES,
                     params,
                     cs_state,
@@ -173,4 +221,4 @@ macro_rules! impl_xcgm_geom {
     };
 }
 
-pub(crate) use impl_xcgm_geom;
+pub(crate) use impl_xcgm_geometry;

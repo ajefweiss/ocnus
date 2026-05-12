@@ -1,4 +1,4 @@
-use bayesfm::geometry::{BFMGeometry, param_value, quaternion_rot};
+use bayesfm::geometry::{Geometry, param_value, quaternion_rot};
 use nalgebra::{
     ArrayStorage, Dim, Matrix3, RealField, SMatrix, SVector, U6, UnitQuaternion, Vector3,
     VectorView, VectorView3,
@@ -10,7 +10,7 @@ use std::{fmt::Debug, marker::PhantomData};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct XTState<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     /// Major torus radius.
     pub rt: T,
@@ -25,20 +25,20 @@ where
 /// Tapered torus flux rope geometry with elliptical cross-section.
 pub struct TTGeometry<T>(PhantomData<T>)
 where
-    T: Copy + RealField;
+    T: RealField;
 
 impl<T> Default for TTGeometry<T>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     fn default() -> Self {
         Self(PhantomData::<T>)
     }
 }
 
-impl<T> BFMGeometry<T, 3, 6> for TTGeometry<T>
+impl<T> Geometry<T, 3, 6> for TTGeometry<T>
 where
-    T: Copy + Default + RealField,
+    T: Default + RealField,
 {
     const PARAM_NAMES: SVector<&'static str, 6> = SVector::from_array_storage(ArrayStorage(
         [["rot_z", "rot_y", "rot_x", "r_0rs", "d_1au", "cs_delta"]; 1],
@@ -266,7 +266,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bayesfm::geometry::BFMGeometry3D;
+    use bayesfm::geometry::Geometry3D;
     use nalgebra::{SVector, Vector3};
 
     #[test]

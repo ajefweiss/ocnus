@@ -49,10 +49,10 @@ opt-level = 1
 #[[bench]]
 #name = "corem"
 #harness = false
-#
-#[[bench]]
-#name = "cylm"
-#harness = false
+
+[[bench]]
+name = "cylm"
+harness = false
 
 [lints.rust]
 missing_docs = "deny"
@@ -61,5 +61,9 @@ missing_docs = "deny"
 too_many_arguments = "allow"
 type_complexity = "allow"
 
-
+[workspace]
+members = [
+    "ocnus_py",
+]
+resolver = "2"
 

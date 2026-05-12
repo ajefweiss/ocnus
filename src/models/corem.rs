@@ -29,7 +29,7 @@ pub fn core_obs<T, const D: usize>(
     cs_state: &XTState<T>,
 ) -> Result<(T, T), ModelError<T>>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     // Extract parameters using their identifiers.
     let tau = param_value("tau", names, params);
@@ -64,7 +64,7 @@ pub fn agcs_obs<T, const D: usize>(
     cs_state: &AGCSState<T>,
 ) -> Result<(T, T), ModelError<T>>
 where
-    T: Copy + RealField,
+    T: RealField,
 {
     // Extract parameters using their identifiers.
     let tau = param_value("tau", names, params);
@@ -96,11 +96,11 @@ macro_rules! impl_corem {
         #[derive(Clone, Debug, Deserialize, Serialize)]
         pub struct $model<T, G>(G, PhantomData<T>)
         where
-            T: Copy + RealField;
+            T: RealField;
 
         impl<T, G> $model<T, G>
         where
-            T: Copy + RealField,
+            T: RealField,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`].")]
             pub fn new(pdf: G) -> Self {
@@ -111,7 +111,7 @@ macro_rules! impl_corem {
         impl<T, OC, G> Magnetometer<T, OC, { $coords::<f32>::NPARAMS + $params.len() }>
             for $model<T, G>
         where
-            T: Copy + Default + RealField + SampleUniform + Sum,
+            T: Default + RealField + SampleUniform + Sum,
             OC: ObsPosition<T, 3>,
             G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
@@ -142,7 +142,7 @@ macro_rules! impl_corem {
 
         impl<T, G> Model<T, 3, { $coords::<f32>::NPARAMS + $params.len() }> for $model<T, G>
         where
-            T: Copy + Default + RealField + SampleUniform,
+            T: Default + RealField + SampleUniform,
             G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
             StandardNormal: Distribution<T>,
@@ -240,7 +240,7 @@ impl_corem!(
 
 impl<T, OC, G> Plasma<T, OC, 3, 11> for COREModel<T, G>
 where
-    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
     OC: ObsPosition<T, 3>,
     G: Density<T, U11>,
     for<'a> &'a G: Density<T, U11>,
@@ -291,7 +291,7 @@ where
 
 impl<T, OC, G> WLCamera<T, OC, 11> for COREModel<T, G>
 where
-    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
     OC: ObsCam<T>,
     G: Density<T, U11>,
     for<'a> &'a G: Density<T, U11>,
@@ -303,7 +303,7 @@ where
 
 impl<T, OC, G> Plasma<T, OC, 3, 13> for AGCSModel<T, G>
 where
-    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
     OC: ObsPosition<T, 3>,
     G: Density<T, U13>,
     for<'a> &'a G: Density<T, U13>,
@@ -358,7 +358,7 @@ where
 
 impl<T, OC, G> WLCamera<T, OC, 13> for AGCSModel<T, G>
 where
-    T: AsPrimitive<usize> + Default + Copy + RealField + SampleUniform + Sum,
+    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
     OC: ObsCam<T>,
     G: Density<T, U13>,
     for<'a> &'a G: Density<T, U13>,
@@ -376,7 +376,7 @@ mod tests {
     use nalgebra::{SVector, Vector3};
     use ocnus::{
         base::ModelEnsbl,
-        obs::{Obs, ObsEnsbl, conf::VecConf, data::ICSBasis, noise::NullNoise},
+        conf::{Obs, ObsEnsbl, conf::VecConf, data::ICSBasis, noise::NullNoise},
     };
     use prodef::multivariate::{ConstantDensity, MultivariateDensity, UniformDensity};
 
@@ -398,7 +398,7 @@ mod tests {
 
         let model = COREModel::new(prior);
 
-        let obs = Obs::from_iter((0..10).map(|i| {
+        let conf = Obs::from_iter((0..10).map(|i| {
             VecConf::from((
                 72.0 * 3600.0 + i as f32 * 2.0 * 3600.0,
                 Vector3::new(1.0, 0.0, 0.0),
@@ -424,9 +424,9 @@ mod tests {
         );
 
         let mut model_ensbl = ModelEnsbl::new(input, None, None);
-        let mut obs_ensbl = ObsEnsbl::new(obs.clone(), 1, None).unwrap();
+        let mut obs_ensbl = ObsEnsbl::new(conf.clone(), 1, None).unwrap();
         let mut obs_ensbl_diag =
-            ObsEnsbl::<f32, _, ICSBasis<f32, 3>>::new(obs.clone(), 1, None).unwrap();
+            ObsEnsbl::<f32, _, ICSBasis<f32, 3>>::new(conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut model_ensbl)
@@ -536,7 +536,7 @@ mod tests {
 
         let model = COREModel::new(prior);
 
-        let obs = Obs::from_iter((0..10).map(|i| {
+        let conf = Obs::from_iter((0..10).map(|i| {
             VecConf::from((
                 72.0 * 3600.0 + i as f32 * 2.0 * 3600.0,
                 Vector3::new(1.0, 0.0, 0.0),
@@ -562,9 +562,9 @@ mod tests {
         );
 
         let mut model_ensbl = ModelEnsbl::new(input, None, None);
-        let mut obs_ensbl = ObsEnsbl::new(obs.clone(), 1, None).unwrap();
+        let mut obs_ensbl = ObsEnsbl::new(conf.clone(), 1, None).unwrap();
         let mut obs_ensbl_diag =
-            ObsEnsbl::<f32, _, ICSBasis<f32, 3>>::new(obs.clone(), 1, None).unwrap();
+            ObsEnsbl::<f32, _, ICSBasis<f32, 3>>::new(conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut model_ensbl)
