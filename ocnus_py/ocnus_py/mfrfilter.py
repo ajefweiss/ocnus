@@ -14,7 +14,7 @@ from ocnus_py import BasicConf3Series, BasicConf3
 
 
 class MFRFilter:
-    def __init__(self, model, timestamps, trajectory, reference_data, **kwargs):
+    def __init__(self, model, initial, timestamps, trajectory, reference_data, **kwargs):
         """Initialize an MFRFilter object.
 
         Args:
@@ -73,7 +73,7 @@ class MFRFilter:
         if kwargs.get("overwrite", False):
             raise NotImplementedError("overwrite functionality not yet implemented")
         else:
-            self.filter = model.new_mag3_filter(BasicConf3(0.0), conf, self.ref_data.T, **kwargs)
+            self.filter = model.new_mag3_filter(BasicConf3(initial), conf, self.ref_data.T, **kwargs)
             self.filter.initialize_mag3(
                 metric=kwargs.get("metric", "nrmse"),
                 threshold=kwargs.get("threshold", 1.0),

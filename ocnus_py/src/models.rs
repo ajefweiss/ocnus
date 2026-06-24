@@ -17,28 +17,12 @@ macro_rules! impl_py_mfr_model {
             pub struct $name(pub $model<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>);
 
             bayesfm::py_add_model_functions!($model, $name, $nparams);
-            bayesfm::py_add_model_simulation!($model, $name, $nparams, "mag3", 3, 3);
-            bayesfm::py_add_model_filter!($model, $name, $nparams, "Mag3", 3, 3, 3);
+            bayesfm::py_add_model_simulation!($model, $name, $nparams, "mag3", BasicConf, 3, 3);
+            bayesfm::py_add_model_filter!($model, $name, $nparams, "Mag3", BasicConf, 3, 3, 3);
 
             #[pyo3::pymethods]
             impl $name
             {
-                // /// Compute the fisher information matrix for a  observation configuration and a specific set of model parameters with a given covariance.
-                // pub fn fisher_mag<'py>(&self, py: Python<'py>, initial: &PyBasicConf3, configuration: &PyBasicConf3Series, values: &Bound<PyAny>, covariance: PyReadonlyArray2<Float>) -> PyResult<Bound<'py, PyArray2<Float>>> {
-                //     let iter = py_any_iterator!(values, Float);
-                //     let matrix = array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn, Dyn, Dyn>(covariance)?;
-
-                //     let vector = SVector::<Float, 3>::from_iterator(iter);
-
-                //     let fisher = py.detach(|| {
-                //         let obs3 = obs.as_obs3()?.clone();
-
-                //         Ok::<_, PyErr>(self.0.fisher_mag((initial.0, configuration.0), &vector.as_view::<Const<3>, U1, U1, Const<3>>(), &matrix).unwrap())
-                //     })?;
-
-                //     Ok(fisher.transpose().to_pyarray(py))
-                // }
-
                 /// Create a new atmosphere model from univariate prior distributions and shells.
                 #[new]
                 pub fn new(priors: Vec<crate::PyUnivariate>) -> pyo3::PyResult<Self> {
