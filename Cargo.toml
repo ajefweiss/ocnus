@@ -29,7 +29,7 @@ serde_arrays = "*"
 serde_json5 = "*"
 typenum = "*"
 thiserror = "*"
-wcs = "*"
+wcs = { path = "../wcs-rs" }
 
 bayesfm = { path = "/Users/ajweiss/Projects/bayesfm-rs" }
 prodef = { path = "/Users/ajweiss/Projects/prodef-rs" }

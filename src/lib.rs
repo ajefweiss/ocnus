@@ -3,3 +3,4 @@
 pub mod geometry;
 pub mod mag;
 pub mod models;
+pub mod rho;

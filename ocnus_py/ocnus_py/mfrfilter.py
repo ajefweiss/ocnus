@@ -10,7 +10,7 @@ import logging as lg
 import numpy as np
 
 from collections.abc import Iterable
-from ocnus_py import BasicConf3Series, BasicConf3
+from ocnus_py import Location3Series, Location3
 
 
 class MFRFilter:
@@ -60,12 +60,12 @@ class MFRFilter:
             # convert trajectory to numpy array
             sub_trajectory = np.array(sub_trajectory)
 
-            new_obs = BasicConf3Series(timestamps=sub_timestamps, opt_position=sub_trajectory)
+            new_obs = Location3Series(timestamps=sub_timestamps, opt_position=sub_trajectory)
 
             if conf is None:
                 conf = new_obs
             else:
-                conf = BasicConf3Series.combine(conf, new_obs)
+                conf = Location3Series.combine(conf, new_obs)
 
         self.conf = conf
         self.ref_data = np.hstack(reference_data)
@@ -73,7 +73,7 @@ class MFRFilter:
         if kwargs.get("overwrite", False):
             raise NotImplementedError("overwrite functionality not yet implemented")
         else:
-            self.filter = model.new_mag3_filter(BasicConf3(initial), conf, self.ref_data.T, **kwargs)
+            self.filter = model.new_mag3_filter(Location3(initial), conf, self.ref_data.T, **kwargs)
             self.filter.initialize_mag3(
                 metric=kwargs.get("metric", "nrmse"),
                 threshold=kwargs.get("threshold", 1.0),

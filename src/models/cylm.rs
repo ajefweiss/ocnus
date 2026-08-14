@@ -23,7 +23,7 @@ where
     // Extract parameters using their identifiers.
     let b = param_value("b_scale", names, params);
     let alpha_signed = param_value("alpha", names, params);
-    let radius = param_value("radius", names, params);
+    let _radius = param_value("radius", names, params);
 
     let (alpha, sign) = match alpha_signed
         .partial_cmp(&T::zero())
@@ -41,14 +41,9 @@ where
             _ => match mu.partial_cmp(&T::zero()).unwrap() {
                 Ordering::Equal => Ok((T::zero(), b)),
                 Ordering::Greater => {
-                    let chi_lff = b.clone()
-                        * sign
-                        * bessel_jn(alpha.clone() * mu.clone() * radius.clone(), 1)
-                        / mu.clone()
-                        / radius.clone()
-                        / T::two_pi();
+                    let chi_lff = b.clone() * sign * bessel_jn(alpha.clone() * mu.clone(), 1);
 
-                    let xi_lff: T = b * bessel_jn(alpha * mu * radius, 0);
+                    let xi_lff: T = b * bessel_jn(alpha * mu, 0);
 
                     Ok((chi_lff, xi_lff))
                 }
@@ -74,12 +69,9 @@ where
 {
     // Extract parameters using their identifiers.
     let b = param_value("b_star", names, params);
-
     let tau = param_value("tau", names, params);
-
     let c10 = param_value("c10", names, params);
-
-    let radius = param_value("radius", names, params);
+    let _radius = param_value("radius", names, params);
 
     let (mu, _nu, _z) = (q[0].clone(), q[1].clone(), q[2].clone());
 
@@ -89,7 +81,7 @@ where
             _ => match mu.partial_cmp(&T::zero()).unwrap() {
                 Ordering::Equal => Ok((T::zero(), b)),
                 Ordering::Greater => {
-                    let chi_nc16 = -b.clone() / radius / c10 / T::two_pi();
+                    let chi_nc16 = -mu.clone() * b.clone() / c10;
 
                     let xi_nc16: T = b * (tau.clone() - mu.powi(2)) / tau;
 
@@ -118,7 +110,7 @@ where
     // Extract parameters using their identifiers.
     let b = param_value("b_scale", names, params);
     let tau = param_value("tau", names, params);
-    let radius = param_value("radius", names, params);
+    let _radius = param_value("radius", names, params);
 
     let (mu, _nu, _z) = (q[0].clone(), q[1].clone(), q[2].clone());
 
@@ -128,10 +120,9 @@ where
             _ => match mu.partial_cmp(&T::zero()).unwrap() {
                 Ordering::Equal => Ok((T::zero(), b)),
                 Ordering::Greater => {
-                    let chi_ut = b.clone() * tau.clone()
-                        / (T::one() + (tau.clone() * mu.clone() * radius.clone()).powi(2))
-                        / T::two_pi();
-                    let xi_ut = b / (T::one() + (tau * mu * radius).powi(2));
+                    let chi_ut = mu.clone() * b.clone() * tau.clone()
+                        / (T::one() + (tau.clone() * mu.clone()).powi(2));
+                    let xi_ut = b / (T::one() + (tau * mu).powi(2));
 
                     Ok((chi_ut, xi_ut))
                 }
@@ -225,7 +216,7 @@ macro_rules! impl_cylm_model {
 
         impl<T, G> $model<T, G>
         where
-            T: Default + RealField,
+            T: RealField,
         {
             #[doc = concat!("Create a new [`", stringify!($model), "`].")]
             pub fn new(pdf: G) -> Self {
@@ -242,7 +233,6 @@ macro_rules! impl_cylm_model {
             G: 'static + prodef::Density<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + Sync,
             OC: bayesfm::conf::ConfPosition<T, 3> + nalgebra::Scalar + Sync,
             for<'a> &'a OC: std::ops::Sub<&'a OC, Output=T>
-
         {
             fn observe_mag3_ics(
                 &self,
@@ -353,7 +343,7 @@ mod tests {
     use approx::ulps_eq;
     use bayesfm::{
         EnsembleModel, EnsembleObservations, EnsembleState,
-        conf::{BasicConf, ConfSeries},
+        conf::{ConfSeries, Location},
         noise::NullNoise,
     };
     use nalgebra::{DMatrix, Dyn, OMatrix, SVector, U8, U12, Vector3};
@@ -374,8 +364,8 @@ mod tests {
 
         let model = CCLFFModel::new(prior);
 
-        let conf: ConfSeries<BasicConf<f32, 3>> = ConfSeries::from_iter((0..10).map(|i| {
-            BasicConf::from((
+        let conf = ConfSeries::from_iter((0..10).map(|i| {
+            Location::from((
                 224640.0 + i as f32 * 3600.0 * 2.0,
                 Vector3::new(1.0, 0.0, 0.0),
             ))
@@ -398,7 +388,7 @@ mod tests {
 
         let mut ensbl = EnsembleState::new(input, None, None);
         let mut obs_ensbl =
-            EnsembleObservations::new(BasicConf::default(), conf.clone(), 1, None).unwrap();
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut ensbl)
@@ -415,19 +405,19 @@ mod tests {
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[0][1],
-            19.200111,
+            9.095808,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[2][1],
-            19.712679,
+            17.062849,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[4][2],
-            -1.6972067,
+            -3.5344844,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
@@ -454,7 +444,7 @@ mod tests {
         let model = CCLFFModel::new(prior);
 
         let conf = ConfSeries::from_iter(
-            (0..2).map(|i| BasicConf::from((0.0, Vector3::new(i as f32, 0.0, 0.0)))),
+            (0..2).map(|i| Location::from((0.0, Vector3::new(i as f32, 0.0, 0.0)))),
         );
 
         let mut input = OMatrix::<f32, U8, Dyn>::zeros(1);
@@ -464,7 +454,7 @@ mod tests {
                 0_f32.to_radians(),
                 0_f32.to_radians(),
                 0.0,
-                1.56,
+                1.0,
                 0.0,
                 600.0,
                 20.0,
@@ -474,7 +464,7 @@ mod tests {
 
         let mut ensbl = EnsembleState::new(input, None, None);
         let mut obs_ensbl =
-            EnsembleObservations::new(BasicConf::default(), conf.clone(), 1, None).unwrap();
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut ensbl)
@@ -522,7 +512,7 @@ mod tests {
         let model = CCUTModel::new(prior);
 
         let conf = ConfSeries::from_iter((0..8).map(|i| {
-            BasicConf::from((
+            Location::from((
                 224640.0 + i as f32 * 3600.0 * 2.0,
                 Vector3::new(1.0, 0.0, 0.0),
             ))
@@ -545,7 +535,7 @@ mod tests {
 
         let mut ensbl = EnsembleState::new(input, None, None);
         let mut obs_ensbl =
-            EnsembleObservations::new(BasicConf::default(), conf.clone(), 1, None).unwrap();
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut ensbl)
@@ -562,19 +552,19 @@ mod tests {
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[0][1],
-            17.279219,
+            5.720541,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[2][1],
-            19.186895,
+            12.50523,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[4][2],
-            -2.3241665,
+            -5.114356,
             max_ulps = 5,
             epsilon = 1e-5
         ));
@@ -602,7 +592,7 @@ mod tests {
         let model = CCUTModel::new(prior);
 
         let conf = ConfSeries::from_iter(
-            (0..2).map(|i| BasicConf::from((0.0, Vector3::new(i as f32, 0.0, 0.0)))),
+            (0..2).map(|i| Location::from((0.0, Vector3::new(i as f32, 0.0, 0.0)))),
         );
 
         let mut input = OMatrix::<f32, U8, Dyn>::zeros(1);
@@ -612,7 +602,7 @@ mod tests {
                 0_f32.to_radians(),
                 0_f32.to_radians(),
                 0.0,
-                1.56,
+                1.0,
                 0.0,
                 600.0,
                 20.0,
@@ -622,7 +612,7 @@ mod tests {
 
         let mut ensbl = EnsembleState::new(input, None, None);
         let mut obs_ensbl =
-            EnsembleObservations::new(BasicConf::default(), conf.clone(), 1, None).unwrap();
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut ensbl)
@@ -674,7 +664,7 @@ mod tests {
         let model = ECHModel::new(prior);
 
         let conf = ConfSeries::from_iter((0..8).map(|i| {
-            BasicConf::from((
+            Location::from((
                 224640.0 + i as f32 * 3600.0 * 2.0,
                 Vector3::new(1.0, 0.0, 0.0),
             ))
@@ -703,7 +693,7 @@ mod tests {
 
         let mut ensbl = EnsembleState::new(input, None, None);
         let mut obs_ensbl =
-            EnsembleObservations::new(BasicConf::default(), conf.clone(), 1, None).unwrap();
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
 
         model
             .initialize_states_ensbl(&mut ensbl)
@@ -720,21 +710,21 @@ mod tests {
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[0][1],
-            17.279219,
+            17.395828,
             max_ulps = 5,
             epsilon = 1e-5
         ));
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[2][1],
-            19.186895,
+            19.183628,
             max_ulps = 5,
             epsilon = 1e-5
         ));
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[4][2],
-            -2.3241665,
+            -7.895256,
             max_ulps = 5,
             epsilon = 1e-5
         ));
@@ -784,19 +774,19 @@ mod tests {
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[0][1],
-            19.200111,
+            19.266665,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[2][1],
-            19.712679,
+            19.71099,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[4][2],
-            -1.6972067,
+            -4.517702,
             max_ulps = 5,
             epsilon = 1e-5
         ));
@@ -830,7 +820,7 @@ mod tests {
         let model = ECHModel::new(prior);
 
         let conf = ConfSeries::from_iter((0..5).map(|i| {
-            BasicConf::from((
+            Location::from((
                 14400.0 + i as f32 * 4.0 * 3600.0,
                 Vector3::new(1.0, 0.0, 0.0),
             ))
@@ -842,7 +832,7 @@ mod tests {
 
         let fisher_info = model
             .fisher_mag(
-                (&BasicConf::default(), &conf),
+                (&Location::default(), &conf),
                 &params.as_view(),
                 &DMatrix::from_diagonal_element(5, 5, 0.1_f32),
             )
@@ -850,7 +840,7 @@ mod tests {
 
         assert!(ulps_eq!(
             fisher_info[(0, 0)],
-            9593.1,
+            9608.1,
             max_ulps = 1,
             epsilon = 1e-1
         ));

@@ -24,13 +24,20 @@ fn ocnus_py(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyMultivariate>()?;
 
     // bayesfm-rs re-exports
-    m.add_class::<PyBasicConf3>()?;
-    m.add_class::<PyBasicConf3Series>()?;
-    m.add_class::<PyEnsblBasicConf3ObsVec3>()?;
+    m.add_class::<PyLocation3>()?;
+    m.add_class::<PyLocation3Series>()?;
+    m.add_class::<PyWCSConf>()?;
+    m.add_class::<PyWCSConfSeries>()?;
+    m.add_class::<PyEnsblLocation3ObsVec3>()?;
+    m.add_class::<PyEnsblWCSConfImg>()?;
     m.add_class::<PyObsVecNoise>()?;
 
     // ocnus models
     m.add_class::<NC16>()?;
+    m.add_class::<CCUT>()?;
+    m.add_class::<CCLFF>()?;
+    m.add_class::<CORE>()?;
+    m.add_class::<AGCS>()?;
 
     Ok(())
 }

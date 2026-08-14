@@ -870,9 +870,8 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "mapproj"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cef28b23f82a86b32a30cfbd8e45fb66645bd677b150636ae277ac9295054c44"
+version = "0.4.1"
+source = "git+https://github.com/cds-astro/cds-mapproj-rust?branch=main#5d11ace70e76ab4804747224ca7317a8f03b6699"
 
 [[package]]
 name = "matrixmultiply"
@@ -1745,9 +1744,7 @@ dependencies = [
 
 [[package]]
 name = "wcs"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "596ba3e58d9861b3323c3cc572c3c7453f48e9b357c89ec04b16c5f9babcfd91"
+version = "0.4.3"
 dependencies = [
  "enum_dispatch",
  "mapproj",

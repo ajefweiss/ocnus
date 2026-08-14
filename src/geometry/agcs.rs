@@ -1,7 +1,7 @@
 use bayesfm::geometry::{Geometry, param_value, quaternion_rot};
 use nalgebra::{
-    ArrayStorage, Dim, Matrix3, RealField, SMatrix, SVector, U8, UnitQuaternion, Vector3,
-    VectorView, VectorView3,
+    ArrayStorage, Const, Dim, Matrix3, RealField, SMatrix, SVector, U8, UnitQuaternion, Vector3,
+    VectorView,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
@@ -12,9 +12,10 @@ where
     T: RealField,
 {
     // Convert axial coordinate s to φ.
-    let phi = hw * ((s + s) - T::one());
+    let phi = hw.clone() * ((s.clone() + s) - T::one());
 
-    Vector3::from([phi.cos(), phi.sin(), T::zero()]) * (T::frac_pi_2() * phi / hw).cos().powf(nfac)
+    Vector3::from([phi.clone().cos(), phi.clone().sin(), T::zero()])
+        * (T::frac_pi_2() * phi / hw).cos().powf(nfac)
 }
 
 /// Analytical GCS (un-scaled) curve speed.
@@ -23,11 +24,11 @@ where
     T: RealField,
 {
     let pis = T::pi() * s;
-    let npi = nfac * T::pi();
+    let npi = nfac.clone() * T::pi();
 
-    pis.sin().powf(nfac - T::one())
-        * (npi.powi(2)
-            + ((T::from_usize(2).unwrap() * hw).powi(2) - npi.powi(2)) * pis.sin().powi(2))
+    pis.clone().sin().powf(nfac - T::one())
+        * (npi.clone().powi(2)
+            + ((T::from_usize(2).unwrap() * hw).powi(2) - npi.clone().powi(2)) * pis.sin().powi(2))
         .sqrt()
 }
 
@@ -37,14 +38,15 @@ where
     T: RealField,
 {
     let pis = T::pi() * s;
-    let npi = nfac * T::pi();
+    let npi = nfac.clone() * T::pi();
 
-    let term_1 = T::from_usize(8).unwrap() * hw.powi(2) * (T::one() + nfac)
-        - T::from_usize(2).unwrap() * (nfac - T::one()) * npi.powi(2)
-        + (nfac - T::one()).powi(2) * nfac * T::pi().powi(2) / pis.sin().powi(2);
+    let term_1 = T::from_usize(8).unwrap() * hw.clone().powi(2) * (T::one() + nfac.clone())
+        - T::from_usize(2).unwrap() * (nfac.clone() - T::one()) * npi.clone().powi(2)
+        + (nfac.clone() - T::one()).powi(2) * nfac.clone() * T::pi().powi(2)
+            / pis.clone().sin().powi(2);
 
-    ((-T::from_usize(4).unwrap() * hw.powi(2) + npi.powi(2)).powi(2)
-        + nfac * T::pi().powi(2) / pis.sin().powi(2) * (term_1))
+    ((-T::from_usize(4).unwrap() * hw.clone().powi(2) + npi.clone().powi(2)).powi(2)
+        + nfac.clone() * T::pi().powi(2) / pis.clone().sin().powi(2) * (term_1))
         .sqrt()
         * pis.sin().powf(nfac)
 }
@@ -55,23 +57,24 @@ where
     T: RealField,
 {
     // Convert axial coordinate s to φ.
-    let phi = hw * ((s + s) - T::one());
+    let phi = hw.clone() * ((s.clone() + s.clone()) - T::one());
     let pis = T::pi() * s;
 
-    let normalization = ((T::from_usize(2).unwrap() * hw * phi.cos() * pis.sin()
-        + nfac * T::pi() * phi.sin() * pis.cos())
-    .powi(2)
-        + (nfac * T::pi() * pis.cos() * phi.cos()
-            - T::from_usize(2).unwrap() * hw * pis.sin() * phi.sin())
-        .powi(2))
-    .sqrt();
+    let normalization =
+        ((T::from_usize(2).unwrap() * hw.clone() * phi.clone().cos() * pis.clone().sin()
+            + nfac.clone() * T::pi() * phi.clone().sin() * pis.clone().cos())
+        .powi(2)
+            + (nfac.clone() * T::pi() * pis.clone().cos() * phi.clone().cos()
+                - T::from_usize(2).unwrap() * hw.clone() * pis.clone().sin() * phi.clone().sin())
+            .powi(2))
+        .sqrt();
 
     Vector3::new(
-        (nfac * T::pi() * pis.cos() * phi.cos()
-            - T::from_usize(2).unwrap() * hw * pis.sin() * phi.sin())
-            / normalization,
-        (T::from_usize(2).unwrap() * hw * pis.sin() * phi.cos()
-            + nfac * T::pi() * pis.cos() * phi.sin())
+        (nfac.clone() * T::pi() * pis.clone().cos() * phi.clone().clone().cos()
+            - T::from_usize(2).unwrap() * hw.clone() * pis.clone().sin() * phi.clone().sin())
+            / normalization.clone(),
+        (T::from_usize(2).unwrap() * hw * pis.clone().sin() * phi.clone().cos()
+            + nfac.clone() * T::pi() * pis.clone().cos() * phi.clone().sin())
             / normalization,
         T::zero(),
     )
@@ -90,7 +93,7 @@ where
 }
 
 /// Coordinate system state type for the AGCSiED geometry.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AGCSState<T>
 where
     T: RealField,
@@ -103,6 +106,19 @@ where
 
     /// Quaternion for orientation.
     pub q: UnitQuaternion<T>,
+}
+
+impl<T> Default for AGCSState<T>
+where
+    T: RealField,
+{
+    fn default() -> Self {
+        Self {
+            rt: T::zero(),
+            rp: T::zero(),
+            q: UnitQuaternion::default(),
+        }
+    }
 }
 
 /// AGCSiED geometry.
@@ -121,7 +137,7 @@ where
 
 impl<T> Geometry<T, 3, 8> for AGCSGeometry<T>
 where
-    T: Default + RealField,
+    T: RealField,
 {
     const PARAM_NAMES: SVector<&'static str, 8> = SVector::from_array_storage(ArrayStorage(
         [[
@@ -131,91 +147,117 @@ where
 
     type CSST = AGCSState<T>;
 
-    fn contravariant_basis<RStride: Dim, CStride: Dim>(
-        ics: &VectorView3<T>,
-        params: &VectorView<T, U8, RStride, CStride>,
-        cs_state: &Self::CSST,
-    ) -> Option<Matrix3<T>> {
-        let rt = cs_state.rt;
-        let rp = cs_state.rp;
-        let hw = param_value("hw", &Self::PARAM_NAMES, params);
-        let nfac = param_value("nfac", &Self::PARAM_NAMES, params);
-        let delta = param_value("cs_delta", &Self::PARAM_NAMES, params);
+    // fn contravariant_basis<CRStride, CCStride, PRStride, PCStride>(
+    //     ics: &VectorView<T, Const<3>, CRStride, CCStride>,
+    //     params: &VectorView<T, Const<8>, PRStride, PCStride>,
+    //     cs_state: &Self::CSST,
+    // ) -> Option<Matrix3<T>>
+    // where
+    //     CRStride: Dim,
+    //     CCStride: Dim,
+    //     PRStride: Dim,
+    //     PCStride: Dim,
+    // {
+    //     let rt = cs_state.rt.clone();
+    //     let rp = cs_state.rp.clone();
+    //     let hw = param_value("hw", &Self::PARAM_NAMES, params);
+    //     let nfac = param_value("nfac", &Self::PARAM_NAMES, params);
+    //     let delta = param_value("cs_delta", &Self::PARAM_NAMES, params);
 
-        let mu = ics[0];
-        let nu = ics[1];
-        let s = ics[2];
+    //     let mu = ics[0].clone();
+    //     let nu = ics[1].clone();
+    //     let s = ics[2].clone();
 
-        let k1 = rt * agcs_curv(s, nfac, hw);
-        let pis = T::pi() * s;
-        let npi = nfac * T::pi();
-        let omega = T::two_pi() * nu;
+    //     let k1 = rt.clone() * agcs_curv(s.clone(), nfac.clone(), hw.clone());
+    //     let pis = T::pi() * s.clone();
+    //     let npi = nfac.clone() * T::pi();
+    //     let omega = T::two_pi() * nu;
 
-        let quaternion = cs_state.q;
+    //     let quaternion = cs_state.q.clone();
 
-        let (n1, n2) = agcs_ns(s, nfac, hw, delta);
+    //     let (n1, n2) = agcs_ns(s.clone(), nfac.clone(), hw.clone(), delta);
+    //     let gamma = agcs_gamma(s.clone(), nfac.clone(), hw.clone());
+    //     let gamma_norm_0p5 = agcs_gamma(T::from_f64(0.5).unwrap(), nfac.clone(), hw.clone()).norm();
+    //     let gamma_ratio = gamma.clone().norm() / gamma_norm_0p5;
+    //     let rfac_0 = rp * gamma_ratio.clone();
+    //     let rfac = rfac_0.clone() * (T::one() - (-T::from_f64(4.0).unwrap() * gamma_ratio))
+    //         / (T::one() - (-T::from_f64(4.0).unwrap()));
 
-        let cof = pis.sin().powf(nfac) * rt * rp;
+    //     let dmu = n1.clone() * (cof.clone() * omega.clone().clone().cos())
+    //         + n2.clone() * (cof.clone() * omega.clone().sin());
 
-        let dmu = n1 * (cof * omega.cos()) + n2 * (cof * omega.sin());
+    //     let dnu = -n1.clone() * (cof.clone() * omega.clone().sin() * T::two_pi() * mu.clone())
+    //         + n2.clone() * (cof.clone() * omega.clone().cos() * T::two_pi() * mu.clone());
 
-        let dnu = -n1 * (cof * omega.sin() * T::two_pi() * mu)
-            + n2 * (cof * omega.cos() * T::two_pi() * mu);
+    //     // Convert axial coordinate s to φ.
+    //     let phi = hw.clone() * ((s.clone() + s.clone()) - T::one());
 
-        // Convert axial coordinate s to φ.
-        let phi = hw * ((s + s) - T::one());
+    //     let tvx = Vector3::new(
+    //         npi.clone() * pis.clone().cos() * phi.clone().cos()
+    //             - T::from_usize(2).unwrap() * hw.clone() * pis.clone().sin() * phi.clone().sin(),
+    //         T::from_usize(2).unwrap() * hw * pis.clone().sin() * phi.clone().cos()
+    //             + npi.clone() * pis.clone().cos() * phi.clone().sin(),
+    //         T::zero(),
+    //     ) * rt
+    //         * pis.clone().sin().powf(nfac.clone() - T::one())
+    //         * (T::one()
+    //             - mu.clone()
+    //                 * rp.clone()
+    //                 * pis.clone().sin().powf(nfac.clone())
+    //                 * (omega.clone().cos() * k1));
 
-        let tvx = Vector3::new(
-            npi * pis.cos() * phi.cos() - T::from_usize(2).unwrap() * hw * pis.sin() * phi.sin(),
-            T::from_usize(2).unwrap() * hw * pis.sin() * phi.cos() + npi * pis.cos() * phi.sin(),
-            T::zero(),
-        ) * rt
-            * pis.sin().powf(nfac - T::one())
-            * (T::one() - mu * rp * pis.sin().powf(nfac) * (omega.cos() * k1));
+    //     let ds = tvx
+    //         + (n1 * omega.clone().cos() + n2 * omega.sin())
+    //             * npi
+    //             * mu
+    //             * rp
+    //             * pis.clone().cos()
+    //             * pis.sin().powf(nfac - T::one());
 
-        let ds = tvx
-            + (n1 * omega.cos() + n2 * omega.sin())
-                * npi
-                * mu
-                * rp
-                * pis.cos()
-                * pis.sin().powf(nfac - T::one());
+    //     Some(SMatrix::from_columns(&[
+    //         quaternion.transform_vector(&dmu),
+    //         quaternion.transform_vector(&dnu),
+    //         quaternion.transform_vector(&ds),
+    //     ]))
+    // }
 
-        Some(SMatrix::from_columns(&[
-            quaternion.transform_vector(&dmu),
-            quaternion.transform_vector(&dnu),
-            quaternion.transform_vector(&ds),
-        ]))
-    }
+    // /// Compute the determinant of the metric tensor.
+    // fn sqrt_detg<CRStride, CCStride, PRStride, PCStride>(
+    //     ics: &VectorView<T, Const<3>, CRStride, CCStride>,
+    //     params: &VectorView<T, U8, PRStride, PCStride>,
+    //     cs_state: &Self::CSST,
+    // ) -> Option<T>
+    // where
+    //     CRStride: Dim,
+    //     CCStride: Dim,
+    //     PRStride: Dim,
+    //     PCStride: Dim,
+    // {
+    //     let rt = cs_state.rt.clone();
+    //     let rp = cs_state.rp.clone();
+    //     let hw = param_value("hw", &Self::PARAM_NAMES, params);
+    //     let nfac = param_value("nfac", &Self::PARAM_NAMES, params);
 
-    /// Compute the determinant of the metric tensor.
-    fn sqrt_detg<RStride: Dim, CStride: Dim>(
-        ics: &VectorView3<T>,
-        params: &VectorView<T, U8, RStride, CStride>,
-        cs_state: &Self::CSST,
-    ) -> Option<T> {
-        let rt = cs_state.rt;
-        let rp = cs_state.rp;
-        let hw = param_value("hw", &Self::PARAM_NAMES, params);
-        let nfac = param_value("nfac", &Self::PARAM_NAMES, params);
+    //     let mu = ics[0].clone();
+    //     let nu = ics[1].clone();
+    //     let s = ics[2].clone();
 
-        let mu = ics[0];
-        let nu = ics[1];
-        let s = ics[2];
+    //     let k1 = rt.clone() * agcs_curv(s.clone(), nfac.clone(), hw);
+    //     let pis = T::pi() * s;
+    //     let omega = T::two_pi() * nu;
 
-        let k1 = rt * agcs_curv(s, nfac, hw);
-        let pis = T::pi() * s;
-        let omega = T::two_pi() * nu;
-
-        Some(
-            T::two_pi()
-                * mu
-                * pis.sin().powf(T::from_usize(2).unwrap() * nfac)
-                * rt.powi(2)
-                * rp.powi(2)
-                * (T::one() - mu * rp * rt * pis.sin().powf(nfac) * (omega.cos() * k1)),
-        )
-    }
+    //     Some(
+    //         T::two_pi()
+    //             * mu.clone()
+    //             * pis
+    //                 .clone()
+    //                 .sin()
+    //                 .powf(T::from_usize(2).unwrap() * nfac.clone())
+    //             * rt.clone().powi(2)
+    //             * rp.clone().powi(2)
+    //             * (T::one() - mu * rp * rt * pis.sin().powf(nfac) * (omega.cos() * k1)),
+    //     )
+    // }
 
     fn initialize_csst<RStride: Dim, CStride: Dim>(
         params: &VectorView<T, U8, RStride, CStride>,
@@ -229,62 +271,60 @@ where
         let latitude = param_value("rot_y", &Self::PARAM_NAMES, params);
         let inclination = param_value("rot_x", &Self::PARAM_NAMES, params);
 
-        let rt = distance_0 / T::from_f64(1.496e8).unwrap();
+        let rt = distance_0.clone() / T::from_f64(1.496e8).unwrap();
 
         assert!(distance_0 > T::zero(), "initial distance must be positive");
         assert!(diameter_1au > T::zero(), "diameter must be positive");
 
         cs_state.rp =
-            diameter_1au * rt.powf(T::from_f64(1.14).unwrap()) / T::from_usize(2).unwrap();
-        cs_state.rt = (rt - cs_state.rp) / T::from_usize(2).unwrap();
+            diameter_1au * rt.clone().powf(T::from_f64(1.14).unwrap()) / T::from_usize(2).unwrap();
+        cs_state.rt = (rt - cs_state.rp.clone()) / T::from_usize(2).unwrap();
 
         cs_state.q = quaternion_rot(longitude, latitude, inclination);
     }
 
-    fn transform_internal_to_external<RStride: Dim, CStride: Dim>(
-        ics: &VectorView3<T>,
-        params: &VectorView<T, U8, RStride, CStride>,
+    fn transform_internal_to_external<CRStride, CCStride, PRStride, PCStride>(
+        ics: &VectorView<T, Const<3>, CRStride, CCStride>,
+        params: &VectorView<T, U8, PRStride, PCStride>,
         cs_state: &Self::CSST,
-    ) -> Option<Vector3<T>> {
-        let rt = cs_state.rt;
-        let rp = cs_state.rp;
+    ) -> Option<Vector3<T>>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim,
+    {
+        let rt = cs_state.rt.clone();
+        let rp = cs_state.rp.clone();
         let hw = param_value("hw", &Self::PARAM_NAMES, params);
         let nfac = param_value("nfac", &Self::PARAM_NAMES, params);
         let delta = param_value("cs_delta", &Self::PARAM_NAMES, params);
 
-        let mu = ics[0];
-        let nu = ics[1];
-        let s = ics[2];
+        let mu = ics[0].clone();
+        let nu = ics[1].clone();
+        let s = ics[2].clone();
 
-        let _pis: T = T::pi() * s;
-        let omega = T::two_pi() * nu;
+        let _pis: T = T::pi() * s.clone();
+        let omega = T::two_pi() * nu.clone();
 
-        let quaternion = cs_state.q;
+        let quaternion = cs_state.q.clone();
 
-        let (n1, n2) = agcs_ns(s, nfac, hw, delta);
+        let (n1, n2) = agcs_ns(s.clone(), nfac.clone(), hw.clone(), delta);
 
-        let gamma = agcs_gamma(s, nfac, hw);
+        let gamma = agcs_gamma(s.clone(), nfac.clone(), hw.clone());
         let gamma_ratio = gamma.norm() / agcs_gamma(T::from_f64(0.5).unwrap(), nfac, hw).norm();
 
         // let rv = gamma * rt * T::from_usize(2).unwrap()
         //     + (n1 * omega.cos() + n2 * omega.sin()) * mu * rp * gamma_ratio * pis.sin().powf(nfac);
 
-        let rfac_0 = rp * gamma_ratio; //* pis.sin().powf(nfac);
+        let rfac_0 = rp * gamma_ratio.clone(); //* pis.sin().powf(nfac);
         let rfac = rfac_0 * (T::one() - (-T::from_f64(4.0).unwrap() * gamma_ratio))
             / (T::one() - (-T::from_f64(4.0).unwrap()));
 
         let rv = gamma * rt * T::from_usize(2).unwrap()
-            + (n1 * omega.cos() + n2 * omega.sin()) * mu * rfac;
+            + (n1 * omega.clone().cos() + n2 * omega.sin()) * mu * rfac;
 
         Some(quaternion.transform_vector(&rv))
-    }
-
-    fn transform_external_to_internal<RStride: Dim, CStride: Dim>(
-        _ecs: &VectorView3<T>,
-        _params: &VectorView<T, U8, RStride, CStride>,
-        _cs_state: &Self::CSST,
-    ) -> Option<Vector3<T>> {
-        unimplemented!();
     }
 }
 
@@ -293,7 +333,7 @@ mod tests {
     use super::*;
     use approx::ulps_eq;
     use bayesfm::geometry::Geometry3D;
-    use nalgebra::{SVector, Vector3};
+    use nalgebra::{SVector, U1, U3, Vector3};
 
     #[test]
     fn test_fr_coords() {
@@ -314,14 +354,14 @@ mod tests {
 
         let ics_ref = Vector3::new(0.56, 0.17, 0.42);
 
-        let ecs = AGCSGeometry::transform_internal_to_external(
+        let ecs = AGCSGeometry::transform_internal_to_external::<U1, U3, _, _>(
             &ics_ref.as_view(),
             &params.fixed_rows::<8>(0),
             &cs_state,
         )
         .unwrap();
 
-        let ics_rec = AGCSGeometry::transform_external_to_internal(
+        let ics_rec = AGCSGeometry::transform_external_to_internal::<U1, U3, _, _>(
             &ecs.as_view(),
             &params.fixed_rows::<8>(0),
             &cs_state,

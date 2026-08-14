@@ -5,7 +5,11 @@ use bayesfm::{
     EnsembleModel,
 };
 use numpy::ToPyArray;
-use ocnus::mag::Magnetometer;
+use ocnus::{
+    mag::Magnetometer,
+    models::{AGCSModel, COREModel},
+    rho::{ElectronCamera, ElectronDensity},
+};
 use pyo3::types::PyAnyMethods;
 
 macro_rules! impl_py_mfr_model {
@@ -17,8 +21,8 @@ macro_rules! impl_py_mfr_model {
             pub struct $name(pub $model<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>);
 
             bayesfm::py_add_model_functions!($model, $name, $nparams);
-            bayesfm::py_add_model_simulation!($model, $name, $nparams, "mag3", BasicConf, 3, 3);
-            bayesfm::py_add_model_filter!($model, $name, $nparams, "Mag3", BasicConf, 3, 3, 3);
+            bayesfm::py_add_model_simulation!($model, $name, $nparams, "mag3", Location, 3, 3);
+            bayesfm::py_add_model_filter!($model, $name, $nparams, "Mag3", Location, 3, 3, 3);
 
             #[pyo3::pymethods]
             impl $name
@@ -49,8 +53,8 @@ macro_rules! impl_py_mfr_model {
                     &self,
                     py: pyo3::Python<'py>,
                     input: numpy::PyReadonlyArray2<Float>,
-                    initial: bayesfm::pytypes::PyBasicConf3,
-                    snapshot: bayesfm::pytypes::PyBasicConf3,
+                    initial: bayesfm::pytypes::PyLocation3,
+                    snapshot: bayesfm::pytypes::PyLocation3,
                     mu: Float,
                     nus: numpy::PyReadonlyArray2<Float>,
                     ss: numpy::PyReadonlyArray2<Float>
@@ -80,3 +84,109 @@ macro_rules! impl_py_mfr_model {
 impl_py_mfr_model!(ocnus::models::NC16Model, NC16, 9);
 impl_py_mfr_model!(ocnus::models::CCLFFModel, CCLFF, 8);
 impl_py_mfr_model!(ocnus::models::CCUTModel, CCUT, 8);
+impl_py_mfr_model!(ocnus::models::COREModel, CORE, 11);
+impl_py_mfr_model!(ocnus::models::AGCSModel, AGCS, 13);
+
+bayesfm::py_add_model_simulation!(
+    ocnus::models::AGCSModel,
+    AGCS,
+    13,
+    "electron_density",
+    Location,
+    3,
+    1
+);
+
+bayesfm::py_add_model_simulation!(
+    ocnus::models::COREModel,
+    CORE,
+    11,
+    "electron_density",
+    Location,
+    3,
+    1
+);
+
+#[pyo3::pymethods]
+impl AGCS {
+    // Simulate remote white-light observations for a configuration time-series and input array.
+    #[pyo3(signature = (initial, configuration, input))]
+    pub fn simulate_remote_white_light<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+        initial: bayesfm::pytypes::PyWCSConf,
+        configuration: bayesfm::pytypes::PyWCSConfSeries,
+        input: numpy::PyReadonlyArray2<Float>,
+    ) -> pyo3::PyResult<bayesfm::pytypes::PyEnsblWCSConfImg> {
+        let matrix = bayesfm::pytypes::array_to_matrix::<
+            numpy::ndarray::Dim<[usize; 2]>,
+            nalgebra::Const<13>,
+            nalgebra::Dyn,
+        >(input, "input")?;
+
+        py.detach(|| {
+            let mut obs_ensbl = bayesfm::EnsembleObservations::new(
+                initial.0,
+                configuration.0,
+                matrix.ncols(),
+                None,
+            )
+            .unwrap();
+
+            let mut ensbl = bayesfm::EnsembleState::new(matrix.clone_owned(), None, None);
+            bayesfm::py_unroll_model_errors!(ensbl.initialize(&self.0))?;
+
+            bayesfm::py_unroll_model_errors!(bayesfm::EnsembleModel::simulate_ensbl_par(
+                &self.0,
+                &mut ensbl,
+                &mut obs_ensbl,
+                &AGCSModel::observe_remote_white_light,
+                &mut None::<&mut bayesfm::noise::NullNoise>
+            ))?;
+
+            Ok(obs_ensbl.clone().into())
+        })
+    }
+}
+
+#[pyo3::pymethods]
+impl CORE {
+    // Simulate remote white-light observations for a configuration time-series and input array.
+    #[pyo3(signature = (initial, configuration, input))]
+    pub fn simulate_remote_white_light<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+        initial: bayesfm::pytypes::PyWCSConf,
+        configuration: bayesfm::pytypes::PyWCSConfSeries,
+        input: numpy::PyReadonlyArray2<Float>,
+    ) -> pyo3::PyResult<bayesfm::pytypes::PyEnsblWCSConfImg> {
+        let matrix = bayesfm::pytypes::array_to_matrix::<
+            numpy::ndarray::Dim<[usize; 2]>,
+            nalgebra::Const<11>,
+            nalgebra::Dyn,
+        >(input, "input")?;
+
+        py.detach(|| {
+            let mut obs_ensbl = bayesfm::EnsembleObservations::new(
+                initial.0,
+                configuration.0,
+                matrix.ncols(),
+                None,
+            )
+            .unwrap();
+
+            let mut ensbl = bayesfm::EnsembleState::new(matrix.clone_owned(), None, None);
+            bayesfm::py_unroll_model_errors!(ensbl.initialize(&self.0))?;
+
+            bayesfm::py_unroll_model_errors!(bayesfm::EnsembleModel::simulate_ensbl_par(
+                &self.0,
+                &mut ensbl,
+                &mut obs_ensbl,
+                &COREModel::observe_remote_white_light,
+                &mut None::<&mut bayesfm::noise::NullNoise>
+            ))?;
+
+            Ok(obs_ensbl.clone().into())
+        })
+    }
+}

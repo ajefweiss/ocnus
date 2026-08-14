@@ -2,7 +2,7 @@
 
 use bayesfm::{
     EnsembleModel, EnsembleObservations, EnsembleState,
-    conf::{BasicConf, ConfSeries},
+    conf::{ConfSeries, Location},
     noise::NullNoise,
     obs::ObsVec,
 };
@@ -43,7 +43,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     ];
 
     let conf = ConfSeries::from_iter((0..refobs.len()).map(|i| {
-        BasicConf::new(
+        Location::new(
             224640.0 + i as f32 * 3600.0 * 2.0,
             Vector3::new(1.0, 0.0, 0.0),
         )
@@ -52,7 +52,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
     let mut model_ensbl =
         EnsembleState::new(OMatrix::<f32, U8, Dyn>::zeros(ENSEMBLE_SIZE), None, None);
     let mut obs_ensbl =
-        EnsembleObservations::new(BasicConf::default(), conf.clone(), ENSEMBLE_SIZE, None).unwrap();
+        EnsembleObservations::new(Location::default(), conf.clone(), ENSEMBLE_SIZE, None).unwrap();
 
     let mut group = c.benchmark_group("cylm_lff_bench");
 

@@ -10,7 +10,7 @@ use bayesfm::{
 use nalgebra::{DMatrix, Dyn, RealField, SMatrix, SVector, SVectorView, Scalar, U1, U3, Vector4};
 use num_traits::{AsPrimitive, Float};
 use prodef::{Domain, MultivariateNormalDensity};
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use rand_distr::uniform::SampleUniform;
 use std::{iter::Sum, ops::Sub};
 
 /// A trait that is shared by all models that describe a magnetic field structure.
@@ -30,7 +30,6 @@ where
     ) -> Result<SMatrix<T, P, P>, ModelError<T>>
     where
         T: Float,
-        StandardNormal: Distribution<T>,
         usize: AsPrimitive<T>,
         Self: Sync,
         Self::CSST: Clone + Default + Send,
@@ -72,7 +71,7 @@ where
 
         match self.observe_mag3_ics(&q.as_view(), params, fm_state, cs_state) {
             Some(b_q) => {
-                let b_s = Self::contravariant_vector::<U1, U3, _, _>(
+                let b_s = Self::contravariant_vector_normalized::<U1, U3, _, _>(
                     &q.as_view(),
                     &b_q.as_view(),
                     params,

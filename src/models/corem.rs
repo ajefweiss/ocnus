@@ -1,14 +1,18 @@
-use crate::coords::{AGCSGeometry, AGCSState, TTGeometry, XTState};
-use bayesfm::{ModelError, geometry::param_value};
-use nalgebra::{Const, Dim, RealField, SVector, SVectorView, U11, U13, VectorView, VectorView3};
-use num_traits::AsPrimitive;
+use crate::geometry::{AGCSState, XTState};
+use bayesfm::{
+    ModelError,
+    conf::{ConfCamera, ConfPosition},
+    geometry::{Geometry, param_value},
+    model_impl_coords,
+};
+use nalgebra::{Const, RealField, SVector, SVectorView, Scalar, VectorView, VectorView3};
 use prodef::Density;
-use rand_distr::{Distribution, StandardNormal, StandardUniform, uniform::SampleUniform};
+use rand_distr::uniform::SampleUniform;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, iter::Sum, marker::PhantomData};
+use std::{cmp::Ordering, iter::Sum, marker::PhantomData, ops::Sub};
 
 /// Forward model cs_state type for the CORE models.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct COREState<T> {
     /// Timestamp (sec)
     pub time: T,
@@ -20,13 +24,26 @@ pub struct COREState<T> {
     pub magnetic_field: T,
 }
 
+impl<T> Default for COREState<T>
+where
+    T: RealField,
+{
+    fn default() -> Self {
+        Self {
+            time: T::zero(),
+            speed: T::zero(),
+            magnetic_field: T::zero(),
+        }
+    }
+}
+
 /// Magnetic field components for the CORE model.
 pub fn core_obs<T, const D: usize>(
     q: &VectorView3<T>,
     names: &SVector<&'static str, D>,
     params: &SVectorView<T, D>,
     fm_state: &COREState<T>,
-    cs_state: &XTState<T>,
+    _cs_state: &XTState<T>,
 ) -> Result<(T, T), ModelError<T>>
 where
     T: RealField,
@@ -34,19 +51,18 @@ where
     // Extract parameters using their identifiers.
     let tau = param_value("tau", names, params);
 
-    let magnetic_field = fm_state.magnetic_field;
-    let radius = cs_state.rp;
+    let magnetic_field = fm_state.magnetic_field.clone();
 
-    let (mu, _nu, _s) = (q[0], q[1], q[2]);
+    let (mu, _nu, _s) = (q[0].clone(), q[1].clone(), q[2].clone());
 
     match mu.partial_cmp(&T::one()) {
         Some(ord) => match ord {
             Ordering::Greater => Ok(((-T::one()).sqrt(), (-T::one()).sqrt())),
             _ => {
-                let chi =
-                    mu * radius * magnetic_field * tau / (T::one() + (tau * mu * radius).powi(2));
+                let chi = mu.clone() * magnetic_field.clone() * tau.clone()
+                    / (T::one() + (tau.clone() * mu.clone()).powi(2));
 
-                let xi = magnetic_field / (T::one() + (tau * mu * radius).powi(2));
+                let xi = magnetic_field.clone() / (T::one() + (tau * mu).powi(2));
 
                 Ok((chi, xi))
             }
@@ -61,7 +77,7 @@ pub fn agcs_obs<T, const D: usize>(
     names: &SVector<&'static str, D>,
     params: &SVectorView<T, D>,
     fm_state: &COREState<T>,
-    cs_state: &AGCSState<T>,
+    _cs_state: &AGCSState<T>,
 ) -> Result<(T, T), ModelError<T>>
 where
     T: RealField,
@@ -69,19 +85,18 @@ where
     // Extract parameters using their identifiers.
     let tau = param_value("tau", names, params);
 
-    let magnetic_field = fm_state.magnetic_field;
-    let radius = cs_state.rp;
+    let magnetic_field = fm_state.magnetic_field.clone();
 
-    let (mu, _nu, _s) = (q[0], q[1], q[2]);
+    let (mu, _nu, _s) = (q[0].clone(), q[1].clone(), q[2].clone());
 
     match mu.partial_cmp(&T::one()) {
         Some(ord) => match ord {
             Ordering::Greater => Ok(((-T::one()).sqrt(), (-T::one()).sqrt())),
             _ => {
-                let chi =
-                    mu * radius * magnetic_field * tau / (T::one() + (tau * mu * radius).powi(2));
+                let chi = mu.clone() * magnetic_field.clone() * tau.clone()
+                    / (T::one() + (tau.clone() * mu.clone()).powi(2));
 
-                let xi = magnetic_field / (T::one() + (tau * mu * radius).powi(2));
+                let xi = magnetic_field.clone() / (T::one() + (tau * mu).powi(2));
 
                 Ok((chi, xi))
             }
@@ -91,7 +106,7 @@ where
 }
 
 macro_rules! impl_corem {
-    ($model: ident, $coords: ident, $csty: ty, $docs: literal, $params: expr, $fn_mag: expr) => {
+    ($model: ident, $docs: literal, $($coords: ident)::+, $csty: ty, $mag: expr, $params: expr) => {
         #[doc=$docs]
         #[derive(Clone, Debug, Deserialize, Serialize)]
         pub struct $model<T, G>(G, PhantomData<T>)
@@ -108,93 +123,87 @@ macro_rules! impl_corem {
             }
         }
 
-        impl<T, OC, G> Magnetometer<T, OC, { $coords::<f32>::NPARAMS + $params.len() }>
+        impl<T, OC, G> crate::mag::Magnetometer<T, OC, { $($coords)::+::<f32>::NPARAMS + $params.len() }>
             for $model<T, G>
         where
-            T: Default + RealField + SampleUniform + Sum,
-            OC: ObsPosition<T, 3>,
-            G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
-            for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
-            StandardNormal: Distribution<T>,
-            usize: AsPrimitive<T>,
+            T: RealField + rand_distr::uniform::SampleUniform + std::iter::Sum,
+            G: 'static + prodef::Density<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + Sync,
+            OC: bayesfm::conf::ConfPosition<T, 3> + nalgebra::Scalar + Sync,
+            for<'a> &'a OC: std::ops::Sub<&'a OC, Output=T>,
         {
             fn observe_mag3_ics(
                 &self,
                 ics: &SVectorView<T, 3>,
-                params: &SVectorView<T, { $coords::<f32>::NPARAMS + $params.len() }>,
+                params: &SVectorView<T, { $($coords)::+::<f32>::NPARAMS + $params.len() }>,
                 fm_state: &Self::FMST,
                 cs_state: &Self::CSST,
             ) -> Option<SVector<T, 3>> {
-                let (chi, xi) = $fn_mag(ics, &Self::PARAMS, params, fm_state, cs_state).ok()?;
-
-                // Components are not appropriately scaled.
-                let basis = Self::contravariant_basis(ics, params, cs_state)?;
+                let (chi, xi) = $mag(ics, &Self::PARAM_NAMES, params, fm_state, cs_state).ok()?;
 
                 Some(SVector::<T, 3>::from_column_slice(&[
                     T::zero(),
-                    chi / basis[1].norm(),
-                    xi / basis[2].norm(),
+                    chi,
+                    xi,
                 ]))
             }
         }
 
-        model_impl_coords!($model, $csty, $coords, $params);
+        model_impl_coords!($model, $($coords)::+, $params);
 
-        impl<T, G> Model<T, 3, { $coords::<f32>::NPARAMS + $params.len() }> for $model<T, G>
+        impl<T, G> bayesfm::Model<T, 3, { $($coords)::+::<f32>::NPARAMS + $params.len() }>
+            for $model<T, G>
         where
-            T: Default + RealField + SampleUniform,
-            G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
-            for<'a> &'a G: Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
-            StandardNormal: Distribution<T>,
-            usize: AsPrimitive<T>,
+            T: RealField,
+            G: 'static + Density<T, Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + Sync,
         {
-            const RCS: usize = 128;
-
             type FMST = COREState<T>;
 
-            fn domain(&self) -> impl Domain<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> {
-                self.0.domain()
-            }
-
-            fn evolve_state(
+            fn evolve_fmst(
                 &self,
                 time_step: T,
-                params: &VectorView<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
+                params: &VectorView<T, Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>>,
                 fm_state: &mut Self::FMST,
                 cs_state: &mut Self::CSST,
             ) -> Result<(), ModelError<T>> {
                 // Extract parameters using their identifiers.
                 let distance_0 =
-                    param_value("r_0rs", &Self::PARAMS, params) * T::from_f64(695510.0).unwrap();
-                let diameter_1au = param_value("d_1au", &Self::PARAMS, params);
+                    param_value("r_0rs", &Self::PARAM_NAMES, params) * T::from_f64(695510.0).unwrap();
+                let diameter_1au = param_value("d_1au", &Self::PARAM_NAMES, params);
 
-                let b_scale = param_value("b_scale", &Self::PARAMS, params);
-                let v_0 = param_value("speed", &Self::PARAMS, params);
-                let v_sw = param_value("sw_speed", &Self::PARAMS, params);
+                let b_scale = param_value("b_scale", &Self::PARAM_NAMES, params);
+                let v_0 = param_value("speed", &Self::PARAM_NAMES, params);
+                let v_sw = param_value("sw_speed", &Self::PARAM_NAMES, params);
                 let gamma =
-                    param_value("sw_gamma", &Self::PARAMS, params) * T::from_f64(1e-7).unwrap();
+                    param_value("sw_gamma", &Self::PARAM_NAMES, params) * T::from_f64(1e-7).unwrap();
 
                 fm_state.time += time_step;
 
-                let delta_v = v_0 - v_sw;
+                let delta_v = v_0 - v_sw.clone();
 
                 let sign = match delta_v.partial_cmp(&T::zero()).unwrap() {
                     Ordering::Greater => T::one(),
                     _ => T::neg(T::one()),
                 };
 
-                let rt = (sign / gamma * (T::one() + sign * gamma * delta_v * fm_state.time).ln()
-                    + v_sw * fm_state.time
+                let rt = (sign.clone() / gamma.clone() * (T::one() + sign.clone() * gamma.clone() * delta_v.clone() * fm_state.time.clone()).ln()
+                    + v_sw.clone() * fm_state.time.clone()
                     + distance_0)
                     / T::from_f64(1.496e8).unwrap();
-                let vt = delta_v / (T::one() + sign * gamma * delta_v * fm_state.time) + v_sw;
+                let vt = delta_v.clone() / (T::one() + sign.clone() * gamma.clone() * delta_v.clone() * fm_state.time.clone()) + v_sw;
+
+                let expansion_factor = T::from_f64(1.14).unwrap();
+                let b_decay_factor = T::from_f64(-1.68).unwrap();
+
+                // // This sets the expansion and decay to zero, used for debugging purposes.
+                // let expansion_factor = T::from_f64(1.0).unwrap();
+                // let b_decay_factor = T::from_f64(0.0).unwrap();
 
                 cs_state.rp =
-                    diameter_1au * rt.powf(T::from_f64(1.14).unwrap()) / T::from_usize(2).unwrap();
-                cs_state.rt = (rt - cs_state.rp) / T::from_usize(2).unwrap();
+                    diameter_1au * rt.clone().powf(expansion_factor) / T::from_usize(2).unwrap();
+                cs_state.rt = (rt.clone() - cs_state.rp.clone()) / T::from_usize(2).unwrap();
 
                 fm_state.magnetic_field = b_scale
-                    * (T::from_usize(2).unwrap() * cs_state.rt).powf(T::from_f64(-1.68).unwrap());
+                    * (T::from_usize(2).unwrap() * cs_state.rt.clone()).powf(b_decay_factor);
                 fm_state.speed = vt;
 
                 Ok(())
@@ -202,183 +211,161 @@ macro_rules! impl_corem {
 
             fn initialize_states(
                 &self,
-                params: &VectorView<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>>,
+                params: &VectorView<T, Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>>,
                 fm_state: &mut Self::FMST,
                 cs_state: &mut Self::CSST,
             ) -> Result<(), ModelError<T>> {
-                Self::initialize_cs(params, cs_state);
+                Self::initialize_csst(params, cs_state);
 
                 fm_state.time = T::zero();
 
                 Ok(())
             }
 
-            fn prior(&self) -> impl Density<T, Const<{ $coords::<f32>::NPARAMS + $params.len() }>> {
+            fn prior(&self) -> impl prodef::Density<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + 'static {
                 self.0.clone()
             }
+
+            fn prior_domain(&self) -> prodef::Domain<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> {
+                (&self.0).domain().clone()
+            }
+
+            fn prior_density(&self, params: &nalgebra::SVectorView<T, { $($coords)::+::<f32>::NPARAMS + $params.len() }>) -> Option<T> {
+                (&self.0).density(params)
+            }
+        }
+
+        impl<T, G> bayesfm::EnsembleModel<T, 3, { $($coords)::+::<f32>::NPARAMS + $params.len() }> for $model<T, G>
+        where
+            T:  nalgebra::RealField,
+            G: 'static + prodef::Density<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + Sync,
+        {
+            const RAYON_CHUNK_SIZE: usize = 128;
         }
     };
 }
 
 impl_corem!(
     COREModel,
-    TTGeometry,
-    XTState<T>,
     "The standard 3DCORE magnetic flux rope model.",
-    ["speed", "b_scale", "tau", "sw_speed", "sw_gamma"],
-    core_obs
+    crate::geometry::TTGeometry,
+    XTState<T>,
+    core_obs,
+    ["speed", "b_scale", "tau", "sw_speed", "sw_gamma"]
 );
 
 impl_corem!(
     AGCSModel,
-    AGCSGeometry,
-    AGCSState<T>,
     "The analgous GCS magnetic flux rope model.",
-    ["speed", "b_scale", "tau", "sw_speed", "sw_gamma"],
-    agcs_obs
+    crate::geometry::AGCSGeometry,
+    AGCSState<T>,
+    agcs_obs,
+    ["speed", "b_scale", "tau", "sw_speed", "sw_gamma"]
 );
 
-impl<T, OC, G> Plasma<T, OC, 3, 11> for COREModel<T, G>
+impl<T, OC, G> crate::rho::ElectronDensity<T, OC, 13> for AGCSModel<T, G>
 where
-    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
-    OC: ObsPosition<T, 3>,
-    G: Density<T, U11>,
-    for<'a> &'a G: Density<T, U11>,
-    StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
+    T: RealField + SampleUniform + Sum,
+    G: 'static + Density<T, Const<13>> + Sync,
+    OC: ConfPosition<T, 3> + Scalar + Sync,
+    for<'a> &'a OC: Sub<&'a OC, Output = T>,
+    Self: Sized,
 {
-    fn observe_pbs_ics(
-        &self,
-        _ics: &SVectorView<T, 3>,
-        _params: &SVectorView<T, 11>,
-        fm_state: &Self::FMST,
-        _cs_state: &Self::CSST,
-    ) -> T {
-        // TODO: calculate correct in situ speed
-        fm_state.speed
-    }
-
-    fn observe_rho_ics(
-        &self,
-        ics: &VectorView3<T>,
-        _params: &SVectorView<T, 11>,
-        _fm_state: &Self::FMST,
-        cs_state: &Self::CSST,
-    ) -> T {
-        T::one() / cs_state.rt / cs_state.rp.powi(2)
-            * (T::pi() * ics[2]).sin()
-            * match ics[0].partial_cmp(&T::one()).unwrap() {
-                Ordering::Less => ics[0].powi(2),
-                Ordering::Equal => T::one(),
-                Ordering::Greater => match ics[0].partial_cmp(&T::from_f64(1.25).unwrap()).unwrap()
-                {
-                    Ordering::Less => T::from_f64(2.0).unwrap() - ics[0].powi(3),
-                    _ => T::zero(),
-                },
-            }
-    }
-
-    fn observe_temp_ics(
-        &self,
-        _ics: &SVectorView<T, 3>,
-        _params: &SVectorView<T, 11>,
-        _fm_state: &Self::FMST,
-        _cs_state: &Self::CSST,
-    ) -> T {
-        unimplemented!("CORE models does not support plasma temperature measurements")
-    }
-}
-
-impl<T, OC, G> WLCamera<T, OC, 11> for COREModel<T, G>
-where
-    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
-    OC: ObsCam<T>,
-    G: Density<T, U11>,
-    for<'a> &'a G: Density<T, U11>,
-    StandardUniform: Distribution<T>,
-    StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
-{
-}
-
-impl<T, OC, G> Plasma<T, OC, 3, 13> for AGCSModel<T, G>
-where
-    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
-    OC: ObsPosition<T, 3>,
-    G: Density<T, U13>,
-    for<'a> &'a G: Density<T, U13>,
-    StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
-{
-    fn observe_pbs_ics(
-        &self,
-        _ics: &SVectorView<T, 3>,
-        _params: &SVectorView<T, 13>,
-        fm_state: &Self::FMST,
-        _cs_state: &Self::CSST,
-    ) -> T {
-        // TODO: calculate correct in situ speed
-        fm_state.speed
-    }
-
-    fn observe_rho_ics(
+    fn observe_electron_density_ics(
         &self,
         ics: &VectorView3<T>,
         _params: &SVectorView<T, 13>,
         _fm_state: &Self::FMST,
         cs_state: &Self::CSST,
-    ) -> T {
-        // Simple electron density model
-        T::one() / cs_state.rt / cs_state.rp.powi(2)
-            * (T::pi() * ics[2]).sin().powi(2)
+    ) -> Option<SVector<T, 1>> {
+        // A very simple electron density model.
+        Some(SVector::from([
+            T::one() / cs_state.rt.clone() / cs_state.rp.clone().powi(2)
+            * (T::pi() * ics[2].clone()).sin().powi(2)
             // * (T::two_pi() * ics[1]).cos().powi(2)
             * match ics[0].partial_cmp(&T::one()).unwrap() {
                 Ordering::Less => {
-                    ics[0].powi(2) * T::from_f64(0.75).unwrap() + T::from_f64(0.25).unwrap()
+                    ics[0].clone().powi(2) * T::from_f64(0.75).unwrap() + T::from_f64(0.25).unwrap()
                 }
                 Ordering::Equal => T::one(),
                 Ordering::Greater => match ics[0].partial_cmp(&T::from_f64(1.25).unwrap()).unwrap()
                 {
-                    Ordering::Less => T::from_f64(2.0).unwrap() - ics[0].powi(3),
+                    Ordering::Less => T::from_f64(2.0).unwrap() - ics[0].clone().powi(3),
                     _ => T::zero(),
                 },
-            }
-    }
-
-    fn observe_temp_ics(
-        &self,
-        _ics: &SVectorView<T, 3>,
-        _params: &SVectorView<T, 13>,
-        _fm_state: &Self::FMST,
-        _cs_state: &Self::CSST,
-    ) -> T {
-        unimplemented!("CORE models does not support plasma temperature measurements")
+            },
+        ]))
     }
 }
 
-impl<T, OC, G> WLCamera<T, OC, 13> for AGCSModel<T, G>
+impl<T, OC, G> crate::rho::ElectronCamera<T, OC, 13> for AGCSModel<T, G>
 where
-    T: AsPrimitive<usize> + Default + RealField + SampleUniform + Sum,
-    OC: ObsCam<T>,
-    G: Density<T, U13>,
-    for<'a> &'a G: Density<T, U13>,
-    StandardUniform: Distribution<T>,
-    StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
+    T: RealField + SampleUniform + Sum,
+    G: 'static + Density<T, Const<13>> + Sync,
+    OC: ConfCamera<T> + Scalar + Sync,
+    for<'a> &'a OC: Sub<&'a OC, Output = T>,
+    Self: Sized,
+{
+}
+
+impl<T, OC, G> crate::rho::ElectronDensity<T, OC, 11> for COREModel<T, G>
+where
+    T: RealField + SampleUniform + Sum,
+    G: 'static + Density<T, Const<11>> + Sync,
+    OC: ConfPosition<T, 3> + Scalar + Sync,
+    for<'a> &'a OC: Sub<&'a OC, Output = T>,
+    Self: Sized,
+{
+    fn observe_electron_density_ics(
+        &self,
+        ics: &VectorView3<T>,
+        _params: &SVectorView<T, 11>,
+        _fm_state: &Self::FMST,
+        cs_state: &Self::CSST,
+    ) -> Option<SVector<T, 1>> {
+        // A very simple electron density model.
+        Some(SVector::from([
+            T::one() / cs_state.rt.clone() / cs_state.rp.clone().powi(2)
+            * (T::pi() * ics[2].clone()).sin().powi(2)
+            // * (T::two_pi() * ics[1]).cos().powi(2)
+            * match ics[0].partial_cmp(&T::one()).unwrap() {
+                Ordering::Less => {
+                    ics[0].clone().powi(2) * T::from_f64(0.75).unwrap() + T::from_f64(0.25).unwrap()
+                }
+                Ordering::Equal => T::one(),
+                Ordering::Greater => match ics[0].partial_cmp(&T::from_f64(1.25).unwrap()).unwrap()
+                {
+                    Ordering::Less => T::from_f64(2.0).unwrap() - ics[0].clone().powi(3),
+                    _ => T::zero(),
+                },
+            },
+        ]))
+    }
+}
+
+impl<T, OC, G> crate::rho::ElectronCamera<T, OC, 11> for COREModel<T, G>
+where
+    T: RealField + SampleUniform + Sum,
+    G: 'static + Density<T, Const<11>> + Sync,
+    OC: ConfCamera<T> + Scalar + Sync,
+    for<'a> &'a OC: Sub<&'a OC, Output = T>,
+    Self: Sized,
 {
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mag::Magnetometer;
     use approx::ulps_eq;
-    use nalgebra::{Dyn, OMatrix};
-    use nalgebra::{SVector, Vector3};
-    use ocnus::{
-        base::ModelEnsbl,
-        conf::{Obs, ObsEnsbl, conf::VecConf, data::ICSBasis, noise::NullNoise},
+    use bayesfm::{
+        EnsembleModel, EnsembleObservations, EnsembleState,
+        conf::{ConfSeries, Location},
+        noise::NullNoise,
+        obs::ObsCoordBasis,
     };
-    use prodef::multivariate::{ConstantDensity, MultivariateDensity, UniformDensity};
+    use nalgebra::{Dyn, OMatrix, SVector, U11, Vector3};
+    use prodef::{ConstantDensity, MultivariateDensity, UniformDensity};
 
     #[test]
     fn test_core_model() {
@@ -398,8 +385,8 @@ mod tests {
 
         let model = COREModel::new(prior);
 
-        let conf = Obs::from_iter((0..10).map(|i| {
-            VecConf::from((
+        let conf = ConfSeries::from_iter((0..10).map(|i| {
+            Location::from((
                 72.0 * 3600.0 + i as f32 * 2.0 * 3600.0,
                 Vector3::new(1.0, 0.0, 0.0),
             ))
@@ -417,16 +404,22 @@ mod tests {
                 1.0,
                 1300.0,
                 20.0,
-                1.0 / 0.25,
+                0.6,
                 400.0,
                 1.0,
             ]),
         );
 
-        let mut model_ensbl = ModelEnsbl::new(input, None, None);
-        let mut obs_ensbl = ObsEnsbl::new(conf.clone(), 1, None).unwrap();
-        let mut obs_ensbl_diag =
-            ObsEnsbl::<f32, _, ICSBasis<f32, 3>>::new(conf.clone(), 1, None).unwrap();
+        let mut model_ensbl = EnsembleState::new(input, None, None);
+        let mut obs_ensbl =
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
+        let mut obs_ensbl_diag = EnsembleObservations::<_, ObsCoordBasis<f32, 3>>::new(
+            Location::default(),
+            conf.clone(),
+            1,
+            None,
+        )
+        .unwrap();
 
         model
             .initialize_states_ensbl(&mut model_ensbl)
@@ -437,7 +430,7 @@ mod tests {
                 &mut model_ensbl,
                 &mut obs_ensbl,
                 &COREModel::observe_mag3,
-                &mut None::<&mut NullNoise<f32>>,
+                &mut None::<&mut NullNoise>,
             )
             .expect("simulation failed");
 
@@ -446,72 +439,51 @@ mod tests {
             .expect("initialization failed");
 
         model
-            .simulate_icsbasis_ensbl(&mut model_ensbl, &mut obs_ensbl_diag)
+            .simulate_basis_ensbl_par(&mut model_ensbl, &mut obs_ensbl_diag)
             .expect("simulation failed");
 
         assert!(ulps_eq!(
             obs_ensbl.output(0)[1][1],
-            -20.889551,
+            -18.194891,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[2][1],
-            -20.758156,
+            -19.41521,
             max_ulps = 5,
             epsilon = 1e-5
         ));
         assert!(ulps_eq!(
             obs_ensbl.output(0)[4][2],
-            -0.06722071,
+            -0.12136115,
             max_ulps = 5,
             epsilon = 1e-5
         ));
 
-        // TODO: These asserts changed?
-        // Unkown why the results changed.
-        // assert!(ulps_eq!(
-        //     obs_ensbl.output(0)[1][1],
-        //     -20.99427,
-        //     max_ulps = 5,
-        //     epsilon = 1e-5
-        // ));
-        // assert!(ulps_eq!(
-        //     obs_ensbl.output(0)[2][1],
-        //     -20.91451,
-        //     max_ulps = 5,
-        //     epsilon = 1e-5
-        // ));
-        // assert!(ulps_eq!(
-        //     obs_ensbl.output(0)[4][2],
-        //     -0.069730066,
-        //     max_ulps = 5,
-        //     epsilon = 1e-5
-        // ));
-
         assert!(ulps_eq!(
-            obs_ensbl_diag.output(0)[2].ics()[0],
+            obs_ensbl_diag.output(0)[2].coordinates()[0],
             0.52137023,
             max_ulps = 5,
             epsilon = 1e-5
         ));
 
         assert!(ulps_eq!(
-            obs_ensbl_diag.output(0)[3].ics()[1],
+            obs_ensbl_diag.output(0)[3].coordinates()[1],
             0.87713426,
             max_ulps = 5,
             epsilon = 1e-5
         ));
 
         assert!(ulps_eq!(
-            obs_ensbl_diag.output(0)[4].ics()[0],
+            obs_ensbl_diag.output(0)[4].coordinates()[0],
             0.21290788,
             max_ulps = 5,
             epsilon = 1e-5
         ));
 
         assert!(ulps_eq!(
-            obs_ensbl_diag.output(0)[5].ics()[2],
+            obs_ensbl_diag.output(0)[5].coordinates()[2],
             0.5,
             max_ulps = 5,
             epsilon = 1e-5
@@ -536,8 +508,8 @@ mod tests {
 
         let model = COREModel::new(prior);
 
-        let conf = Obs::from_iter((0..10).map(|i| {
-            VecConf::from((
+        let conf = ConfSeries::from_iter((0..10).map(|i| {
+            Location::from((
                 72.0 * 3600.0 + i as f32 * 2.0 * 3600.0,
                 Vector3::new(1.0, 0.0, 0.0),
             ))
@@ -555,16 +527,22 @@ mod tests {
                 0.99,
                 1300.0,
                 20.0,
-                1.0 / 0.25,
+                0.6,
                 400.0,
                 1.0,
             ]),
         );
 
-        let mut model_ensbl = ModelEnsbl::new(input, None, None);
-        let mut obs_ensbl = ObsEnsbl::new(conf.clone(), 1, None).unwrap();
-        let mut obs_ensbl_diag =
-            ObsEnsbl::<f32, _, ICSBasis<f32, 3>>::new(conf.clone(), 1, None).unwrap();
+        let mut model_ensbl = EnsembleState::new(input, None, None);
+        let mut obs_ensbl =
+            EnsembleObservations::new(Location::default(), conf.clone(), 1, None).unwrap();
+        let mut obs_ensbl_diag = EnsembleObservations::<_, ObsCoordBasis<f32, 3>>::new(
+            Location::default(),
+            conf.clone(),
+            1,
+            None,
+        )
+        .unwrap();
 
         model
             .initialize_states_ensbl(&mut model_ensbl)
@@ -575,7 +553,7 @@ mod tests {
                 &mut model_ensbl,
                 &mut obs_ensbl,
                 &COREModel::<f32, _>::observe_mag3,
-                &mut None::<&mut NullNoise<f32>>,
+                &mut None::<&mut NullNoise>,
             )
             .expect("simulation failed");
 
@@ -584,7 +562,7 @@ mod tests {
             .expect("initialization failed");
 
         model
-            .simulate_icsbasis_ensbl(&mut model_ensbl, &mut obs_ensbl_diag)
+            .simulate_basis_ensbl_par(&mut model_ensbl, &mut obs_ensbl_diag)
             .expect("simulation failed");
     }
 }
