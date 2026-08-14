@@ -38,7 +38,7 @@ macro_rules! impl_py_mfr_model {
                         if priors.iter().zip(names.iter()).fold(true, |acc, next| {
                             acc & (next.0.name() == *next.1)
                         }) {
-                            let mvpdf = prodef::MultivariateDensity::new(nalgebra::SVector::from_iterator(priors.iter().map(|uvpdf| uvpdf.density().clone())));
+                            let mvpdf = prodef::MultivariateDensity::new(nalgebra::SVector::from_iterator(priors.iter().map(|uvpdf| uvpdf.inner().clone())));
 
                             Ok(Self($model::<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>::new(mvpdf)))
                         } else {
@@ -141,7 +141,10 @@ impl AGCS {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &AGCSModel::observe_remote_white_light,
-                &mut None::<&mut bayesfm::noise::NullNoise>
+                None::<(
+                    &bayesfm::noise::NullNoise,
+                    &mut rand::rngs::Xoshiro256PlusPlus
+                )>
             ))?;
 
             Ok(obs_ensbl.clone().into())
@@ -183,7 +186,10 @@ impl CORE {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &COREModel::observe_remote_white_light,
-                &mut None::<&mut bayesfm::noise::NullNoise>
+                None::<(
+                    &bayesfm::noise::NullNoise,
+                    &mut rand::rngs::Xoshiro256PlusPlus
+                )>
             ))?;
 
             Ok(obs_ensbl.clone().into())

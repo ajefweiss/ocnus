@@ -1,7 +1,6 @@
 use bayesfm::geometry::{Geometry, param_value, quaternion_rot};
 use nalgebra::{
-    ArrayStorage, Const, Dim, Matrix3, RealField, SMatrix, SVector, U8, UnitQuaternion, Vector3,
-    VectorView,
+    ArrayStorage, Const, Dim, RealField, SVector, U8, UnitQuaternion, Vector3, VectorView,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, marker::PhantomData};
@@ -33,6 +32,7 @@ where
 }
 
 /// Analytical GCS (un-scaled) curvature.
+#[allow(unused)]
 fn agcs_curv<T>(s: T, nfac: T, hw: T) -> T
 where
     T: RealField,

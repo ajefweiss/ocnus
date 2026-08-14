@@ -10,7 +10,8 @@ use bayesfm::{
 use nalgebra::{DMatrix, Dyn, RealField, SMatrix, SVector, SVectorView, Scalar, U1, U3, Vector4};
 use num_traits::{AsPrimitive, Float};
 use prodef::{Domain, MultivariateNormalDensity};
-use rand_distr::uniform::SampleUniform;
+use rand::{RngExt, SeedableRng};
+use rand_distr::{Distribution, StandardUniform, uniform::SampleUniform};
 use std::{iter::Sum, ops::Sub};
 
 /// A trait that is shared by all models that describe a magnetic field structure.
@@ -20,6 +21,7 @@ where
     OC: ConfPosition<T, 3> + Scalar + Sync,
     for<'a> &'a OC: Sub<&'a OC, Output = T>,
     Self: Sized,
+    StandardUniform: Distribution<T>,
 {
     /// Compute the fisher information matrix (FIM) using magnetic field vector observations.
     fn fisher_mag(
@@ -118,13 +120,14 @@ where
 
     /// Perform an ensemble forward simulation for a magnetic field measurement, in parallel, for the given spacecraft observers
     /// and noise model `NM`.
-    fn simulate_mag3<NM>(
+    fn simulate_mag3<R, NM>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, 3, P>,
         obs_ensbl: &mut EnsembleObservations<OC, ObsVec<T, 3>>,
-        opt_noise: &mut Option<&mut NM>,
+        opt_noise: Option<(&NM, &mut R)>,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         OC: Sync,
         NM: Noise<ObsVec<T, 3>> + Sync,
         Self::CSST: Send,
@@ -136,14 +139,14 @@ where
 
     /// Perform an ensemble forward simulation for a magnetic field measurement, in parallel, for the given spacecraft observers
     /// and noise model `NM`.
-    fn simulate_mag4<NM>(
+    fn simulate_mag4<R, NM>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, 3, P>,
         obs_ensbl: &mut EnsembleObservations<OC, ObsVec<T, 4>>,
-        opt_noise: &mut Option<&mut NM>,
+        opt_noise: Option<(&NM, &mut R)>,
     ) -> Result<(), ModelError<T>>
     where
-        OC: Sync,
+        R: RngExt + SeedableRng + Send + Sync,
         NM: Noise<ObsVec<T, 4>> + Sync,
         Self::CSST: Send,
         Self::FMST: Send,

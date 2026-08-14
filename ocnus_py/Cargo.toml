@@ -10,14 +10,16 @@ crate-type = ["cdylib"]
 
 [dependencies]
 nalgebra = { version = "0.34.2", features = ["rayon", "serde-serialize"] }
-numpy = "0.28.0"
+numpy = "0.29.0"
 paste = "1.0.15"
-pyo3 = "0.28.3"
+pyo3 = "0.29.2"
 pyo3-log = "0.13.3"
+rand = "0.10.2"
 
-bayesfm = { path = "/Users/ajweiss/Projects/bayesfm-rs", features = ["pyo3"] }
-prodef = { path = "/Users/ajweiss/Projects/prodef-rs", features = ["pyo3"] }
-ocnus = { path = "/Users/ajweiss/Projects/ocnus-rs" }
+bayesfm = { path = "../../bayesfm-rs", features = ["pyo3"] }
+prodef = { path = "../../prodef-rs", features = ["pyo3"] }
+ocnus = { path = ".." }
+
 
 [features]
 f32 = []

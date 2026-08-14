@@ -232,7 +232,8 @@ macro_rules! impl_cylm_model {
             T: RealField + rand_distr::uniform::SampleUniform + std::iter::Sum,
             G: 'static + prodef::Density<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + Sync,
             OC: bayesfm::conf::ConfPosition<T, 3> + nalgebra::Scalar + Sync,
-            for<'a> &'a OC: std::ops::Sub<&'a OC, Output=T>
+            for<'a> &'a OC: std::ops::Sub<&'a OC, Output=T>,
+            rand::distr::StandardUniform: rand_distr::Distribution<T>
         {
             fn observe_mag3_ics(
                 &self,
@@ -399,7 +400,7 @@ mod tests {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &CCLFFModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
@@ -475,7 +476,7 @@ mod tests {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &CCLFFModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
@@ -546,7 +547,7 @@ mod tests {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &CCUTModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
@@ -623,7 +624,7 @@ mod tests {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &CCUTModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
@@ -704,7 +705,7 @@ mod tests {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &ECHModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
@@ -768,7 +769,7 @@ mod tests {
                 &mut ensbl,
                 &mut obs_ensbl,
                 &ECHModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 

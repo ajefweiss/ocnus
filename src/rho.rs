@@ -10,9 +10,8 @@ use nalgebra::{
     Const, DMatrix, RealField, SVector, SVectorView, Scalar, U1, U3, Unit, UnitQuaternion, Vector3,
 };
 use num_traits::AsPrimitive;
-use rand::{RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng, rngs::Xoshiro256PlusPlus};
 use rand_distr::{Distribution, StandardUniform, uniform::SampleUniform};
-use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{iter::Sum, ops::Sub};
 use wcs::WCS;
@@ -64,13 +63,14 @@ where
 
     /// Perform an ensemble forward simulation for an electron density measurement, in parallel, for the given spacecraft observers
     /// and noise model `NM`.
-    fn simulate_electron_density<NM>(
+    fn simulate_electron_density<R, NM>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, 3, P>,
         obs_ensbl: &mut EnsembleObservations<OC, ObsVec<T, 1>>,
-        opt_noise: &mut Option<&mut NM>,
+        opt_noise: Option<(&NM, &mut R)>,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         OC: Sync,
         NM: Noise<ObsVec<T, 1>> + Sync,
         Self::CSST: Send,

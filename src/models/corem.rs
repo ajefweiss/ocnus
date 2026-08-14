@@ -130,6 +130,7 @@ macro_rules! impl_corem {
             G: 'static + prodef::Density<T, nalgebra::Const<{ $($coords)::+::<f32>::NPARAMS + $params.len() }>> + Sync,
             OC: bayesfm::conf::ConfPosition<T, 3> + nalgebra::Scalar + Sync,
             for<'a> &'a OC: std::ops::Sub<&'a OC, Output=T>,
+            rand::distr::StandardUniform: rand::distr::Distribution<T>,
         {
             fn observe_mag3_ics(
                 &self,
@@ -430,7 +431,7 @@ mod tests {
                 &mut model_ensbl,
                 &mut obs_ensbl,
                 &COREModel::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
@@ -553,7 +554,7 @@ mod tests {
                 &mut model_ensbl,
                 &mut obs_ensbl,
                 &COREModel::<f32, _>::observe_mag3,
-                &mut None::<&mut NullNoise>,
+                None::<(&NullNoise, &mut rand::rngs::Xoshiro256PlusPlus)>,
             )
             .expect("simulation failed");
 
