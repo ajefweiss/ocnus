@@ -9,7 +9,8 @@ use bayesfm::{
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use nalgebra::{Dyn, OMatrix, SVector, U8, Vector3};
 use ocnus::{mag::Magnetometer, models::CCLFFModel};
-use prodef::{ConstantDensity, MultivariateDensity, SamplingMode, UniformDensity};
+use prodef::{ConstantDensity, MultivariateDensity, UniformDensity};
+use rand::{SeedableRng, rngs::Xoshiro128PlusPlus};
 use std::{hint::black_box, time::Duration};
 
 const ENSEMBLE_SIZE: usize = 2_usize.pow(16);
@@ -68,8 +69,7 @@ fn benchmark_lff_f32(c: &mut Criterion) {
                 .initialize_ensbl::<MultivariateDensity<f32, U8>>(
                     black_box(&mut model_ensbl),
                     black_box(prior.clone()),
-                    &SamplingMode::UntilValid { max_attempts: 1000 },
-                    42,
+                    &mut Xoshiro128PlusPlus::seed_from_u64(42),
                 )
                 .unwrap();
         });

@@ -1019,7 +1019,7 @@ dependencies = [
 
 [[package]]
 name = "ocnus"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "approx",
  "bayesfm",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "ocnus-py"
-version = "0.0.0"
+version = "0.3.0"
 dependencies = [
  "bayesfm",
  "nalgebra",

@@ -29,7 +29,7 @@ macro_rules! impl_py_mfr_model {
             {
                 /// Create a new atmosphere model from univariate prior distributions and shells.
                 #[new]
-                pub fn new(priors: Vec<crate::PyUnivariate>) -> pyo3::PyResult<Self> {
+                pub fn new(priors: Vec<prodef::pytypes::PyUnivariate>) -> pyo3::PyResult<Self> {
                     let names = $model::<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>::PARAM_NAMES;
 
                     if priors.len() != $nparams {

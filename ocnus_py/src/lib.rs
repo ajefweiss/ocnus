@@ -2,11 +2,6 @@
 
 mod models;
 
-use bayesfm::pytypes::*;
-use models::*;
-use prodef::pytypes::*;
-use pyo3::prelude::*;
-
 // Configure floating-point type, by default we use f64 as this is the default in python.
 #[cfg(not(feature = "f32"))]
 /// 64-bit floating point type.
@@ -15,29 +10,26 @@ pub type Float = f64;
 /// 32-bit floating point type.
 pub type Float = f32;
 
-#[pymodule]
-fn ocnus_py(m: &Bound<PyModule>) -> PyResult<()> {
-    pyo3_log::init();
+#[pyo3::pymodule]
+mod ocnus_py {
+    use pyo3::prelude::*;
 
-    // prodef-rs re-exports
-    m.add_class::<PyUnivariate>()?;
-    m.add_class::<PyMultivariate>()?;
+    #[pymodule_init]
+    fn init(_m: &Bound<'_, PyModule>) -> PyResult<()> {
+        pyo3_log::init();
+        Ok(())
+    }
 
-    // bayesfm-rs re-exports
-    m.add_class::<PyLocation3>()?;
-    m.add_class::<PyLocation3Series>()?;
-    m.add_class::<PyWCSConf>()?;
-    m.add_class::<PyWCSConfSeries>()?;
-    m.add_class::<PyEnsblLocation3ObsVec3>()?;
-    m.add_class::<PyEnsblWCSConfImg>()?;
-    m.add_class::<PyObsVecNoise>()?;
+    // Re-export external components directly into Python
+    #[pymodule_export]
+    use prodef::pytypes::{PyMultivariate, PyUnivariate};
 
-    // ocnus models
-    m.add_class::<NC16>()?;
-    m.add_class::<CCUT>()?;
-    m.add_class::<CCLFF>()?;
-    m.add_class::<CORE>()?;
-    m.add_class::<AGCS>()?;
+    #[pymodule_export]
+    use bayesfm::pytypes::{
+        PyEnsblLocation3ObsVec3, PyEnsblWCSConfImg, PyLocation3, PyLocation3Series, PyObsVecNoise,
+        PyWCSConf, PyWCSConfSeries, PyXoshiro256PlusPlus,
+    };
 
-    Ok(())
+    #[pymodule_export]
+    use crate::models::{AGCS, CCLFF, CCUT, CORE, NC16};
 }
